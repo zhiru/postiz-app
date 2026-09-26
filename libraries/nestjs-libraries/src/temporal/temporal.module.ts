@@ -35,6 +35,8 @@ export const getTemporalModule = (
     },
     taskQueue: 'main',
     logLevel: 'error',
+    // fail the boot instead of running without a connection / workers
+    allowConnectionFailure: false,
     ...(isWorkers
       ? {
           workers: [

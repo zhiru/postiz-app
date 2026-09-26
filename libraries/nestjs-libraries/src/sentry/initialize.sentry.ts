@@ -1,5 +1,4 @@
 import * as Sentry from '@sentry/nestjs';
-import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import { capitalize } from 'lodash';
 
 export const setSentryUserContext = (params: {
@@ -29,6 +28,10 @@ export const initializeSentry = (appName: string, allowLogs = false) => {
   if (!process.env.NEXT_PUBLIC_SENTRY_DSN) {
     return null;
   }
+
+  // required only when Sentry is on: it loads a native CPU profiler that can
+  // deadlock the process at boot, even when profiling is never used
+  const { nodeProfilingIntegration } = require('@sentry/profiling-node');
 
   try {
     Sentry.init({
