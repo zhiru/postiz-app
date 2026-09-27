@@ -81,6 +81,8 @@ async function start() {
     Logger.log(`🚀 Backend is running on: http://localhost:${port}`);
   } catch (e) {
     Logger.error(`Backend failed to start on port ${port}`, e);
+    // exit so pm2 restarts it, otherwise it stays "online" without a port
+    process.exit(1);
   }
 }
 

@@ -35,6 +35,9 @@ export const getTemporalModule = (
     },
     taskQueue: 'main',
     logLevel: 'error',
+    // workers: fail the boot instead of "continuing without worker"
+    // (the backend client connects lazily, so it is not affected)
+    allowConnectionFailure: false,
     ...(isWorkers
       ? {
           workers: [
