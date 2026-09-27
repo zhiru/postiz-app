@@ -792,5 +792,17 @@
   "organization_name": "Nome da organização",
   "organization_name_description": "O nome exibido no seletor de organizações.",
   "could_not_create_organization": "Não foi possível criar a organização",
-  "could_not_update_organization_name": "Não foi possível atualizar o nome da organização"
+  "could_not_update_organization_name": "Não foi possível atualizar o nome da organização",
+  "manage_organizations": "Gerenciar organizações",
+  "organizations": "Organizações",
+  "organizations_description": "Cada organização tem seus próprios canais, calendário, equipe e chave de API. Use uma por marca para mantê-las separadas.",
+  "rename_organization": "Renomear organização",
+  "could_not_rename_organization": "Não foi possível renomear a organização",
+  "organization_renamed": "Organização renomeada",
+  "delete_organization_confirm": "Esta organização, seus canais e posts serão excluídos. Não dá para desfazer. Tem certeza?",
+  "yes_delete_organization": "Sim, excluir esta organização",
+  "could_not_delete_organization": "Não foi possível excluir a organização",
+  "current_organization": "Atual",
+  "switch": "Trocar",
+  "rename": "Renomear"
 }

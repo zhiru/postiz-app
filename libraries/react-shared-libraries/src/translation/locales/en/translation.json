@@ -792,5 +792,17 @@
   "organization_name": "Organization name",
   "organization_name_description": "The name shown in the organization switcher.",
   "could_not_create_organization": "Could not create organization",
-  "could_not_update_organization_name": "Could not update organization name"
+  "could_not_update_organization_name": "Could not update organization name",
+  "manage_organizations": "Manage organizations",
+  "organizations": "Organizations",
+  "organizations_description": "Each organization has its own channels, calendar, team and API key. Use one per brand to keep them apart.",
+  "rename_organization": "Rename organization",
+  "could_not_rename_organization": "Could not rename organization",
+  "organization_renamed": "Organization renamed",
+  "delete_organization_confirm": "This organization, its channels and posts will be deleted. This action cannot be undone, are you sure?",
+  "yes_delete_organization": "Yes, delete this organization",
+  "could_not_delete_organization": "Could not delete organization",
+  "current_organization": "Current",
+  "switch": "Switch",
+  "rename": "Rename"
 }

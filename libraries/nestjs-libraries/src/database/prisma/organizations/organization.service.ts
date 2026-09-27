@@ -2,6 +2,7 @@ import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org
 import { HttpException, Injectable } from '@nestjs/common';
 import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
 import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
+import { IntegrationRepository } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.repository';
 import { AddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/add.team.member.dto';
 import { AdminAddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/admin.add.team.member.dto';
 import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
@@ -9,14 +10,15 @@ import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import dayjs from 'dayjs';
 import { CreateOrganizationDto } from '@gitroom/nestjs-libraries/dtos/organizations/create.organization.dto';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import { Organization, ShortLinkPreference, User } from '@prisma/client';
+import { Organization, Role, ShortLinkPreference, User } from '@prisma/client';
 import { AutopostService } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.service';
 
 @Injectable()
 export class OrganizationService {
   constructor(
     private _organizationRepository: OrganizationRepository,
-    private _notificationsService: NotificationService
+    private _notificationsService: NotificationService,
+    private _integrationRepository: IntegrationRepository
   ) {}
   async createOrgAndUser(
     body: Omit<CreateOrgUserDto, 'providerToken'> & { providerId?: string },
@@ -210,11 +212,97 @@ export class OrganizationService {
     );
   }
 
-  createOrgForUser(userId: string, body: CreateOrganizationDto) {
+  async createOrgForUser(userId: string, body: CreateOrganizationDto) {
+    const maxOrgs = Number(process.env.MAX_ORGS_PER_USER) || 10;
+    const enabledOrgs = (
+      await this._organizationRepository.getOrgsByUserId(userId)
+    ).filter((item) => !item.users[0].disabled);
+
+    if (enabledOrgs.length >= maxOrgs) {
+      throw new HttpException(
+        `You can create up to ${maxOrgs} organizations`,
+        400
+      );
+    }
+
     return this._organizationRepository.createOrgForUser(
       userId,
       body.name?.trim() || 'My Organization'
     );
+  }
+
+  async renameOwnedOrganization(userId: string, orgId: string, name: string) {
+    const org = await this.getEnabledUserOrg(userId, orgId);
+    if (org.users[0].role !== Role.SUPERADMIN) {
+      throw new HttpException(
+        'You do not have permission to rename this organization',
+        400
+      );
+    }
+
+    return this._organizationRepository.updateOrganizationName(orgId, name);
+  }
+
+  async getOrgToDelete(userId: string, orgId: string) {
+    const orgs = await this._organizationRepository.getOrgsByUserId(userId);
+    const org = await this.getEnabledUserOrg(userId, orgId);
+    if (org.users[0].role !== Role.SUPERADMIN) {
+      throw new HttpException(
+        'You do not have permission to delete this organization',
+        400
+      );
+    }
+
+    if (orgs.filter((item) => !item.users[0].disabled).length === 1) {
+      throw new HttpException(
+        'You cannot delete your only organization. Delete your account instead',
+        400
+      );
+    }
+
+    const team = await this._organizationRepository.getTeam(org.id);
+    if (
+      team?.users?.some(
+        (member) => member.user.id !== userId && !member.disabled
+      )
+    ) {
+      throw new HttpException(
+        'Please remove your team members before deleting this organization',
+        400
+      );
+    }
+
+    return org;
+  }
+
+  async deleteOwnedOrganization(orgId: string, userId: string) {
+    // the last-organization guard runs first, so a refused delete keeps the channels
+    const deleted =
+      await this._organizationRepository.deleteOrganizationIfNotLast(
+        orgId,
+        userId
+      );
+
+    if (!deleted) {
+      throw new HttpException(
+        'Could not delete the organization, please refresh the page and try again',
+        400
+      );
+    }
+
+    await this._integrationRepository.deleteIntegrationsForAccount(orgId);
+    return deleted;
+  }
+
+  private async getEnabledUserOrg(userId: string, orgId: string) {
+    const org = (
+      await this._organizationRepository.getOrgsByUserId(userId)
+    ).find((item) => item.id === orgId && !item.users[0].disabled);
+    if (!org) {
+      throw new HttpException('Organization not found', 400);
+    }
+
+    return org;
   }
 
   getOrganizationName(orgId: string) {

@@ -5,6 +5,7 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import useSWR from 'swr';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import clsx from 'clsx';
+import Link from 'next/link';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { Input } from '@gitroom/react/form/input';
 import { Button } from '@gitroom/react/form/button';
@@ -174,6 +175,14 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
                 <div onClick={createOrg} className="whitespace-nowrap">
                   {t('create_new_organization', 'Create New Organization')} +
                 </div>
+              )}
+              {!asOpenSelect && (
+                <Link
+                  href="/settings?tab=organizations"
+                  className="whitespace-nowrap"
+                >
+                  {t('manage_organizations', 'Manage organizations')}
+                </Link>
               )}
             </div>
           )}

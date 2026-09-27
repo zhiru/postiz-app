@@ -1,5 +1,5 @@
-import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
-import { Role, ShortLinkPreference, SubscriptionTier } from '@prisma/client';
+import { PrismaRepository, PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import { Prisma, Role, ShortLinkPreference, SubscriptionTier } from '@prisma/client';
 import { Injectable } from '@nestjs/common';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
@@ -11,7 +11,8 @@ export class OrganizationRepository {
   constructor(
     private _organization: PrismaRepository<'organization'>,
     private _userOrg: PrismaRepository<'userOrganization'>,
-    private _user: PrismaRepository<'user'>
+    private _user: PrismaRepository<'user'>,
+    private _transaction: PrismaTransaction
   ) {}
 
   createMaxUser(id: string, name: string, saasName: string, email: string) {
@@ -424,11 +425,17 @@ export class OrganizationRepository {
       await this._organization.model.organization.findFirst({
         where: {
           id: orgId,
+          deletedAt: null,
         },
         select: {
           subscription: true,
         },
       });
+
+    // the organization was deleted after the invite was sent
+    if (!checkForSubscription) {
+      return false;
+    }
 
     if (
       process.env.STRIPE_PUBLISHABLE_KEY &&
@@ -537,6 +544,7 @@ export class OrganizationRepository {
         users: {
           select: {
             role: true,
+            disabled: true,
             user: {
               select: {
                 email: true,
@@ -636,7 +644,7 @@ export class OrganizationRepository {
     return this._organization.model.organization.create({
       data: {
         name,
-        apiKey: AuthService.fixedEncryption(makeId(20)),
+        apiKey: AuthService.fixedEncryption(makeSecureId(20)),
         allowTrial: false,
         isTrailing: false,
         users: {
@@ -672,5 +680,46 @@ export class OrganizationRepository {
         name,
       },
     });
+  }
+
+  // soft-deletes the organization only if the user keeps at least one other
+  // enabled organization; serializable so two parallel deletes can't remove both
+  deleteOrganizationIfNotLast(orgId: string, userId: string) {
+    return this._transaction.model
+      .$transaction(
+        async (tx) => {
+          const enabledOrgs = await tx.userOrganization.count({
+            where: {
+              userId,
+              disabled: false,
+              organization: {
+                deletedAt: null,
+              },
+            },
+          });
+
+          if (enabledOrgs <= 1) {
+            return null;
+          }
+
+          return tx.organization.update({
+            where: {
+              id: orgId,
+            },
+            data: {
+              deletedAt: new Date(),
+            },
+          });
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        }
+      )
+      .catch((err) => {
+        if (err?.code === 'P2034') {
+          return null;
+        }
+        throw err;
+      });
   }
 }
