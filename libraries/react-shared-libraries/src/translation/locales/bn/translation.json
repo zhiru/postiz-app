@@ -682,6 +682,7 @@
   "repeat_post_every_label": "প্রতি কতদিন পর পোস্ট পুনরাবৃত্তি হবে",
   "add_new_tag": "নতুন ট্যাগ যোগ করুন",
   "tag_name": "নাম",
+  "post_save_failed": "পোস্ট সংরক্ষণ করা যায়নি",
   "post_is_too_long": "পোস্টটি খুব বড়, অনুগ্রহ করে ঠিক করুন",
   "your_post_should_have_at_least_one_character_or_one_image": "আপনার পোস্টে অন্তত একটি অক্ষর বা একটি ছবি থাকতে হবে।",
   "internal_edit": "অভ্যন্তরীণ সম্পাদনা",
@@ -792,5 +793,6 @@
   "organization_name": "সংস্থার নাম",
   "organization_name_description": "সংস্থা সুইচারে প্রদর্শিত নাম।",
   "could_not_create_organization": "সংস্থা তৈরি করা যায়নি",
-  "could_not_update_organization_name": "সংস্থার নাম আপডেট করা যায়নি"
+  "could_not_update_organization_name": "সংস্থার নাম আপডেট করা যায়নি",
+  "some_files_failed_to_upload": "কিছু ফাইল আপলোড করতে ব্যর্থ হয়েছে, অনুগ্রহ করে আবার চেষ্টা করুন"
 }

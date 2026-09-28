@@ -682,6 +682,7 @@
   "repeat_post_every_label": "Повторять публикацию каждые",
   "add_new_tag": "Добавить новый тег",
   "tag_name": "Название",
+  "post_save_failed": "Не удалось сохранить публикацию",
   "post_is_too_long": "пост слишком длинный, пожалуйста, исправьте его",
   "your_post_should_have_at_least_one_character_or_one_image": "Ваша публикация должна содержать хотя бы один символ или одно изображение.",
   "internal_edit": "Внутреннее редактирование",
@@ -792,5 +793,6 @@
   "organization_name": "Название организации",
   "organization_name_description": "Имя, отображаемое в переключателе организаций.",
   "could_not_create_organization": "Не удалось создать организацию",
-  "could_not_update_organization_name": "Не удалось обновить название организации"
+  "could_not_update_organization_name": "Не удалось обновить название организации",
+  "some_files_failed_to_upload": "Не удалось загрузить некоторые файлы, пожалуйста, попробуйте еще раз"
 }
