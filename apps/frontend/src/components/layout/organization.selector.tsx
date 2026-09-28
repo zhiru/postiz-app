@@ -82,9 +82,23 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
   const current = useMemo(() => {
     return data?.find((d: any) => d.id === user?.orgId);
   }, [data]);
-  const withoutCurrent = useMemo(() => {
-    return data?.filter((d: any) => d.id !== user?.orgId);
-  }, [current, data]);
+  // current organization first, then the others
+  const sorted = useMemo(() => {
+    return [...(data || [])].sort(
+      (a: any, b: any) =>
+        Number(b.id === user?.orgId) - Number(a.id === user?.orgId)
+    ) as {
+      name: string;
+      id: string;
+      users: { role: 'SUPERADMIN' | 'ADMIN' | 'USER' }[];
+    }[];
+  }, [data, user?.orgId]);
+  const roleLabel = (role?: 'SUPERADMIN' | 'ADMIN' | 'USER') =>
+    role === 'SUPERADMIN'
+      ? t('super_admin', 'Super Admin')
+      : role === 'ADMIN'
+      ? t('admin', 'Admin')
+      : t('user', 'User');
   const changeOrg = useCallback(
     (org: { name: string; id: string }) => async () => {
       await fetch('/user/change-org', {
@@ -140,50 +154,85 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
           {(data?.length > 1 || !asOpenSelect) && (
             <div
               className={clsx(
-                'hidden py-[12px] px-[12px] group-hover:flex absolute top-[100%] end-0 w-max max-w-[400px] bg-third border-tableBorder border gap-[12px] cursor-pointer flex-col',
-                asOpenSelect ? '!flex !relative max-w-[500px] mx-auto mb-[10px]' : '',
+                'hidden group-hover:flex absolute top-[100%] end-0 pt-[8px] z-[400]',
+                asOpenSelect && '!flex !relative justify-center pt-0 mb-[10px]'
               )}
             >
-              {withoutCurrent?.map(
-                (org: {
-                  name: string;
-                  id: string;
-                  users: { role: 'SUPERADMIN' | 'ADMIN' | 'USER' }[];
-                }) => (
-                  <div
-                    key={org?.id}
-                    onClick={changeOrg(org)}
-                    className="whitespace-nowrap truncate"
-                  >
-                    {org?.name}
-                    {!!org?.users?.[0]?.role && (
-                      <span className="text-customColor18">
-                        {' '}
-                        (
-                        {org?.users?.[0]?.role === 'SUPERADMIN'
-                          ? 'Super-Admin'
-                          : org?.users?.[0]?.role === 'ADMIN'
-                          ? 'Admin'
-                          : 'User'}
-                        )
-                      </span>
-                    )}
-                  </div>
-                )
-              )}
-              {!asOpenSelect && (
-                <div onClick={createOrg} className="whitespace-nowrap">
-                  {t('create_new_organization', 'Create New Organization')} +
+              <div className="w-[280px] max-w-[90vw] rounded-[12px] bg-newBgColorInner border border-newTableBorder shadow-[0_12px_32px_rgba(0,0,0,0.35)] p-[6px] flex flex-col text-[14px]">
+                <div className="px-[10px] pt-[6px] pb-[4px] text-[11px] uppercase tracking-wider text-textItemBlur">
+                  {t('organizations', 'Organizations')}
                 </div>
-              )}
-              {!asOpenSelect && (
-                <Link
-                  href="/settings?tab=organizations"
-                  className="whitespace-nowrap"
-                >
-                  {t('manage_organizations', 'Manage organizations')}
-                </Link>
-              )}
+                {sorted.map((org) => {
+                  const isCurrent = org.id === user?.orgId;
+                  return (
+                    <div
+                      key={org.id}
+                      onClick={isCurrent ? undefined : changeOrg(org)}
+                      className={clsx(
+                        'flex items-center gap-[10px] px-[10px] py-[8px] rounded-[8px]',
+                        isCurrent
+                          ? 'bg-boxHover cursor-default'
+                          : 'cursor-pointer hover:bg-boxHover'
+                      )}
+                    >
+                      <div className="w-[28px] h-[28px] rounded-[8px] bg-btnPrimary text-white flex items-center justify-center text-[13px] font-[600] shrink-0">
+                        {org.name?.trim()?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate text-newTextColor">
+                          {org.name}
+                        </div>
+                        <div className="text-[12px] text-textItemBlur">
+                          {roleLabel(org.users?.[0]?.role)}
+                        </div>
+                      </div>
+                      {isCurrent && (
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="text-btnPrimary shrink-0"
+                        >
+                          <path d="M20 6 9 17l-5-5" />
+                        </svg>
+                      )}
+                    </div>
+                  );
+                })}
+                {!asOpenSelect && (
+                  <>
+                    <div className="h-[1px] bg-newTableBorder my-[6px]" />
+                    <div
+                      onClick={createOrg}
+                      className="flex items-center gap-[10px] px-[10px] py-[8px] rounded-[8px] cursor-pointer hover:bg-boxHover text-newTextColor"
+                    >
+                      <div className="w-[28px] h-[28px] rounded-[8px] border border-dashed border-newTableBorder flex items-center justify-center shrink-0">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                      </div>
+                      {t('create_new_organization', 'Create New Organization')}
+                    </div>
+                    <Link
+                      href="/settings?tab=organizations"
+                      className="flex items-center gap-[10px] px-[10px] py-[8px] rounded-[8px] cursor-pointer hover:bg-boxHover text-newTextColor"
+                    >
+                      <div className="w-[28px] h-[28px] flex items-center justify-center shrink-0 text-textItemBlur">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+                        </svg>
+                      </div>
+                      {t('manage_organizations', 'Manage organizations')}
+                    </Link>
+                  </>
+                )}
+              </div>
             </div>
           )}
         </div>

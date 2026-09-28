@@ -182,28 +182,36 @@ export const OrganizationsComponent = () => {
   return (
     <div className="flex flex-col">
       <h3 className="text-[20px]">{t('organizations', 'Organizations')}</h3>
-      <div className="text-customColor18 mt-[4px]">
+      <div className="text-textItemBlur mt-[4px]">
         {t(
           'organizations_description',
           'Each organization has its own channels, calendar, team and API key. Use one per brand to keep them apart.'
         )}
       </div>
       <div className="my-[16px] mt-[16px] bg-sixth border-fifth border rounded-[4px] p-[24px] flex flex-col gap-[24px]">
-        <div className="flex flex-col gap-[16px]">
+        <div className="flex flex-col divide-y divide-newTableBorder">
           {(data || []).map((org) => {
             const role = org.users?.[0]?.role;
             const isCurrent = org.id === user?.orgId;
             const isOwner = role === 'SUPERADMIN';
             return (
-              <div key={org.id} className="flex items-center gap-[12px]">
-                <div className="flex-1 min-w-0 truncate">{org.name}</div>
-                <div className="flex-1 text-customColor18">
-                  {roleLabel(role)}
-                  {isCurrent
-                    ? ` · ${t('current_organization', 'Current')}`
-                    : ''}
+              <div
+                key={org.id}
+                className="grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-[12px] py-[6px]"
+              >
+                <div className="w-[28px] h-[28px] rounded-[8px] bg-btnPrimary text-white flex items-center justify-center text-[13px] font-[600]">
+                  {org.name?.trim()?.[0]?.toUpperCase() || '?'}
                 </div>
-                <div className="flex-1 flex justify-end gap-[8px]">
+                <div className="min-w-0">
+                  <div className="truncate">{org.name}</div>
+                  <div className="text-[12px] text-textItemBlur">
+                    {roleLabel(role)}
+                    {isCurrent
+                      ? ` · ${t('current_organization', 'Current')}`
+                      : ''}
+                  </div>
+                </div>
+                <div className="flex justify-end gap-[8px]">
                   {!isCurrent && (
                     <Button
                       className="!h-[24px] rounded-[4px] text-[12px]"
