@@ -55,7 +55,7 @@ export const useMenuItem = () => {
       path: '/launches',
     },
     {
-      name: 'Agent',
+      name: t('agent', 'Agent'),
       icon: (
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -331,7 +331,7 @@ export const TopMenu: FC = () => {
                 if (f.requireBilling && !billingEnabled) {
                   return false;
                 }
-                if (f.name === 'Billing' && user?.isLifetime) {
+                if (f.path === '/billing' && user?.isLifetime) {
                   return false;
                 }
                 if (f.role) {
@@ -359,7 +359,7 @@ export const TopMenu: FC = () => {
             if (f.requireBilling && !billingEnabled) {
               return false;
             }
-            if (f.name === 'Billing' && user?.isLifetime) {
+            if (f.path === '/billing' && user?.isLifetime) {
               return false;
             }
             if (f.role) {
