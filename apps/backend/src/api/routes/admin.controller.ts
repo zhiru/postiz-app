@@ -1,7 +1,9 @@
 import {
+  Body,
   Controller,
   Get,
   HttpException,
+  Put,
   Query,
 } from '@nestjs/common';
 import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
@@ -9,6 +11,8 @@ import { User } from '@prisma/client';
 import { ApiTags } from '@nestjs/swagger';
 import { ErrorsService } from '@gitroom/nestjs-libraries/database/prisma/errors/errors.service';
 import { AdminStatsService } from '@gitroom/nestjs-libraries/database/prisma/admin-stats/admin-stats.service';
+import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/prisma/instance-credentials/instance.credentials.service';
+import { InstanceCredentialsDto } from '@gitroom/nestjs-libraries/dtos/admin/instance.credentials.dto';
 import dayjs from 'dayjs';
 
 @ApiTags('Admin')
@@ -16,7 +20,8 @@ import dayjs from 'dayjs';
 export class AdminController {
   constructor(
     private _errorsService: ErrorsService,
-    private _adminStatsService: AdminStatsService
+    private _adminStatsService: AdminStatsService,
+    private _instanceCredentialsService: InstanceCredentialsService
   ) {}
 
   private assertSuperAdmin(user: User) {
@@ -67,5 +72,20 @@ export class AdminController {
       to: toDate.endOf('day').toDate(),
       unknownOnly: unknownOnly === 'true' || unknownOnly === '1',
     });
+  }
+
+  @Get('/credentials')
+  listCredentials(@GetUserFromRequest() user: User) {
+    this.assertSuperAdmin(user);
+    return this._instanceCredentialsService.list();
+  }
+
+  @Put('/credentials')
+  saveCredentials(
+    @GetUserFromRequest() user: User,
+    @Body() body: InstanceCredentialsDto
+  ) {
+    this.assertSuperAdmin(user);
+    return this._instanceCredentialsService.save(body.values, user.id);
   }
 }

@@ -1811,3 +1811,12 @@ model Announcement {
   color       AnnouncementColor @default(INFO)
   createdAt   DateTime          @default(now())
 }
+
+// Instance-wide provider credentials set from the admin panel. They override
+// the matching environment variables at runtime; value is encrypted.
+model InstanceCredential {
+  key       String   @id
+  value     String
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+}
