@@ -1,8 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpException,
+  Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -23,6 +26,8 @@ import { getCookieUrlFromDomain } from '@gitroom/helpers/subdomain/subdomain.man
 import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 import { ApiTags } from '@nestjs/swagger';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
+import { CreateOrganizationDto } from '@gitroom/nestjs-libraries/dtos/organizations/create.organization.dto';
+import { OrganizationNameDto } from '@gitroom/nestjs-libraries/dtos/settings/organization-name.dto';
 import { UserDetailDto } from '@gitroom/nestjs-libraries/dtos/users/user.details.dto';
 import { EmailNotificationsDto } from '@gitroom/nestjs-libraries/dtos/users/email-notifications.dto';
 import { HttpForbiddenException } from '@gitroom/nestjs-libraries/services/exception.filter';
@@ -303,11 +308,78 @@ export class UsersController {
     );
   }
 
+  @Post('/organizations')
+  createOrg(
+    @GetUserFromRequest() user: User,
+    @Req() req: Request,
+    @Body() body: CreateOrganizationDto
+  ) {
+    this.assertNotImpersonating(req);
+    return this._orgService.createOrgForUser(user.id, body);
+  }
+
+  @Patch('/organizations/:id')
+  renameOrg(
+    @GetUserFromRequest() user: User,
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: OrganizationNameDto
+  ) {
+    this.assertNotImpersonating(req);
+    return this._orgService.renameOwnedOrganization(user.id, id, body.name);
+  }
+
+  @Delete('/organizations/:id')
+  async deleteOrg(
+    @GetUserFromRequest() user: User,
+    @GetOrgFromRequest() organization: Organization,
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) response: Response
+  ) {
+    this.assertNotImpersonating(req);
+    const orgToDelete = await this._orgService.getOrgToDelete(user.id, id);
+
+    if (process.env.STRIPE_PUBLISHABLE_KEY && orgToDelete.paymentId) {
+      throw new HttpException(
+        'Cancel the subscription of this organization before deleting it',
+        400
+      );
+    }
+
+    await this._orgService.deleteOwnedOrganization(orgToDelete.id, user.id);
+
+    const remaining = (await this._orgService.getOrgsByUserId(user.id)).filter(
+      (item) => !item.users[0].disabled
+    );
+    const nextOrg =
+      remaining.find((item) => item.id === organization.id) || remaining[0];
+    if (nextOrg) {
+      this.setShowOrgCookie(response, nextOrg.id);
+    }
+
+    return { id: nextOrg?.id };
+  }
+
   @Post('/change-org')
   changeOrg(
     @Body('id') id: string,
     @Res({ passthrough: true }) response: Response
   ) {
+    this.setShowOrgCookie(response, id);
+    response.status(200).send();
+  }
+
+  private assertNotImpersonating(req: Request) {
+    if (req.cookies?.impersonate || req.headers.impersonate) {
+      throw new HttpException(
+        'Organizations cannot be changed while impersonating',
+        400
+      );
+    }
+  }
+
+  private setShowOrgCookie(response: Response, id: string) {
     response.cookie('showorg', id, {
       domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
       ...(!process.env.NOT_SECURED
@@ -323,8 +395,6 @@ export class UsersController {
     if (process.env.NOT_SECURED) {
       response.header('showorg', id);
     }
-
-    response.status(200).send();
   }
 
   @Post('/delete-account')

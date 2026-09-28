@@ -785,5 +785,12 @@
   "preview_comment_failed": "Không thể đăng bình luận",
   "preview_comment_detach_hint": "Bình luận trên đoạn văn bản được chọn sẽ mất nổi bật nếu văn bản bị chỉnh sửa sau đó.",
   "preview_comment_text_changed": "Nội dung đã thay đổi",
-  "preview_no_comments_yet": "Chưa có bình luận nào. Chọn một đoạn văn bản trong bài viết để bình luận, hoặc thêm bình luận chung."
+  "preview_no_comments_yet": "Chưa có bình luận nào. Chọn một đoạn văn bản trong bài viết để bình luận, hoặc thêm bình luận chung.",
+  "create": "Tạo",
+  "create_new_organization": "Tạo Tổ Chức Mới",
+  "organization_settings": "Cài Đặt Tổ Chức",
+  "organization_name": "Tên tổ chức",
+  "organization_name_description": "Tên được hiển thị trong bộ chuyển đổi tổ chức.",
+  "could_not_create_organization": "Không thể tạo tổ chức",
+  "could_not_update_organization_name": "Không thể cập nhật tên tổ chức"
 }

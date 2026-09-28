@@ -785,5 +785,12 @@
   "preview_comment_failed": "コメントの投稿に失敗しました",
   "preview_comment_detach_hint": "選択テキストへのコメントは、テキストが後から編集されるとハイライトが失われます。",
   "preview_comment_text_changed": "テキストが変更されました",
-  "preview_no_comments_yet": "まだコメントはありません。投稿内のテキストを選択してコメントするか、一般的なコメントを追加してください。"
+  "preview_no_comments_yet": "まだコメントはありません。投稿内のテキストを選択してコメントするか、一般的なコメントを追加してください。",
+  "create": "作成",
+  "create_new_organization": "新しい組織を作成",
+  "organization_settings": "組織の設定",
+  "organization_name": "組織名",
+  "organization_name_description": "組織切り替え時に表示される名前です。",
+  "could_not_create_organization": "組織を作成できませんでした",
+  "could_not_update_organization_name": "組織名を更新できませんでした"
 }

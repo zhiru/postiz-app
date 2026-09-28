@@ -785,5 +785,12 @@
   "preview_comment_failed": "Impossibile pubblicare il commento",
   "preview_comment_detach_hint": "I commenti su testo selezionato perdono l'evidenziazione se il testo viene modificato successivamente.",
   "preview_comment_text_changed": "Testo modificato",
-  "preview_no_comments_yet": "Nessun commento ancora. Seleziona del testo nel post per commentarlo, oppure aggiungi un commento generale."
+  "preview_no_comments_yet": "Nessun commento ancora. Seleziona del testo nel post per commentarlo, oppure aggiungi un commento generale.",
+  "create": "Crea",
+  "create_new_organization": "Crea nuova organizzazione",
+  "organization_settings": "Impostazioni organizzazione",
+  "organization_name": "Nome dell'organizzazione",
+  "organization_name_description": "Il nome visualizzato nel selettore dell'organizzazione.",
+  "could_not_create_organization": "Impossibile creare l'organizzazione",
+  "could_not_update_organization_name": "Impossibile aggiornare il nome dell'organizzazione"
 }
