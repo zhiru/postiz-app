@@ -6,6 +6,7 @@ import {
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { graphPaginate } from '@gitroom/nestjs-libraries/integrations/social/meta.graph';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import dayjs from 'dayjs';
 import {
@@ -391,57 +392,40 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     const seenIds = new Set<string>();
     const allPages: any[] = [];
 
-    const fetchPaginated = async (startUrl: string) => {
-      let nextUrl: string | undefined = startUrl;
-      while (nextUrl) {
-        const response = await (await fetch(nextUrl)).json();
-        if (response.data) {
-          for (const page of response.data) {
-            if (!seenIds.has(page.id)) {
-              seenIds.add(page.id);
-              allPages.push(page);
-            }
-          }
+    const addPages = (pages: any[]) => {
+      for (const page of pages) {
+        if (!seenIds.has(page.id)) {
+          seenIds.add(page.id);
+          allPages.push(page);
         }
-        nextUrl = response.paging?.next;
       }
     };
 
     // Fetch pages the user explicitly shared during the OAuth dialog
-    await fetchPaginated(
-      `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me/accounts?fields=id,username,name,access_token,picture.type(large)&limit=100&access_token=${accessToken}`
+    addPages(
+      await graphPaginate(
+        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me/accounts?fields=id,username,name,access_token,picture.type(large)&limit=100&access_token=${accessToken}`
+      )
     );
 
     // Also fetch pages via Business Manager API to discover pages
     // not selected during the OAuth page selection step
     try {
-      let bizUrl:
-        | string
-        | undefined = `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me/businesses?access_token=${accessToken}`;
+      const businesses = await graphPaginate(
+        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me/businesses?access_token=${accessToken}`
+      );
 
-      while (bizUrl) {
-        const bizResponse = await (await fetch(bizUrl)).json();
-        if (bizResponse.data) {
-          for (const business of bizResponse.data) {
-            try {
-              await fetchPaginated(
-                `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/owned_pages?fields=id,username,name,access_token,picture.type(large)&limit=100&access_token=${accessToken}`
-              );
-            } catch {
-              // Continue with other businesses
-            }
-
-            try {
-              await fetchPaginated(
-                `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/client_pages?fields=id,username,name,access_token,picture.type(large)&limit=100&access_token=${accessToken}`
-              );
-            } catch {
-              // Continue with other businesses
-            }
-          }
-        }
-        bizUrl = bizResponse.paging?.next;
-      }
+      // ponytail: one request pair per business, all at once; cap if a user has hundreds
+      const lists = await Promise.all(
+        businesses.flatMap((business: any) =>
+          ['owned_pages', 'client_pages'].map((edge) =>
+            graphPaginate(
+              `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/${edge}?fields=id,username,name,access_token,picture.type(large)&limit=100&access_token=${accessToken}`
+            ).catch(() => [] as any[]) // Continue with other businesses
+          )
+        )
+      );
+      lists.forEach(addPages);
     } catch {
       // Business Manager API not available for all users
     }

@@ -25,6 +25,8 @@ import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integration
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 
+const PAGES_TIMEOUT_MS = 45000;
+
 @ApiTags('Integrations')
 @Controller('/integrations')
 export class NoAuthIntegrationsController {
@@ -277,10 +279,30 @@ export class NoAuthIntegrationsController {
             : null;
 
         if (fetchMethod) {
-          // @ts-ignore - dynamic method call
-          pages = await integrationProvider[fetchMethod](accessToken);
+          // Bound the wait so a slow provider API shows an error instead of
+          // a spinner until the proxy cuts the request.
+          let timer: NodeJS.Timeout;
+          pages = await Promise.race([
+            // @ts-ignore - dynamic method call
+            integrationProvider[fetchMethod](accessToken),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(
+                () =>
+                  reject(
+                    new HttpException(
+                      'Timed out loading the accounts from the provider, please try again',
+                      504
+                    )
+                  ),
+                PAGES_TIMEOUT_MS
+              );
+            }),
+          ]).finally(() => clearTimeout(timer));
         }
       } catch (err) {
+        if (err instanceof HttpException) {
+          throw err;
+        }
         console.log('Failed to fetch pages:', err);
       }
     }
