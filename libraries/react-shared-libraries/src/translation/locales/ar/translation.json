@@ -682,6 +682,7 @@
   "repeat_post_every_label": "تكرار النشر كل",
   "add_new_tag": "إضافة وسم جديد",
   "tag_name": "الاسم",
+  "post_save_failed": "تعذّر حفظ المنشور",
   "post_is_too_long": "المنشور طويل جدًا، يرجى تعديله",
   "your_post_should_have_at_least_one_character_or_one_image": "يجب أن يحتوي منشورك على حرف واحد على الأقل أو صورة واحدة.",
   "internal_edit": "تعديل داخلي",
@@ -792,5 +793,6 @@
   "organization_name": "اسم المنظمة",
   "organization_name_description": "الاسم المعروض في مُبدّل المنظمات.",
   "could_not_create_organization": "تعذّر إنشاء المؤسسة",
-  "could_not_update_organization_name": "تعذر تحديث اسم المؤسسة"
+  "could_not_update_organization_name": "تعذر تحديث اسم المؤسسة",
+  "some_files_failed_to_upload": "فشل تحميل بعض الملفات، يرجى المحاولة مرة أخرى"
 }

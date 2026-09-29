@@ -682,6 +682,7 @@
   "repeat_post_every_label": "Beitrag wiederholen alle",
   "add_new_tag": "Neues Schlagwort hinzufügen",
   "tag_name": "Name",
+  "post_save_failed": "Der Beitrag konnte nicht gespeichert werden",
   "post_is_too_long": "Beitrag ist zu lang, bitte korrigieren",
   "your_post_should_have_at_least_one_character_or_one_image": "Dein Beitrag sollte mindestens ein Zeichen oder ein Bild enthalten.",
   "internal_edit": "Interne Bearbeitung",
@@ -792,5 +793,6 @@
   "organization_name": "Organisationsname",
   "organization_name_description": "Der Name, der im Organisationsumschalter angezeigt wird.",
   "could_not_create_organization": "Organisation konnte nicht erstellt werden",
-  "could_not_update_organization_name": "Organisationsname konnte nicht aktualisiert werden"
+  "could_not_update_organization_name": "Organisationsname konnte nicht aktualisiert werden",
+  "some_files_failed_to_upload": "Einige Dateien konnten nicht hochgeladen werden. Bitte versuchen Sie es erneut."
 }

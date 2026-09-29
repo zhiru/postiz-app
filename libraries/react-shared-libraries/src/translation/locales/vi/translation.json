@@ -682,6 +682,7 @@
   "repeat_post_every_label": "Lặp lại bài đăng mỗi",
   "add_new_tag": "Thêm thẻ mới",
   "tag_name": "Tên",
+  "post_save_failed": "Không thể lưu bài viết",
   "post_is_too_long": "bài đăng quá dài, vui lòng chỉnh sửa",
   "your_post_should_have_at_least_one_character_or_one_image": "Bài đăng của bạn phải có ít nhất một ký tự hoặc một hình ảnh.",
   "internal_edit": "Chỉnh sửa nội bộ",
@@ -792,5 +793,6 @@
   "organization_name": "Tên tổ chức",
   "organization_name_description": "Tên được hiển thị trong bộ chuyển đổi tổ chức.",
   "could_not_create_organization": "Không thể tạo tổ chức",
-  "could_not_update_organization_name": "Không thể cập nhật tên tổ chức"
+  "could_not_update_organization_name": "Không thể cập nhật tên tổ chức",
+  "some_files_failed_to_upload": "Một số tệp không tải lên được, vui lòng thử lại"
 }

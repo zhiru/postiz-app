@@ -682,6 +682,7 @@
   "repeat_post_every_label": "게시 반복 주기",
   "add_new_tag": "새 태그 추가",
   "tag_name": "이름",
+  "post_save_failed": "게시물을 저장할 수 없습니다",
   "post_is_too_long": "게시글이 너무 깁니다. 수정해 주세요.",
   "your_post_should_have_at_least_one_character_or_one_image": "게시물에는 최소한 한 글자 또는 한 이미지를 포함해야 합니다.",
   "internal_edit": "내부 편집",
@@ -792,5 +793,6 @@
   "organization_name": "조직 이름",
   "organization_name_description": "조직 전환기에서 표시되는 이름입니다.",
   "could_not_create_organization": "조직을 생성할 수 없습니다",
-  "could_not_update_organization_name": "조직 이름을 업데이트할 수 없습니다"
+  "could_not_update_organization_name": "조직 이름을 업데이트할 수 없습니다",
+  "some_files_failed_to_upload": "일부 파일을 업로드하지 못했습니다. 다시 시도해 주세요."
 }

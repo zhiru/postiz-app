@@ -682,6 +682,7 @@
   "repeat_post_every_label": "Gönderiyi Her Tekrarla",
   "add_new_tag": "Yeni Etiket Ekle",
   "tag_name": "Adı",
+  "post_save_failed": "Gönderi kaydedilemedi",
   "post_is_too_long": "gönderi çok uzun, lütfen düzeltin",
   "your_post_should_have_at_least_one_character_or_one_image": "Gönderinizde en az bir karakter veya bir görsel olmalıdır.",
   "internal_edit": "Dahili Düzenleme",
@@ -792,5 +793,6 @@
   "organization_name": "Organizasyon adı",
   "organization_name_description": "Organizasyon değiştiricisinde gösterilen isim.",
   "could_not_create_organization": "Organizasyon oluşturulamadı",
-  "could_not_update_organization_name": "Organizasyon adı güncellenemedi"
+  "could_not_update_organization_name": "Organizasyon adı güncellenemedi",
+  "some_files_failed_to_upload": "Bazı dosyalar yüklenemedi, lütfen tekrar deneyin"
 }

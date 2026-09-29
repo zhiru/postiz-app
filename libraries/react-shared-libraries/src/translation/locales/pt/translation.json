@@ -684,6 +684,7 @@
   "tag_name": "Nome",
   "post_is_too_long": "o post está muito longo, corrija-o",
   "your_post_should_have_at_least_one_character_or_one_image": "Seu post deve ter pelo menos um caractere ou uma imagem.",
+  "post_save_failed": "Não foi possível salvar a publicação",
   "internal_edit": "Edição interna",
   "are_you_sure_go_back_to_global_mode": "Esta ação é irreversível. Tem certeza de que deseja voltar para o modo global?",
   "yes_go_back_to_global_mode": "Sim, voltar para o modo global",
@@ -826,5 +827,6 @@
   "credential_empty": "vazio",
   "credential_reset": "Usar .env",
   "credential_will_reset": "Vai usar o .env",
-  "super_admin_only": "Só o super admin da instância vê esta página."
+  "super_admin_only": "Só o super admin da instância vê esta página.",
+  "some_files_failed_to_upload": "Alguns arquivos não foram carregados, tente novamente"
 }
