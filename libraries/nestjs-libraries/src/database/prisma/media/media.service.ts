@@ -160,7 +160,15 @@ export class MediaService {
       response.body,
       declaredSize
     );
-    return this.saveFile(org, uploaded.originalname, uploaded.path);
+    // Keep the remote file name so the Media Library shows something readable
+    // instead of the generated storage name. Done here rather than at each
+    // caller so the public API route and the MCP tool both get it.
+    return this.saveFile(
+      org,
+      uploaded.originalname,
+      uploaded.path,
+      new URL(url).pathname.split('/').pop() || undefined
+    );
   }
 
   saveFile(

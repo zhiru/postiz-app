@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   HttpException,
+  Post,
   Put,
   Query,
 } from '@nestjs/common';
@@ -87,5 +88,11 @@ export class AdminController {
   ) {
     this.assertSuperAdmin(user);
     return this._instanceCredentialsService.save(body.values, user.id);
+  }
+
+  @Post('/restart')
+  restartServices(@GetUserFromRequest() user: User) {
+    this.assertSuperAdmin(user);
+    return this._instanceCredentialsService.restartProcesses();
   }
 }

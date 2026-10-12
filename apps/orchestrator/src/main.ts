@@ -1,30 +1,16 @@
 import { initializeSentry } from '@gitroom/nestjs-libraries/sentry/initialize.sentry';
 initializeSentry('orchestrator', true);
-import 'source-map-support/register';
-import dayjs from 'dayjs';
-import utc from 'dayjs/plugin/utc';
-dayjs.extend(utc);
+// Same as the backend: apply the panel settings before anything that reads
+// them at import time is loaded.
+import { loadInstanceCredentials } from '@gitroom/nestjs-libraries/database/prisma/instance-credentials/instance.credentials.bootstrap';
 
-// Keep in sync with apps/backend/src/main.ts: normalize a trailing slash
-// once at boot instead of fixing every concat site.
-for (const key of ['FRONTEND_URL', 'MAIN_URL', 'NEXT_PUBLIC_BACKEND_URL']) {
-  if (process.env[key]) {
-    process.env[key] = process.env[key]!.replace(/\/+$/, '');
+loadInstanceCredentials().then(() => {
+  // Keep in sync with apps/backend/src/main.ts: normalize a trailing slash
+  // once at boot, after the panel settings are applied.
+  for (const key of ['FRONTEND_URL', 'MAIN_URL', 'NEXT_PUBLIC_BACKEND_URL']) {
+    if (process.env[key]) {
+      process.env[key] = process.env[key]!.replace(/\/+$/, '');
+    }
   }
-}
-
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from '@gitroom/orchestrator/app.module';
-import * as dns from 'node:dns';
-dns.setDefaultResultOrder('ipv4first');
-
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  app.enableShutdownHooks();
-  const port = process.env.ORCHESTRATOR_PORT || 3002;
-  await app.listen(port);
-  console.log(`Orchestrator health check listening on port ${port}`);
-}
-
-
-bootstrap();
+  return import('./start');
+});
