@@ -7,6 +7,16 @@ import {
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { TemporalService } from 'nestjs-temporal-core';
+import { safeStringify } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+
+// A failed token request can carry the request body (client secret, refresh
+// token) on the error object for providers whose refresh fails through the
+// base fetch or a client library - log a summary instead of the raw error.
+function refreshErrorSummary(err: any): string {
+  return `message=${err?.message || ''} status=${
+    err?.status || err?.response?.status || 0
+  } response=${safeStringify(err?.response?.data ?? '')}`;
+}
 
 @Injectable()
 export class RefreshIntegrationService {
@@ -38,7 +48,9 @@ export class RefreshIntegrationService {
       integration.providerIdentifier,
       refresh.accessToken,
       refresh.refreshToken,
-      refresh.expiresIn
+      refresh.expiresIn,
+      undefined,
+      integration.inBetweenSteps
     );
 
     return refresh;
@@ -84,27 +96,15 @@ export class RefreshIntegrationService {
     if (!refresh || !refresh.accessToken) {
       if (refreshError) {
         console.error(
-          `Could not refresh ${integration.providerIdentifier} integration ${integration.id}`,
-          refreshError?.response?.data || refreshError?.message || refreshError
+          `Could not refresh ${integration.providerIdentifier} integration ${integration.id}:`,
+          refreshErrorSummary(refreshError)
         );
       }
 
-      // informAboutRefreshError (with the failure cause) already notifies
-      // the user, and refreshNeeded sets the same flag disconnectChannel
-      // would — calling disconnectChannel here sent a second, cause-less
-      // copy of the same email for every failed refresh.
-      await this._integrationService.refreshNeeded(
-        integration.organizationId,
-        integration.id
-      );
-
-      await this._integrationService.informAboutRefreshError(
-        integration.organizationId,
+      return this.markRefreshFailed(
         integration,
         socialProvider.refreshErrorMessage?.(refreshError) || cause
       );
-
-      return false;
     }
 
     if (
@@ -114,24 +114,50 @@ export class RefreshIntegrationService {
       return refresh;
     }
 
-    let reConnect;
-    try {
-      reConnect = await socialProvider.reConnect(
+    const reConnect = await socialProvider
+      .reConnect(
         integration.rootInternalId,
         integration.internalId,
         refresh.accessToken
-      );
-    } catch (err: any) {
-      console.error(
-        `Could not reconnect ${integration.providerIdentifier} integration ${integration.id} after a successful token refresh`,
-        err?.response?.data || err?.message || err
-      );
-      throw err;
+      )
+      .catch((err: any) => {
+        console.error(
+          `Could not reconnect ${integration.providerIdentifier} integration ${integration.id} after a successful token refresh:`,
+          refreshErrorSummary(err)
+        );
+        return false as const;
+      });
+
+    // A failing reConnect (e.g. YouTube's "Channel not found") used to throw
+    // raw out of this service and surface as a 500 wherever a caller (public
+    // post analytics included) just awaited refresh() expecting a boolean -
+    // treat it the same as a refresh failure instead.
+    if (!reConnect) {
+      return this.markRefreshFailed(integration, cause);
     }
 
     return {
       ...refresh,
       ...reConnect,
     };
+  }
+
+  // informAboutRefreshError (with the failure cause) already notifies the
+  // user, and refreshNeeded sets the same flag disconnectChannel would —
+  // calling disconnectChannel here sent a second, cause-less copy of the same
+  // email for every failed refresh.
+  private async markRefreshFailed(integration: Integration, cause: string) {
+    await this._integrationService.refreshNeeded(
+      integration.organizationId,
+      integration.id
+    );
+
+    await this._integrationService.informAboutRefreshError(
+      integration.organizationId,
+      integration,
+      cause
+    );
+
+    return false as const;
   }
 }
