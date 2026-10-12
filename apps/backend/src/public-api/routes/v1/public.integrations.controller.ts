@@ -59,6 +59,9 @@ import { GetOrgActivityDto } from '@gitroom/nestjs-libraries/dtos/analytics/get.
 import { ResetCreditsDto } from '@gitroom/nestjs-libraries/dtos/billing/reset.credits.dto';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import dayjs from 'dayjs';
+import { SocialCommentsService } from '@gitroom/nestjs-libraries/database/prisma/social-comments/social.comments.service';
+import { GetSocialCommentsDto } from '@gitroom/nestjs-libraries/dtos/comments/get.social.comments.dto';
+import { ReplySocialCommentDto } from '@gitroom/nestjs-libraries/dtos/comments/reply.social.comment.dto';
 
 @ApiTags('Public API')
 @Controller('/public/v1')
@@ -74,8 +77,33 @@ export class PublicIntegrationsController {
     private _adminStatsService: AdminStatsService,
     private _organizationService: OrganizationService,
     private _clippingService: ClippingService,
-    private _subscriptionService: SubscriptionService
+    private _subscriptionService: SubscriptionService,
+    private _socialCommentsService: SocialCommentsService
   ) {}
+
+  @Get('/comments')
+  async getComments(
+    @GetOrgFromRequest() org: Organization,
+    @Query() query: GetSocialCommentsDto
+  ) {
+    return this._socialCommentsService.getComments(org.id, query);
+  }
+
+  // Anything reaching this endpoint is an automation (n8n, an agent), so the
+  // text is queued for approval unless the organization turned auto reply on.
+  @Post('/comments/:id/reply')
+  async replyToComment(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string,
+    @Body() body: ReplySocialCommentDto
+  ) {
+    return this._socialCommentsService.reply(
+      org.id,
+      id,
+      body.message,
+      'automation'
+    );
+  }
 
   @Post('/upload')
   @UseInterceptors(FileInterceptor('file', streamUploadOptions()))

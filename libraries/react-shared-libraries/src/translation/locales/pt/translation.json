@@ -987,5 +987,21 @@
   "attempts": "Tentativas",
   "error": "Erro",
   "success": "Sucesso",
-  "failed": "Falhou"
+  "failed": "Falhou",
+  "comments_inbox": "Caixa de comentários",
+  "comments_inbox_description": "Comentários que as pessoas deixaram nos seus posts publicados. Uma resposta sugerida por uma automação fica aqui até alguém aprovar.",
+  "auto_reply_without_approval": "Enviar respostas sugeridas automaticamente, sem aprovação",
+  "no_comments_yet": "Nenhum comentário ainda",
+  "comment_status_received": "Recebido",
+  "comment_status_pending_approval": "Aguardando aprovação",
+  "comment_status_replied": "Respondido",
+  "comment_status_ignored": "Ignorado",
+  "suggested_reply": "Resposta sugerida",
+  "approve_to_send": "edite se quiser e aprove para enviar",
+  "approve_and_send": "Aprovar e enviar",
+  "reply_sent": "Resposta enviada",
+  "replied_with": "Respondido",
+  "unknown": "Desconhecido",
+  "all": "Todos",
+  "saved": "Salvo"
 }

@@ -29,6 +29,8 @@ import { AgenciesService } from '@gitroom/nestjs-libraries/database/prisma/agenc
 import { AgenciesRepository } from '@gitroom/nestjs-libraries/database/prisma/agencies/agencies.repository';
 import { TrackService } from '@gitroom/nestjs-libraries/track/track.service';
 import { ShortLinkService } from '@gitroom/nestjs-libraries/short-linking/short.link.service';
+import { SocialCommentsRepository } from '@gitroom/nestjs-libraries/database/prisma/social-comments/social.comments.repository';
+import { SocialCommentsService } from '@gitroom/nestjs-libraries/database/prisma/social-comments/social.comments.service';
 import { WebhooksRepository } from '@gitroom/nestjs-libraries/database/prisma/webhooks/webhooks.repository';
 import { WebhooksService } from '@gitroom/nestjs-libraries/database/prisma/webhooks/webhooks.service';
 import { SignatureRepository } from '@gitroom/nestjs-libraries/database/prisma/signatures/signature.repository';
@@ -71,6 +73,8 @@ import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/p
     NotificationsRepository,
     WebhooksRepository,
     WebhooksService,
+    SocialCommentsRepository,
+    SocialCommentsService,
     IntegrationService,
     IntegrationRepository,
     PostsService,

@@ -19,3 +19,4 @@ export * from './streak.workflow';
 export * from './generate.video.workflow';
 export * from './process.media.workflow';
 export * from './clipping.workflow';
+export * from './comments.poll.workflow.v1.0.0';

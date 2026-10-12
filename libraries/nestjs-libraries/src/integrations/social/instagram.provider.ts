@@ -4,6 +4,7 @@ import {
   PendingCheckResponse,
   PostDetails,
   PostResponse,
+  SocialCommentDetails,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
@@ -1053,6 +1054,53 @@ export class InstagramProvider
       pendingData = result.pendingData;
       await timer(30000);
     }
+  }
+
+  async listComments(
+    token: string,
+    postId: string,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<SocialCommentDetails[]> {
+    const [accessToken] = token.split('___');
+
+    const { data } = await (
+      await this.fetch(
+        `https://${type}/${META_GRAPH_API_VERSION}/${postId}/comments?fields=id,text,timestamp,username,parent_id,from{id,username}&limit=50&access_token=${accessToken}`
+      )
+    ).json();
+
+    return (data || []).map((comment: any) => ({
+      id: comment.id,
+      parentId: comment.parent_id,
+      content: comment.text || '',
+      authorName: comment.from?.username || comment.username,
+      authorId: comment.from?.id,
+      publishedAt: comment.timestamp,
+    }));
+  }
+
+  async replyToComment(
+    token: string,
+    commentId: string,
+    message: string,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<{ id: string }> {
+    const [accessToken] = token.split('___');
+
+    const { id } = await (
+      await this.fetch(
+        `https://${type}/${META_GRAPH_API_VERSION}/${commentId}/replies?message=${encodeURIComponent(
+          message
+        )}&access_token=${accessToken}`,
+        {
+          method: 'POST',
+        }
+      )
+    ).json();
+
+    return { id };
   }
 
   async comment(

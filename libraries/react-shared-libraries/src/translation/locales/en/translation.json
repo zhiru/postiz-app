@@ -987,5 +987,21 @@
   "attempts": "Attempts",
   "error": "Error",
   "success": "Success",
-  "failed": "Failed"
+  "failed": "Failed",
+  "comments_inbox": "Comments inbox",
+  "comments_inbox_description": "Comments people left on your published posts. A reply suggested by an automation waits here until somebody approves it.",
+  "auto_reply_without_approval": "Send suggested replies automatically, without approval",
+  "no_comments_yet": "No comments yet",
+  "comment_status_received": "Received",
+  "comment_status_pending_approval": "Waiting for approval",
+  "comment_status_replied": "Replied",
+  "comment_status_ignored": "Ignored",
+  "suggested_reply": "Suggested reply",
+  "approve_to_send": "edit it if you want, then approve to send it",
+  "approve_and_send": "Approve and send",
+  "reply_sent": "Reply sent",
+  "replied_with": "Replied",
+  "unknown": "Unknown",
+  "all": "All",
+  "saved": "Saved"
 }

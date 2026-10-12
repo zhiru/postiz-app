@@ -43,6 +43,8 @@ model Organization {
   usedCodes           UsedCodes[]
   users               UserOrganization[]
   webhooks            Webhooks[]
+  socialComments      SocialComments[]
+  autoReplyComments   Boolean              @default(false)
   oauthApp            OAuthApp[]
   oauthAuthorizations OAuthAuthorization[]
 
@@ -407,6 +409,7 @@ model Integration {
   @@index([inBetweenSteps])
   @@index([refreshNeeded])
   @@index([disabled])
+  socialComments         SocialComments[]
 }
 
 model Signatures {
@@ -509,6 +512,7 @@ model Post {
   @@index([updatedAt])
   @@index([releaseURL])
   @@index([integrationId])
+  socialComments             SocialComments[]
 }
 
 model Notifications {
@@ -674,6 +678,42 @@ model Webhooks {
 
   @@index([organizationId])
   @@index([deletedAt])
+}
+
+// Comments read from the social networks (Instagram, Facebook). Not to be
+// confused with `Comments`, which are the internal notes users leave on a post.
+model SocialComments {
+  id                String              @id @default(uuid())
+  organizationId    String
+  integrationId     String
+  postId            String?
+  providerCommentId String
+  parentCommentId   String?
+  content           String
+  authorName        String?
+  authorId          String?
+  permalink         String?
+  publishedAt       DateTime
+  status            SocialCommentStatus @default(RECEIVED)
+  suggestedReply    String?
+  reply             String?
+  repliedAt         DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  organization      Organization        @relation(fields: [organizationId], references: [id])
+  integration       Integration         @relation(fields: [integrationId], references: [id])
+  post              Post?               @relation(fields: [postId], references: [id])
+
+  @@unique([integrationId, providerCommentId])
+  @@index([organizationId, status])
+  @@index([organizationId, publishedAt])
+}
+
+enum SocialCommentStatus {
+  RECEIVED
+  PENDING_APPROVAL
+  REPLIED
+  IGNORED
 }
 
 model WebhookDeliveries {
