@@ -6,7 +6,10 @@ import {
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { graphPaginate } from '@gitroom/nestjs-libraries/integrations/social/meta.graph';
+import {
+  graphPaginate,
+  graphFindPaginated,
+} from '@gitroom/nestjs-libraries/integrations/social/meta.graph';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import dayjs from 'dayjs';
 import {
@@ -440,32 +443,26 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     const fields = 'id,username,name,access_token,picture.type(large)';
     let foundWithoutToken = false;
 
-    const searchPaginated = async (startUrl: string) => {
-      let url: string | undefined = startUrl;
-      while (url) {
-        const response = await (await fetch(url)).json();
-        if (response.data) {
-          const page = response.data.find(
-            (p: any) => String(p.id) === String(pageId)
-          );
-          // A page listed through a business the user has no role on comes
-          // back without a page token, keep looking for a listing that has one
-          if (page && !page.access_token) {
-            foundWithoutToken = true;
-          } else if (page) {
-            return {
-              id: page.id,
-              name: page.name,
-              access_token: page.access_token,
-              picture: page.picture?.data?.url || '',
-              username: page.username,
-            };
-          }
+    const searchPaginated = (startUrl: string) =>
+      graphFindPaginated(startUrl, (items) => {
+        const page = items.find((p: any) => String(p.id) === String(pageId));
+        // A page listed through a business the user has no role on comes
+        // back without a page token, keep looking for a listing that has one
+        if (page && !page.access_token) {
+          foundWithoutToken = true;
+          return undefined;
         }
-        url = response.paging?.next;
-      }
-      return null;
-    };
+        if (page) {
+          return {
+            id: page.id,
+            name: page.name,
+            access_token: page.access_token,
+            picture: page.picture?.data?.url || '',
+            username: page.username,
+          };
+        }
+        return undefined;
+      });
 
     // 1. Check /me/accounts
     const fromAccounts = await searchPaginated(
@@ -475,34 +472,28 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
 
     // 2. Check Business Manager owned_pages and client_pages
     try {
-      let bizUrl:
-        | string
-        | undefined = `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me/businesses?access_token=${accessToken}`;
+      const businesses = await graphPaginate(
+        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me/businesses?access_token=${accessToken}`
+      );
 
-      while (bizUrl) {
-        const bizResponse = await (await fetch(bizUrl)).json();
-        if (bizResponse.data) {
-          for (const business of bizResponse.data) {
-            try {
-              const fromOwned = await searchPaginated(
-                `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/owned_pages?fields=${fields}&limit=100&access_token=${accessToken}`
-              );
-              if (fromOwned) return fromOwned;
-            } catch {
-              // Continue with other businesses
-            }
-
-            try {
-              const fromClient = await searchPaginated(
-                `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/client_pages?fields=${fields}&limit=100&access_token=${accessToken}`
-              );
-              if (fromClient) return fromClient;
-            } catch {
-              // Continue with other businesses
-            }
-          }
+      for (const business of businesses) {
+        try {
+          const fromOwned = await searchPaginated(
+            `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/owned_pages?fields=${fields}&limit=100&access_token=${accessToken}`
+          );
+          if (fromOwned) return fromOwned;
+        } catch {
+          // Continue with other businesses
         }
-        bizUrl = bizResponse.paging?.next;
+
+        try {
+          const fromClient = await searchPaginated(
+            `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/client_pages?fields=${fields}&limit=100&access_token=${accessToken}`
+          );
+          if (fromClient) return fromClient;
+        } catch {
+          // Continue with other businesses
+        }
       }
     } catch {
       // Business Manager API not available for all users

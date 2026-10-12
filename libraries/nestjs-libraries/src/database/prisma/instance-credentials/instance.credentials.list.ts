@@ -57,6 +57,9 @@ export const instanceCredentialGroups: {
   { name: 'Limits', category: 'limits', identifiers: [], keys: ['API_LIMIT', 'MAX_ORGS_PER_USER', 'WORKER_CONCURRENCY_DIVIDER'] },
 
   { name: 'Flags', category: 'flags', identifiers: [], keys: ['DISABLE_REGISTRATION', 'DISALLOW_PLUS', 'HIDDEN_PROVIDERS', 'RUN_CRON', 'DISABLE_IMAGE_COMPRESSION', 'DISABLE_X_ANALYTICS', 'STRIP_LINKS_FROM_X_POSTS', 'DISABLE_SSRF_PROTECTION', 'RESTRICT_UPLOAD_DOMAINS'] },
+  // comma-separated exact hostnames and/or IPv4 CIDRs allowed to bypass the
+  // webhook/self-hosted-URL SSRF guard (see webhook.url.validator.ts)
+  { name: 'Security / Network', category: 'flags', identifiers: [], keys: ['SSRF_ALLOWED_HOSTS'] },
 
   { name: 'Public URLs', category: 'urls', identifiers: [], keys: ['FRONTEND_URL', 'MAIN_URL', 'BACKEND_INTERNAL_URL', 'NEXT_PUBLIC_BACKEND_URL'] },
 

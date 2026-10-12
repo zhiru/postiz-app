@@ -59,13 +59,13 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             process.env.STORAGE_PROVIDER! as 'local' | 'cloudflare'
           }
           environment={process.env.NODE_ENV!}
-          backendUrl={process.env.NEXT_PUBLIC_BACKEND_URL!}
+          backendUrl={process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/+$/, '')!}
           plontoKey={process.env.NEXT_PUBLIC_POLOTNO!}
           stripeClient={process.env.STRIPE_PUBLISHABLE_KEY!}
           isChatBase={!!process.env.CHATBASE_TOKEN}
           billingEnabled={!!process.env.STRIPE_PUBLISHABLE_KEY}
           discordUrl={process.env.NEXT_PUBLIC_DISCORD_SUPPORT!}
-          frontEndUrl={process.env.FRONTEND_URL!}
+          frontEndUrl={process.env.FRONTEND_URL?.replace(/\/+$/, '')!}
           isGeneral={!!process.env.IS_GENERAL}
           genericOauth={!!process.env.POSTIZ_GENERIC_OAUTH}
           oauthLogoUrl={process.env.NEXT_PUBLIC_POSTIZ_OAUTH_LOGO_URL!}
@@ -94,7 +94,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             !!process.env.RUNPOD_ENDPOINT_ID
           }
           transloadit={
-            process.env.TRANSLOADIT_AUTH && process.env.TRANSLOADIT_TEMPLATE
+            // Transloadit templates export to the R2 bucket and save-media builds
+            // the path from CLOUDFLARE_BUCKET_URL, so it only works with cloudflare
+            // storage; with local storage it would silently lose uploads.
+            process.env.STORAGE_PROVIDER === 'cloudflare' &&
+            process.env.TRANSLOADIT_AUTH &&
+            process.env.TRANSLOADIT_TEMPLATE
               ? [
                   process.env.TRANSLOADIT_AUTH!,
                   process.env.TRANSLOADIT_TEMPLATE!,
