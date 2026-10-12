@@ -5,6 +5,8 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.repository';
+import { WebhooksService } from '@gitroom/nestjs-libraries/database/prisma/webhooks/webhooks.service';
+import { WebhookEvent } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.delivery';
 import { CreatePostDto } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
 import dayjs from 'dayjs';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
@@ -74,7 +76,8 @@ export class PostsService {
     private _shortLinkService: ShortLinkService,
     private _openaiService: OpenaiService,
     private _temporalService: TemporalService,
-    private _refreshIntegrationService: RefreshIntegrationService
+    private _refreshIntegrationService: RefreshIntegrationService,
+    private _webhooksService: WebhooksService
   ) {}
 
   searchForMissingThreeHoursPosts() {
@@ -874,7 +877,38 @@ export class PostsService {
   }
 
   async deletePost(orgId: string, group: string) {
+    // Build the webhook body while the rows are still visible - the shared
+    // lookup skips deleted posts. Skipped entirely when nobody subscribed, so
+    // the usual delete pays nothing.
+    const subscribed = await this._webhooksService.hasSubscribers(
+      orgId,
+      'post.deleted'
+    );
+    const root = subscribed
+      ? (await this._postRepository.getPostsByGroup(orgId, group)).find(
+          (p) => !p.parentPostId
+        )
+      : undefined;
+    const deletedPayload = root
+      ? await this._postRepository.getPostByForWebhookId(
+          root.id,
+          root.integrationId
+        )
+      : [];
+
     const post = await this._postRepository.deletePost(orgId, group);
+
+    if (root && deletedPayload.length) {
+      // Deleting a post is a user waiting on an HTTP response - the delivery
+      // (up to three attempts) must not be on that path.
+      void this.sendPostWebhook(
+        'post.deleted',
+        root.id,
+        orgId,
+        root.integrationId,
+        deletedPayload
+      );
+    }
 
     if (post?.id) {
       try {
@@ -1383,7 +1417,45 @@ export class PostsService {
   }
 
   async changeState(id: string, state: State, err?: any, body?: any) {
-    return this._postRepository.changeState(id, state, err, body);
+    const update = await this._postRepository.changeState(id, state, err, body);
+
+    if (state === 'ERROR') {
+      await this.sendPostWebhook(
+        'post.failed',
+        id,
+        update.organizationId,
+        update.integrationId
+      );
+    }
+
+    return update;
+  }
+
+  // The body is the same array of posts post.published sends: consumers tell
+  // the events apart by the X-Postiz-Event header, not by the shape.
+  private async sendPostWebhook(
+    event: WebhookEvent,
+    postId: string,
+    orgId: string,
+    integrationId: string,
+    payload?: any[]
+  ) {
+    try {
+      const post =
+        payload ??
+        (await this._postRepository.getPostByForWebhookId(
+          postId,
+          integrationId
+        ));
+
+      if (!post.length) {
+        return;
+      }
+
+      await this._webhooksService.sendEvent(orgId, event, integrationId, post);
+    } catch (err) {
+      /** a webhook must never break the action that triggered it **/
+    }
   }
 
   async changePostStatus(

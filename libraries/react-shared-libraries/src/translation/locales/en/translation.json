@@ -996,5 +996,20 @@
   "yes_restart": "Yes, restart",
   "could_not_restart": "Could not restart the services",
   "restarting_services": "Restarting the services",
-  "restart_pending": "These settings were changed but are only read when the services start:"
+  "restart_pending": "These settings were changed but are only read when the services start:",
+  "events": "Events",
+  "deliveries": "Deliveries",
+  "webhook_deliveries": "Webhook deliveries",
+  "events_to_send": "Events to send",
+  "rotate_signing_secret": "Rotate signing secret",
+  "webhook_signing_secret": "Webhook signing secret",
+  "rotate_secret_confirm": "Rotating invalidates the current secret. Continue?",
+  "rotate": "Rotate",
+  "webhook_secret_shown_once": "Copy it now - this is the only time it is shown. Postiz signs every request with it and sends the result in the X-Postiz-Signature header, together with X-Postiz-Timestamp and X-Postiz-Event.",
+  "no_deliveries_yet": "No deliveries yet",
+  "event": "Event",
+  "attempts": "Attempts",
+  "error": "Error",
+  "success": "Success",
+  "failed": "Failed"
 }

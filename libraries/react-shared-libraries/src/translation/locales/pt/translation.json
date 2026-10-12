@@ -996,5 +996,20 @@
   "yes_restart": "Sim, reiniciar",
   "could_not_restart": "Não foi possível reiniciar os serviços",
   "restarting_services": "Reiniciando os serviços",
-  "restart_pending": "Estas configurações mudaram, mas só são lidas quando os serviços iniciam:"
+  "restart_pending": "Estas configurações mudaram, mas só são lidas quando os serviços iniciam:",
+  "events": "Eventos",
+  "deliveries": "Entregas",
+  "webhook_deliveries": "Entregas do webhook",
+  "events_to_send": "Eventos a enviar",
+  "rotate_signing_secret": "Rotacionar segredo de assinatura",
+  "webhook_signing_secret": "Segredo de assinatura do webhook",
+  "rotate_secret_confirm": "Rotacionar invalida o segredo atual. Continuar?",
+  "rotate": "Rotacionar",
+  "webhook_secret_shown_once": "Copie agora — esta é a única vez que ele aparece. O Postiz assina cada requisição com ele e envia o resultado no cabeçalho X-Postiz-Signature, junto de X-Postiz-Timestamp e X-Postiz-Event.",
+  "no_deliveries_yet": "Nenhuma entrega ainda",
+  "event": "Evento",
+  "attempts": "Tentativas",
+  "error": "Erro",
+  "success": "Sucesso",
+  "failed": "Falhou"
 }
