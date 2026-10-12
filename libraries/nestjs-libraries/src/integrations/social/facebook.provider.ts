@@ -11,6 +11,7 @@ import {
   graphPaginate,
   graphFindPaginated,
 } from '@gitroom/nestjs-libraries/integrations/social/meta.graph';
+import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import dayjs from 'dayjs';
 import {
@@ -1055,6 +1056,26 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     const until = dayjs().endOf('day').unix();
     const since = dayjs().subtract(date, 'day').unix();
 
+    return withTrend(
+      await this.pageInsights(id, accessToken, since, until),
+      () =>
+        this.pageInsights(
+          id,
+          accessToken,
+          dayjs()
+            .subtract(date * 2, 'day')
+            .unix(),
+          since
+        )
+    );
+  }
+
+  private async pageInsights(
+    id: string,
+    accessToken: string,
+    since: number,
+    until: number
+  ): Promise<AnalyticsData[]> {
     // Reach/impression metrics (page_impressions_unique, page_posts_impressions_unique,
     // page_video_views) were deprecated by Meta on 2026-06-15 and now return an
     // "invalid metric" error. They are replaced by the Media Views metrics, which
@@ -1095,7 +1116,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
             : d.name === 'page_daily_follows'
             ? 'Page followers'
             : 'Media views',
-        percentageChange: 5,
+        percentageChange: 0,
         data: d?.values?.map((v: any) => ({
           total: sumValue(v.value),
           date: dayjs(v.end_time).format('YYYY-MM-DD'),

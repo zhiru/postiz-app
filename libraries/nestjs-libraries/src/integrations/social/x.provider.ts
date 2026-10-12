@@ -1611,7 +1611,10 @@ export class XProvider extends SocialAbstract implements SocialProvider {
 
       return Object.entries(metrics).map(([key, value]) => ({
         label: key.replace('_count', '').replace('_', ' ').toUpperCase(),
-        percentageChange: 5,
+        // No trend here: the series below is a synthetic [0, total] ramp, and a
+        // real previous period would mean a second pass of the rate limited
+        // loadAllTweets pagination. 0 makes the frontend render no indicator.
+        percentageChange: 0,
         data: [
           {
             total: String(0),

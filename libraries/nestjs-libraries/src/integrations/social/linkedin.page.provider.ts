@@ -5,6 +5,7 @@ import {
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { LinkedinProvider } from '@gitroom/nestjs-libraries/integrations/social/linkedin.provider';
 import dayjs from 'dayjs';
@@ -325,6 +326,26 @@ export class LinkedinPageProvider
     const endDate = dayjs().unix() * 1000;
     const startDate = dayjs().subtract(date, 'days').unix() * 1000;
 
+    return withTrend(
+      await this.pageStatistics(id, accessToken, startDate, endDate),
+      () =>
+        this.pageStatistics(
+          id,
+          accessToken,
+          dayjs()
+            .subtract(date * 2, 'days')
+            .unix() * 1000,
+          startDate
+        )
+    );
+  }
+
+  private async pageStatistics(
+    id: string,
+    accessToken: string,
+    startDate: number,
+    endDate: number
+  ): Promise<AnalyticsData[]> {
     const { elements }: { elements: Root[]; paging: any } = await (
       await fetch(
         `https://api.linkedin.com/v2/organizationPageStatistics?q=organization&organization=${encodeURIComponent(
@@ -438,7 +459,7 @@ export class LinkedinPageProvider
       data: analytics[
         key as 'Page Views' | 'Organic Followers' | 'Paid Followers'
       ],
-      percentageChange: 5,
+      percentageChange: 0,
     }));
   }
 

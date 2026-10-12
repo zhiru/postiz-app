@@ -7,6 +7,7 @@ import {
   SocialCommentDetails,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { timer } from '@gitroom/helpers/utils/timer';
 import dayjs from 'dayjs';
@@ -1193,9 +1194,32 @@ export class InstagramProvider
     date: number,
     type = 'graph.facebook.com'
   ): Promise<AnalyticsData[]> {
-    const [accessToken, userToken] = token.split('___');
     const until = dayjs().startOf('day').unix();
     const since = dayjs().subtract(date, 'day').unix();
+
+    return withTrend(
+      await this.accountInsights(id, token, type, since, until),
+      () =>
+        this.accountInsights(
+          id,
+          token,
+          type,
+          dayjs()
+            .subtract(date * 2, 'day')
+            .unix(),
+          since
+        )
+    );
+  }
+
+  private async accountInsights(
+    id: string,
+    token: string,
+    type: string,
+    since: number,
+    until: number
+  ): Promise<AnalyticsData[]> {
+    const [accessToken, userToken] = token.split('___');
 
     const { data, ...all } = await (
       await fetch(
@@ -1213,7 +1237,7 @@ export class InstagramProvider
     analytics.push(
       ...(data?.map((d: any) => ({
         label: this.setTitle(d.name),
-        percentageChange: 5,
+        percentageChange: 0,
         data: d.values.map((v: any) => ({
           total: v.value,
           date: dayjs(v.end_time).format('YYYY-MM-DD'),
@@ -1224,7 +1248,7 @@ export class InstagramProvider
     analytics.push(
       ...data2.map((d: any) => ({
         label: this.setTitle(d.name),
-        percentageChange: 5,
+        percentageChange: 0,
         data: [
           {
             total: d.total_value.value,
