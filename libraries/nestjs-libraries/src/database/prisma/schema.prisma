@@ -663,14 +663,32 @@ model Webhooks {
   name           String
   organizationId String
   url            String
+  secret         String?
+  events         String[]               @default([])
   deletedAt      DateTime?
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
   integrations   IntegrationsWebhooks[]
+  deliveries     WebhookDeliveries[]
   organization   Organization           @relation(fields: [organizationId], references: [id])
 
   @@index([organizationId])
   @@index([deletedAt])
+}
+
+model WebhookDeliveries {
+  id         String   @id @default(uuid())
+  webhookId  String
+  event      String
+  url        String
+  success    Boolean
+  statusCode Int?
+  attempts   Int      @default(1)
+  error      String?
+  createdAt  DateTime @default(now())
+  webhook    Webhooks @relation(fields: [webhookId], references: [id])
+
+  @@index([webhookId, createdAt])
 }
 
 model AutoPost {

@@ -972,5 +972,20 @@
   "impersonate": "Impersonate",
   "impersonate_description": "Open the app as another user to debug their account. A banner stays on screen while you do.",
   "import_debug_post_description": "Recreate a post from a debug code to reproduce a publishing error.",
-  "write_the_user_details": "Write the user details"
+  "write_the_user_details": "Write the user details",
+  "events": "Events",
+  "deliveries": "Deliveries",
+  "webhook_deliveries": "Webhook deliveries",
+  "events_to_send": "Events to send",
+  "rotate_signing_secret": "Rotate signing secret",
+  "webhook_signing_secret": "Webhook signing secret",
+  "rotate_secret_confirm": "Rotating invalidates the current secret. Continue?",
+  "rotate": "Rotate",
+  "webhook_secret_shown_once": "Copy it now - this is the only time it is shown. Postiz signs every request with it and sends the result in the X-Postiz-Signature header, together with X-Postiz-Timestamp and X-Postiz-Event.",
+  "no_deliveries_yet": "No deliveries yet",
+  "event": "Event",
+  "attempts": "Attempts",
+  "error": "Error",
+  "success": "Success",
+  "failed": "Failed"
 }
