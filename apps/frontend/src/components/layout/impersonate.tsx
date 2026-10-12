@@ -692,7 +692,7 @@ const AddAnnouncementModal: FC<{ close: () => void }> = ({ close }) => {
   );
 };
 
-const AddAnnouncement = () => {
+export const AddAnnouncement = () => {
   const { openModal } = useModals();
   const t = useT();
 
@@ -799,52 +799,7 @@ const AddTeamMember = () => {
   );
 };
 
-const ViewErrors = () => {
-  const t = useT();
-  const handleClick = useCallback(() => {
-    window.location.href = '/admin/errors';
-  }, []);
-  return (
-    <div
-      className="px-[10px] rounded-[4px] bg-blue-700 text-white cursor-pointer whitespace-nowrap"
-      onClick={handleClick}
-    >
-      {t('view_errors', 'View Errors')}
-    </div>
-  );
-};
-
-const ViewStats = () => {
-  const t = useT();
-  const handleClick = useCallback(() => {
-    window.location.href = '/admin/stats';
-  }, []);
-  return (
-    <div
-      className="px-[10px] rounded-[4px] bg-purple-700 text-white cursor-pointer whitespace-nowrap"
-      onClick={handleClick}
-    >
-      {t('view_stats', 'View Stats')}
-    </div>
-  );
-};
-
-const ViewCredentials = () => {
-  const t = useT();
-  const handleClick = useCallback(() => {
-    window.location.href = '/admin/credentials';
-  }, []);
-  return (
-    <div
-      className="px-[10px] rounded-[4px] bg-green-700 text-white cursor-pointer whitespace-nowrap"
-      onClick={handleClick}
-    >
-      {t('view_credentials', 'Credentials')}
-    </div>
-  );
-};
-
-const ImportDebugPost = () => {
+export const ImportDebugPost = () => {
   const { openModal } = useModals();
   const t = useT();
 
@@ -1025,33 +980,16 @@ const SwitchUser = () => {
   );
 };
 
-export const Impersonate = () => {
+export const ImpersonateSearch = () => {
   const fetch = useFetch();
   const [name, setName] = useState('');
-  const { isSecured, billingEnabled } = useVariables();
-  const user = useUser();
+  const t = useT();
   const load = useCallback(async () => {
     if (!name) {
       return [];
     }
-    const value = await (await fetch(`/user/impersonate?name=${name}`)).json();
-    return value;
+    return await (await fetch(`/user/impersonate?name=${name}`)).json();
   }, [name]);
-  const stopImpersonating = useCallback(async () => {
-    if (!isSecured) {
-      setCookie('impersonate', '', -10);
-    } else {
-      await fetch(`/user/impersonate`, {
-        method: 'POST',
-        body: JSON.stringify({
-          id: '',
-        }),
-      });
-    }
-    window.location.reload();
-  }, []);
-  const t = useT();
-
   const setUser = useCallback(
     (userId: string) => async () => {
       await fetch(`/user/impersonate`, {
@@ -1074,88 +1012,100 @@ export const Impersonate = () => {
     refreshInterval: 0,
   });
   const mapData = useMemo(() => {
-    return data?.map(
-      (curr: any) => ({
-        id: curr?.id,
-        name: curr?.user?.name,
-        email: curr?.user?.email,
-        orgName: curr?.organization?.name,
-        role: curr?.role,
-        tier: curr?.organization?.subscription?.subscriptionTier || 'FREE',
-      }),
-      []
-    );
+    return data?.map((curr: any) => ({
+      id: curr?.id,
+      name: curr?.user?.name,
+      email: curr?.user?.email,
+      orgName: curr?.organization?.name,
+      role: curr?.role,
+      tier: curr?.organization?.subscription?.subscriptionTier || 'FREE',
+    }));
   }, [data]);
+
+  return (
+    <div className="relative flex flex-col">
+      <Input
+        autoComplete="off"
+        placeholder={t('write_the_user_details', 'Write the user details')}
+        name="impersonate"
+        disableForm={true}
+        label=""
+        removeError={true}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      {!!data?.length && (
+        <>
+          <div
+            className="bg-primary/80 fixed start-0 top-0 w-full h-full z-[998]"
+            onClick={() => setName('')}
+          />
+          <div className="absolute top-[100%] w-max min-w-full max-w-[90vw] start-0 bg-sixth border border-customColor6 text-textColor z-[999]">
+            {mapData?.map((user: any) => (
+              <div
+                onClick={setUser(user?.id)}
+                key={user?.id}
+                className="p-[10px] border-b border-customColor6 hover:bg-tableBorder cursor-pointer whitespace-nowrap truncate"
+              >
+                {t('user_1', 'user:')}
+                {user?.id?.split('-')?.at(-1)} - {user?.name} - {user?.email} -{' '}
+                {user?.orgName} ({user?.role} / {user?.tier})
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// security banner: only rendered while an impersonation is active
+export const Impersonate = () => {
+  const fetch = useFetch();
+  const { isSecured, billingEnabled } = useVariables();
+  const user = useUser();
+  const t = useT();
+  const stopImpersonating = useCallback(async () => {
+    if (!isSecured) {
+      setCookie('impersonate', '', -10);
+    } else {
+      await fetch(`/user/impersonate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          id: '',
+        }),
+      });
+    }
+    window.location.reload();
+  }, []);
+
+  if (!user?.impersonate) {
+    return null;
+  }
+
   return (
     <div>
       <div className="bg-forth h-[52px] mobile:h-auto mobile:py-[8px] mobile:px-[8px] flex justify-center items-center border-input border rounded-[8px] text-white">
-        <div
-          className={`relative flex flex-col ${
-            user?.impersonate ? 'w-full px-[20px] mobile:px-0' : 'w-[600px] mobile:w-full'
-          }`}
-        >
+        <div className="relative flex flex-col w-full px-[20px] mobile:px-0">
           <div className="relative z-[1]">
-            {user?.impersonate ? (
-              <div className="text-center flex justify-center items-center gap-[10px] mobile:flex-wrap">
-                <div className="whitespace-nowrap">
-                  {t('currently_impersonating', 'Currently Impersonating')}
-                </div>
-                <div>
-                  <div
-                    className="px-[10px] rounded-[4px] bg-red-500 text-white cursor-pointer"
-                    onClick={stopImpersonating}
-                  >
-                    X
-                  </div>
-                </div>
-                {user?.tier?.current === 'FREE' && <Subscription />}
-                {user?.tier?.team_members && <AddTeamMember />}
-                {billingEnabled && <ManageBilling />}
-                <SwitchUser />
+            <div className="text-center flex justify-center items-center gap-[10px] mobile:flex-wrap">
+              <div className="whitespace-nowrap">
+                {t('currently_impersonating', 'Currently Impersonating')}
               </div>
-            ) : (
-              <div className="flex items-center gap-[10px] mobile:flex-wrap">
-                <div className="flex-1 mobile:basis-full">
-                  <Input
-                    autoComplete="off"
-                    placeholder="Write the user details"
-                    name="impersonate"
-                    disableForm={true}
-                    label=""
-                    removeError={true}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
+              <div>
+                <div
+                  className="px-[10px] rounded-[4px] bg-red-500 text-white cursor-pointer"
+                  onClick={stopImpersonating}
+                >
+                  X
                 </div>
-                <ImportDebugPost />
-                <AddAnnouncement />
-                <ViewErrors />
-                <ViewStats />
-                <ViewCredentials />
               </div>
-            )}
+              {user?.tier?.current === 'FREE' && <Subscription />}
+              {user?.tier?.team_members && <AddTeamMember />}
+              {billingEnabled && <ManageBilling />}
+              <SwitchUser />
+            </div>
           </div>
-          {!!data?.length && (
-            <>
-              <div
-                className="bg-primary/80 fixed start-0 top-0 w-full h-full z-[998]"
-                onClick={() => setName('')}
-              />
-              <div className="absolute top-[100%] w-max min-w-full max-w-[90vw] start-0 bg-sixth border border-customColor6 text-textColor z-[999]">
-                {mapData?.map((user: any) => (
-                  <div
-                    onClick={setUser(user?.id)}
-                    key={user?.id}
-                    className="p-[10px] border-b border-customColor6 hover:bg-tableBorder cursor-pointer whitespace-nowrap truncate"
-                  >
-                    {t('user_1', 'user:')}
-                    {user?.id?.split('-')?.at(-1)} - {user?.name} - {user?.email}{' '}
-                    - {user?.orgName} ({user?.role} / {user?.tier})
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
         </div>
       </div>
     </div>
