@@ -98,6 +98,28 @@ export class Disconnect extends ApplicationFailure {
   }
 }
 
+// The platform already accepted the post (it is live) but a follow-up mutation
+// on it failed (e.g. YouTube rejected the thumbnail after the upload): the post
+// still ends in ERROR, yet its platform id / URL must survive so the user can
+// reach the live post instead of re-publishing it. The post activity records
+// them and rethrows as BadBody, like Disconnect.
+export class PublishedWithError extends ApplicationFailure {
+  constructor(
+    identifier: string,
+    public readonly postDbId: string,
+    public readonly releaseId: string,
+    public readonly releaseURL: string,
+    message = ''
+  ) {
+    super(
+      truncateForTemporal(message, MAX_FAILURE_MESSAGE),
+      'published_with_error',
+      true,
+      [{ identifier, postDbId, releaseId, releaseURL }]
+    );
+  }
+}
+
 // The status a media read actually answered with, for the failure details that
 // get persisted with the post - without it the stored error is an empty '{}'
 // and there is no way to tell a store that ignored Range from one that was down.

@@ -14,6 +14,7 @@ import { YoutubeSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/provide
 import {
   BadBody,
   RefreshToken,
+  PublishedWithError,
   SocialAbstract,
   ValidityMedia,
   rangeReadFailure,
@@ -665,6 +666,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
           path,
           uploadedBytes: 0,
           thumbnail: settings?.thumbnail?.path || '',
+          postDbId: firstPost.id,
         },
       },
     ];
@@ -677,6 +679,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       videoSize: number;
       path: string;
       uploadedBytes: number;
+      postDbId?: string;
       thumbnail: string;
       videoId?: string;
     },
@@ -730,6 +733,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       uploadedBytes: number;
       thumbnail: string;
       videoId?: string;
+      postDbId?: string;
     },
     integration: Integration
   ): Promise<PendingCheckResponse> {
@@ -842,31 +846,61 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       }
     }
 
+    const releaseURL = `https://www.youtube.com/watch?v=${videoId}`;
+
     if (pendingData.thumbnail) {
       const { client, youtube } = clientAndYoutube();
       client.setCredentials({ access_token: accessToken });
       const youtubeClient = youtube(client);
 
-      await this.runInConcurrent(async () =>
-        youtubeClient.thumbnails.set({
-          videoId,
-          media: {
-            body: (
-              await this.getSsrfSafeAxios()({
-                url: pendingData.thumbnail,
-                method: 'GET',
-                responseType: 'stream',
-              })
-            ).data,
-          },
-        })
-      );
+      try {
+        await this.runInConcurrent(async () =>
+          youtubeClient.thumbnails.set({
+            videoId,
+            media: {
+              body: (
+                await this.getSsrfSafeAxios()({
+                  url: pendingData.thumbnail,
+                  method: 'GET',
+                  responseType: 'stream',
+                })
+              ).data,
+            },
+          })
+        );
+      } catch (err: any) {
+        // The video is already live: a rejected thumbnail must not lose its
+        // id and URL, or users re-upload a duplicate thinking the post never
+        // went out. Keep them on the post and still fail it (ERROR, curated
+        // message) so the user knows the thumbnail needs attention.
+        const text = JSON.stringify(err?.response?.data || {});
+        const handleError = this.handleErrors(text);
+
+        if (pendingData.postDbId) {
+          throw new PublishedWithError(
+            this.identifier,
+            pendingData.postDbId,
+            videoId,
+            releaseURL,
+            handleError?.value ||
+              'We have uploaded your video but could not set the thumbnail'
+          );
+        }
+
+        throw new BadBody(
+          this.identifier,
+          text,
+          '{}',
+          handleError?.value ||
+            'We have uploaded your video but could not set the thumbnail'
+        );
+      }
     }
 
     return {
       status: 'completed',
       postId: videoId,
-      releaseURL: `https://www.youtube.com/watch?v=${videoId}`,
+      releaseURL,
     };
   }
 
