@@ -88,7 +88,12 @@ export class PublicIntegrationsController {
       throw new HttpException({ msg: 'No file provided' }, 400);
     }
 
-    return this._mediaService.saveFile(org.id, file.filename, file.path);
+    return this._mediaService.saveFile(
+      org.id,
+      file.filename,
+      file.path,
+      file.originalname
+    );
   }
 
   @Post('/upload-from-url')
@@ -123,7 +128,11 @@ export class PublicIntegrationsController {
     @Query() query: GetPostsDto
   ) {
     Sentry.metrics.count('public_api-request', 1);
-    const posts = await this._postsService.getPosts(org.id, query);
+    const posts = await this._postsService.getPosts(
+      org.id,
+      query,
+      query.includeAttachments
+    );
     return {
       posts,
       // comments,
