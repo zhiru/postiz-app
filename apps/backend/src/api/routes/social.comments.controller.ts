@@ -14,6 +14,8 @@ import { SocialCommentsService } from '@gitroom/nestjs-libraries/database/prisma
 import { GetSocialCommentsDto } from '@gitroom/nestjs-libraries/dtos/comments/get.social.comments.dto';
 import { ReplySocialCommentDto } from '@gitroom/nestjs-libraries/dtos/comments/reply.social.comment.dto';
 import { AutoReplyCommentsDto } from '@gitroom/nestjs-libraries/dtos/comments/auto.reply.comments.dto';
+import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
+import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 @ApiTags('Social Comments')
 @Controller('/social-comments')
@@ -34,6 +36,7 @@ export class SocialCommentsController {
   }
 
   @Post('/auto-reply')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
   async setAutoReply(
     @GetOrgFromRequest() org: Organization,
     @Body() body: AutoReplyCommentsDto
