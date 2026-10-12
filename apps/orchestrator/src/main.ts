@@ -5,6 +5,14 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 dayjs.extend(utc);
 
+// Keep in sync with apps/backend/src/main.ts: normalize a trailing slash
+// once at boot instead of fixing every concat site.
+for (const key of ['FRONTEND_URL', 'MAIN_URL', 'NEXT_PUBLIC_BACKEND_URL']) {
+  if (process.env[key]) {
+    process.env[key] = process.env[key]!.replace(/\/+$/, '');
+  }
+}
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '@gitroom/orchestrator/app.module';
 import * as dns from 'node:dns';

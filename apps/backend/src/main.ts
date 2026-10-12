@@ -9,6 +9,17 @@ Runtime.install({ shutdownSignals: [] });
 
 process.env.TZ = 'UTC';
 
+// Providers append paths directly to these, so a trailing slash in the env
+// value (e.g. FRONTEND_URL=https://host.com/) produces a double slash in the
+// OAuth redirect_uri and breaks Meta's exact redirect_uri matching, plus CORS
+// origin matching in split-origin setups. Normalize once here instead of
+// fixing every concat site.
+for (const key of ['FRONTEND_URL', 'MAIN_URL', 'NEXT_PUBLIC_BACKEND_URL']) {
+  if (process.env[key]) {
+    process.env[key] = process.env[key]!.replace(/\/+$/, '');
+  }
+}
+
 import cookieParser from 'cookie-parser';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
