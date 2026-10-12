@@ -35,6 +35,13 @@ export class WebhooksService {
     return this._webhooksRepository.getDeliveries(orgId, id);
   }
 
+  // Lets a caller skip building a payload nobody is going to receive.
+  async hasSubscribers(orgId: string, event: WebhookEvent) {
+    return (
+      await this._webhooksRepository.getWebhooksForDispatch(orgId)
+    ).some((f) => webhookSubscribesTo(f.events, event));
+  }
+
   // The payload is built by the caller: this stays unaware of what a post
   // looks like, so posts can depend on webhooks and never the other way round.
   // Delivery failures never throw - they are written to the deliveries table

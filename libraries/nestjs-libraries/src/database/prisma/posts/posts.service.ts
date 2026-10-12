@@ -855,10 +855,17 @@ export class PostsService {
 
   async deletePost(orgId: string, group: string) {
     // Build the webhook body while the rows are still visible - the shared
-    // lookup skips deleted posts.
-    const root = (await this._postRepository.getPostsByGroup(orgId, group)).find(
-      (p) => !p.parentPostId
+    // lookup skips deleted posts. Skipped entirely when nobody subscribed, so
+    // the usual delete pays nothing.
+    const subscribed = await this._webhooksService.hasSubscribers(
+      orgId,
+      'post.deleted'
     );
+    const root = subscribed
+      ? (await this._postRepository.getPostsByGroup(orgId, group)).find(
+          (p) => !p.parentPostId
+        )
+      : undefined;
     const deletedPayload = root
       ? await this._postRepository.getPostByForWebhookId(
           root.id,
@@ -869,7 +876,9 @@ export class PostsService {
     const post = await this._postRepository.deletePost(orgId, group);
 
     if (root && deletedPayload.length) {
-      await this.sendPostWebhook(
+      // Deleting a post is a user waiting on an HTTP response - the delivery
+      // (up to three attempts) must not be on that path.
+      void this.sendPostWebhook(
         'post.deleted',
         root.id,
         orgId,
