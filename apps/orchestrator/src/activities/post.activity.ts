@@ -31,6 +31,7 @@ import {
 import {
   BadBody,
   Disconnect,
+  PublishedWithError,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 
 // Drops fields the workflow and downstream activities never read — biggest wins are `error` (grows per retry) and `childrenPost` (Prisma side-loads it on every recursive row).
@@ -192,7 +193,15 @@ export class PostActivity {
     // only the root drives the pre-publish sleep and the repeat schedule,
     // the rest are comments
     const [root, ...comments] = getPosts.map(slimPost);
-    return [reanchorInterval(root), ...comments];
+
+    // a thread item with no text and no media has nothing to publish
+    const publishable = comments.filter(
+      (comment) =>
+        JSON.parse(comment.image || '[]').length ||
+        stripHtmlValidation('normal', comment.content || '', true).trim()
+    );
+
+    return [reanchorInterval(root), ...publishable];
   }
 
   @ActivityMethod()
@@ -288,6 +297,29 @@ export class PostActivity {
             integration.organizationId,
             integration,
             err.message
+          );
+        } catch (e) {
+          /**empty**/
+        }
+
+        throw new BadBody(
+          integration.providerIdentifier,
+          JSON.stringify({}),
+          Buffer.from('{}'),
+          err.message
+        );
+      }
+
+      // The post is live but a follow-up mutation failed (e.g. YouTube
+      // rejected the thumbnail after the upload): keep its platform id/URL on
+      // the post, then fail it as BadBody like any other error - the post
+      // still ends in ERROR, but the calendar can link to the live post.
+      if (err instanceof PublishedWithError) {
+        try {
+          await this._postService.setReleaseDetails(
+            err.postDbId,
+            err.releaseId,
+            err.releaseURL
           );
         } catch (e) {
           /**empty**/
