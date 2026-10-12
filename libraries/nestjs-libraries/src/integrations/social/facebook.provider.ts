@@ -1,3 +1,4 @@
+import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -36,6 +37,11 @@ export const META_GRAPH_API_VERSION = 'v25.0';
 )
 export class FacebookProvider extends SocialAbstract implements SocialProvider {
   identifier = 'facebook';
+  reportMetrics: ReportMetricsMap = {
+    followersGained: ['Page followers'],
+    reach: ['Page Impressions'],
+    engagement: ['Posts Engagement'],
+  };
   name = 'Facebook Page';
   isBetweenSteps = true;
   scopes = [

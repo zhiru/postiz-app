@@ -1,3 +1,5 @@
+import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { instagramReportMetrics } from '@gitroom/nestjs-libraries/integrations/social/instagram.provider';
 import {
   AuthTokenDetails,
   PostDetails,
@@ -26,6 +28,7 @@ export class InstagramStandaloneProvider
   implements SocialProvider
 {
   identifier = 'instagram-standalone';
+  reportMetrics: ReportMetricsMap = instagramReportMetrics;
   name = 'Instagram\n(Standalone)';
   isBetweenSteps = false;
   refreshCron = true;

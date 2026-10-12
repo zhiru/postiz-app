@@ -1,3 +1,4 @@
+import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -22,6 +23,10 @@ import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 export class ThreadsProvider extends SocialAbstract implements SocialProvider {
   identifier = 'threads';
+  reportMetrics: ReportMetricsMap = {
+    reach: ['Views'],
+    engagement: ['Likes', 'Replies', 'Reposts', 'Quotes'],
+  };
   name = 'Threads';
   isBetweenSteps = false;
   scopes = [

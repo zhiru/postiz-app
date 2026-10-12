@@ -94,6 +94,34 @@ export const useMenuItem = () => {
       path: '/analytics',
     },
     {
+      name: t('report', 'Report'),
+      icon: (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="20"
+          height="20"
+          viewBox="0 0 20 20"
+          fill="none"
+        >
+          <path
+            d="M12.5 1.5H5.5C4.39543 1.5 3.5 2.39543 3.5 3.5V16.5C3.5 17.6046 4.39543 18.5 5.5 18.5H14.5C15.6046 18.5 16.5 17.6046 16.5 16.5V5.5L12.5 1.5Z"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M12 1.5V6H16.5M6.75 10.5V14.5M10 8.5V14.5M13.25 12V14.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ),
+      path: '/report',
+    },
+    {
       name: t('media', 'Media'),
       icon: (
         <svg

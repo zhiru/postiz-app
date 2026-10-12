@@ -73,6 +73,28 @@ export interface AnalyticsData {
   percentageChange: number;
 }
 
+// The cross channel report needs comparable columns, but every provider names
+// its own metrics ("Page Impressions", "Reach", "IMPRESSION"...). Each provider
+// declares which of ITS OWN analytics() labels feed each canonical metric, so
+// the collector can translate without ever knowing which provider it is holding.
+//
+// The semantics of each key are fixed, and that is what decides how the report
+// aggregates it:
+//   followers       - a running total (stock). The latest day in the period wins.
+//   followersGained - followers won on that day (flow). Summed over the period.
+//   reach           - impressions / views / reach on that day (flow). Summed.
+//   engagement      - interactions on that day (flow). Summed.
+// A provider reports whichever of the four it actually has, and nothing else.
+// followers and followersGained are never mixed: one is a snapshot, the other a
+// delta, and adding them together would mean nothing.
+export type ReportMetric =
+  | 'followers'
+  | 'followersGained'
+  | 'reach'
+  | 'engagement';
+
+export type ReportMetricsMap = Partial<Record<ReportMetric, string[]>>;
+
 
 export type GenerateAuthUrlResponse = {
   url: string;
@@ -205,6 +227,9 @@ export interface SocialProvider
     ISocialMediaIntegration {
   identifier: string;
   refreshWait?: boolean;
+  // Maps this provider's own analytics() labels onto the canonical report
+  // metrics. Providers without analytics() simply leave it out.
+  reportMetrics?: ReportMetricsMap;
   convertToJPEG?: boolean;
   stripLinks?: () => boolean;
   refreshCron?: boolean;

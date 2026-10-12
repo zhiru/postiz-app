@@ -1,3 +1,4 @@
+import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -41,6 +42,10 @@ const clientAndGmb = () => {
 export class GmbProvider extends SocialAbstract implements SocialProvider {
   override maxConcurrentJob = 3;
   identifier = 'gmb';
+  reportMetrics: ReportMetricsMap = {
+    reach: ['Desktop Map Views', 'Mobile Map Views'],
+    engagement: ['Website Clicks', 'Phone Calls', 'Direction Requests'],
+  };
   name = 'Google My Business';
   isBetweenSteps = true;
   scopes = [

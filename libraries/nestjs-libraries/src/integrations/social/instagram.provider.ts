@@ -1,3 +1,4 @@
+import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -25,6 +26,14 @@ import { META_GRAPH_API_VERSION } from '@gitroom/nestjs-libraries/integrations/s
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
+// Shared with instagram.standalone.provider, which delegates to this provider
+// instead of extending it.
+export const instagramReportMetrics: ReportMetricsMap = {
+  followersGained: ['Follower Count'],
+  reach: ['Reach'],
+  engagement: ['Likes', 'Comments', 'Shares', 'Saves', 'Replies'],
+};
+
 @Rules(
   "Instagram should have at least one attachment, if it's a story, it can have only one picture"
 )
@@ -33,6 +42,7 @@ export class InstagramProvider
   implements SocialProvider
 {
   identifier = 'instagram';
+  reportMetrics: ReportMetricsMap = instagramReportMetrics;
   name = 'Instagram\n(Facebook Business)';
   isBetweenSteps = true;
   toolTip = 'Instagram must be business and connected to a Facebook page';

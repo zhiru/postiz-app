@@ -1,3 +1,4 @@
+import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { TweetV2, TwitterApi } from 'twitter-api-v2';
 import { createHmac, randomBytes } from 'crypto';
 import { parseFragment } from 'parse5';
@@ -74,6 +75,10 @@ type XPendingData = {
 )
 export class XProvider extends SocialAbstract implements SocialProvider {
   identifier = 'x';
+  reportMetrics: ReportMetricsMap = {
+    reach: ['IMPRESSION'],
+    engagement: ['LIKE', 'REPLY', 'RETWEET', 'QUOTE', 'BOOKMARK'],
+  };
   name = 'X';
   isBetweenSteps = false;
   scopes = [] as string[];

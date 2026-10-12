@@ -1027,5 +1027,20 @@
   "replied_with": "Respondido",
   "unknown": "Desconhecido",
   "all": "Todos",
-  "saved": "Salvo"
+  "saved": "Salvo",
+  "report": "Relatório",
+  "report_from": "De",
+  "report_to": "Até",
+  "report_channel": "Canal",
+  "report_channels": "Canais",
+  "report_followers": "Seguidores",
+  "report_followers_gained": "Seguidores ganhos",
+  "report_reach": "Alcance",
+  "report_engagement": "Engajamento",
+  "report_posts_published": "Posts publicados",
+  "report_export_csv": "Exportar CSV",
+  "report_backfill": "Preencher histórico",
+  "report_backfill_done": "Histórico preenchido para os canais selecionados",
+  "report_compared_to": "Comparado com",
+  "report_no_channels": "Nenhum canal conectado ainda"
 }

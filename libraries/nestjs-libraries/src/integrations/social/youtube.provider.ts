@@ -1,3 +1,4 @@
+import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -60,6 +61,10 @@ const clientAndYoutube = () => {
 export class YoutubeProvider extends SocialAbstract implements SocialProvider {
   override maxConcurrentJob = 200; // YouTube has strict upload quotas
   identifier = 'youtube';
+  reportMetrics: ReportMetricsMap = {
+    followersGained: ['Subscribers Gained'],
+    engagement: ['Likes'],
+  };
   name = 'YouTube';
   isBetweenSteps = true;
   dto = YoutubeSettingsDto;

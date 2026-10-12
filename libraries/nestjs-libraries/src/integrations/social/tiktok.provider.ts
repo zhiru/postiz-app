@@ -1,3 +1,4 @@
+import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -34,6 +35,11 @@ import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorato
 )
 export class TiktokProvider extends SocialAbstract implements SocialProvider {
   identifier = 'tiktok';
+  reportMetrics: ReportMetricsMap = {
+    followers: ['Followers'],
+    reach: ['Views'],
+    engagement: ['Recent Likes', 'Recent Comments', 'Recent Shares'],
+  };
   name = 'Tiktok';
   isBetweenSteps = false;
   convertToJPEG = true;

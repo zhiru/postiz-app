@@ -1027,5 +1027,20 @@
   "replied_with": "Replied",
   "unknown": "Unknown",
   "all": "All",
-  "saved": "Saved"
+  "saved": "Saved",
+  "report": "Report",
+  "report_from": "From",
+  "report_to": "To",
+  "report_channel": "Channel",
+  "report_channels": "Channels",
+  "report_followers": "Followers",
+  "report_followers_gained": "Followers gained",
+  "report_reach": "Reach",
+  "report_engagement": "Engagement",
+  "report_posts_published": "Posts published",
+  "report_export_csv": "Export CSV",
+  "report_backfill": "Fill history",
+  "report_backfill_done": "History filled for the selected channels",
+  "report_compared_to": "Compared to",
+  "report_no_channels": "No channels connected yet"
 }
