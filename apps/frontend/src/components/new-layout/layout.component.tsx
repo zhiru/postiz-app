@@ -123,7 +123,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                     )}
                     <div
                       className={clsx(
-                        'flex flex-col bg-newBgColorInner w-[80px] rounded-[12px] mobile:fixed mobile:top-0 mobile:bottom-0 mobile:start-0 mobile:z-[491] mobile:rounded-none mobile:overflow-y-auto mobile:overflow-x-hidden',
+                        'flex flex-col bg-newBgColorInner w-[112px] rounded-[12px] mobile:fixed mobile:top-0 mobile:bottom-0 mobile:start-0 mobile:z-[491] mobile:rounded-none mobile:overflow-y-auto mobile:overflow-x-hidden',
                         !menuOpen && 'mobile:hidden'
                       )}
                       onClick={() => setMenuOpen(false)}
@@ -131,8 +131,10 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                       <div
                         id="left-menu"
                         className={clsx(
-                          'fixed h-full w-[64px] start-[20px] flex flex-1 top-0 mobile:static mobile:h-auto mobile:min-h-full mobile:mx-auto',
-                          user?.admin && 'pt-[52px] max-h-[1000px]:w-[500px]'
+                          'fixed h-full w-[96px] start-[20px] flex flex-1 top-0 mobile:static mobile:h-auto mobile:min-h-full mobile:mx-auto',
+                          user?.admin &&
+                            user?.impersonate &&
+                            'pt-[52px] max-h-[1000px]:w-[500px]'
                         )}
                       >
                         <div className="flex flex-col h-full gap-[32px] mobile:gap-[16px] flex-1 pt-[12px] pb-[20px] mobile:pb-[12px]">

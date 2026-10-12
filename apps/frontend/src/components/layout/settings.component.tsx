@@ -3,6 +3,7 @@
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import React, {
   FC,
+  Fragment,
   Ref,
   useCallback,
   useEffect,
@@ -35,6 +36,14 @@ import { OrganizationsComponent } from '@gitroom/frontend/components/settings/or
 import { AppsComponent } from '@gitroom/frontend/components/settings/apps.component';
 import { ThirdPartyComponent } from '@gitroom/frontend/components/third-parties/third-party.component';
 import { Plugs } from '@gitroom/frontend/components/plugs/plugs';
+import { AdminCredentialsComponent } from '@gitroom/frontend/components/admin/admin-credentials.component';
+import { AdminStatsComponent } from '@gitroom/frontend/components/admin/admin-stats.component';
+import { AdminErrorsComponent } from '@gitroom/frontend/components/admin/admin-errors.component';
+import {
+  AddAnnouncement,
+  ImportDebugPost,
+  ImpersonateSearch,
+} from '@gitroom/frontend/components/layout/impersonate';
 export const SettingsPopup: FC<{
   getRef?: Ref<any>;
 }> = (props) => {
@@ -86,7 +95,7 @@ export const SettingsPopup: FC<{
 
   const t = useT();
   const list = useMemo(() => {
-    const arr = [];
+    const arr: { tab: string; label: string; section?: string }[] = [];
     arr.push({ tab: 'global_settings', label: t('global_settings', 'Global Settings') });
     arr.push({ tab: 'organizations', label: t('organizations', 'Organizations') });
     // Populate tabs based on user permissions
@@ -112,6 +121,29 @@ export const SettingsPopup: FC<{
     arr.push({ tab: 'plugs', label: t('plugs', 'Plugs') });
     arr.push({ tab: 'apps', label: t('apps', 'Apps') });
 
+    // instance tools, only for the super admin of the instance
+    if (user?.isSuperAdmin) {
+      arr.push({
+        tab: 'admin_credentials',
+        label: t('view_credentials', 'Credentials'),
+        section: t('administration', 'Administration'),
+      });
+      arr.push({ tab: 'admin_stats', label: t('statistics', 'Statistics') });
+      arr.push({ tab: 'admin_errors', label: t('errors', 'Errors') });
+      arr.push({
+        tab: 'admin_announcements',
+        label: t('announcements', 'Announcements'),
+      });
+      arr.push({
+        tab: 'admin_impersonate',
+        label: t('impersonate', 'Impersonate'),
+      });
+      arr.push({
+        tab: 'admin_import_debug_post',
+        label: t('import_debug_post', 'Import Debug Post'),
+      });
+    }
+
     return arr;
   }, [user, isGeneral, showLogout, t]);
 
@@ -130,9 +162,14 @@ export const SettingsPopup: FC<{
     <>
       <div className="bg-newBgColorInner p-[20px] mobile:p-[12px] flex flex-col transition-all w-[260px] mobile:w-full">
         <div className="flex flex-1 flex-col gap-[15px] mobile:flex-row mobile:gap-[8px] mobile:overflow-x-auto mobile:pb-[6px] scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
-          {list.map(({ tab: tabKey, label }) => (
+          {list.map(({ tab: tabKey, label, section }) => (
+            <Fragment key={tabKey}>
+              {!!section && (
+                <div className="text-[12px] uppercase opacity-60 mt-[8px] mobile:mt-0 mobile:self-center mobile:shrink-0 mobile:whitespace-nowrap">
+                  {section}
+                </div>
+              )}
             <div
-              key={tabKey}
               className={clsx(
                 'cursor-pointer flex items-center gap-[12px] group/profile hover:bg-boxHover rounded-e-[8px] mobile:shrink-0 mobile:whitespace-nowrap mobile:rounded-[8px] mobile:px-[12px] mobile:py-[8px]',
                 tabKey === tab && 'bg-boxHover'
@@ -149,6 +186,7 @@ export const SettingsPopup: FC<{
               </div>
               {label}
             </div>
+            </Fragment>
           ))}
         </div>
         <div>
@@ -246,6 +284,73 @@ export const SettingsPopup: FC<{
                     }
                   />
                 </div>
+              )}
+
+              {!!user?.isSuperAdmin && (
+                <>
+                  {tab === 'admin_credentials' && (
+                    <div>
+                      <AdminCredentialsComponent />
+                    </div>
+                  )}
+
+                  {tab === 'admin_stats' && (
+                    <div>
+                      <AdminStatsComponent />
+                    </div>
+                  )}
+
+                  {tab === 'admin_errors' && (
+                    <div>
+                      <AdminErrorsComponent />
+                    </div>
+                  )}
+
+                  {tab === 'admin_announcements' && (
+                    <div className="flex flex-col gap-[12px] items-start">
+                      <div className="text-[20px] font-[600]">
+                        {t('announcements', 'Announcements')}
+                      </div>
+                      <div className="text-[13px] opacity-70">
+                        {t(
+                          'announcements_description',
+                          'Publish a banner shown at the top of the app to every user of this instance.'
+                        )}
+                      </div>
+                      <AddAnnouncement />
+                    </div>
+                  )}
+
+                  {tab === 'admin_impersonate' && (
+                    <div className="flex flex-col gap-[12px]">
+                      <div className="text-[20px] font-[600]">
+                        {t('impersonate', 'Impersonate')}
+                      </div>
+                      <div className="text-[13px] opacity-70">
+                        {t(
+                          'impersonate_description',
+                          'Open the app as another user to debug their account. A banner stays on screen while you do.'
+                        )}
+                      </div>
+                      <ImpersonateSearch />
+                    </div>
+                  )}
+
+                  {tab === 'admin_import_debug_post' && (
+                    <div className="flex flex-col gap-[12px] items-start">
+                      <div className="text-[20px] font-[600]">
+                        {t('import_debug_post', 'Import Debug Post')}
+                      </div>
+                      <div className="text-[13px] opacity-70">
+                        {t(
+                          'import_debug_post_description',
+                          'Recreate a post from a debug code to reproduce a publishing error.'
+                        )}
+                      </div>
+                      <ImportDebugPost />
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </form>
