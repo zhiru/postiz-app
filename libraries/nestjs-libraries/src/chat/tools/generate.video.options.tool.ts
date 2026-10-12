@@ -16,7 +16,12 @@ export class GenerateVideoOptionsTool implements AgentToolInterface {
   run() {
     return createTool({
       id: 'generateVideoOptions',
-      description: `All the options to generate videos, some tools might require another call to generateVideoFunction`,
+      description: `Lists the available video generators, use this before calling 'generateVideoTool'.
+                    Each entry has: 'type' (the identifier to pass as generateVideoTool's 'identifier'),
+                    'output' (the supported orientations, always "vertical|horizontal"),
+                    'customParams' (the extra settings this generator accepts, pass as generateVideoTool's 'customParams'),
+                    and 'tools' (helper functions, e.g. to list available voices and get a voice_id,
+                    that must be called through 'videoFunctionTool' before generating, if the generator needs them).`,
       inputSchema: z.object({
         reasoning: z
           .string()
