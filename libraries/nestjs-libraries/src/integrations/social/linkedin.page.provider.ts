@@ -1,3 +1,4 @@
+import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -21,6 +22,13 @@ export class LinkedinPageProvider
   implements SocialProvider
 {
   override identifier = 'linkedin-page';
+  // 'Engagement' is deliberately absent: LinkedIn reports it as an engagement
+  // RATE, not a count, and summing rates across days or channels is meaningless.
+  reportMetrics: ReportMetricsMap = {
+    followersGained: ['Organic Followers', 'Paid Followers'],
+    reach: ['Page Views'],
+    engagement: ['Clicks', 'Shares', 'Comments'],
+  };
   override name = 'LinkedIn Page';
   override isBetweenSteps = true;
   override refreshWait = true;

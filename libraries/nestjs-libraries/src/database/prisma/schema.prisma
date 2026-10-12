@@ -45,6 +45,7 @@ model Organization {
   webhooks            Webhooks[]
   oauthApp            OAuthApp[]
   oauthAuthorizations OAuthAuthorization[]
+  integrationAnalytics IntegrationAnalytics[]
 
   @@index([apiKey])
   @@index([streakSince])
@@ -395,6 +396,7 @@ model Integration {
   orderItems            OrderItems[]
   plugs                 Plugs[]
   posts                 Post[]
+  analytics             IntegrationAnalytics[]
 
   @@unique([organizationId, internalId])
   @@index([rootInternalId])
@@ -407,6 +409,27 @@ model Integration {
   @@index([inBetweenSteps])
   @@index([refreshNeeded])
   @@index([disabled])
+}
+
+// One row per channel, per day, per canonical report metric. Written by the
+// daily collection workflow and by on demand backfill, read by the cross
+// channel report. Additive: nothing else reads or writes it.
+model IntegrationAnalytics {
+  id             String       @id @default(cuid())
+  organizationId String
+  integrationId  String
+  date           DateTime     @db.Date
+  metric         String
+  value          Float
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  integration    Integration  @relation(fields: [integrationId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([integrationId, date, metric])
+  @@index([organizationId, date])
+  @@index([integrationId])
+  @@index([date])
 }
 
 model Signatures {

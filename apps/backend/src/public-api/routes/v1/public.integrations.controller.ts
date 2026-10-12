@@ -9,6 +9,7 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -56,6 +57,9 @@ import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import { AdminStatsService } from '@gitroom/nestjs-libraries/database/prisma/admin-stats/admin-stats.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { GetOrgActivityDto } from '@gitroom/nestjs-libraries/dtos/analytics/get.org.activity.dto';
+import { GetReportDto } from '@gitroom/nestjs-libraries/dtos/analytics/get.report.dto';
+import { AnalyticsReportService } from '@gitroom/nestjs-libraries/database/prisma/analytics/analytics.report.service';
+import { Response } from 'express';
 import { ResetCreditsDto } from '@gitroom/nestjs-libraries/dtos/billing/reset.credits.dto';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import dayjs from 'dayjs';
@@ -74,7 +78,8 @@ export class PublicIntegrationsController {
     private _adminStatsService: AdminStatsService,
     private _organizationService: OrganizationService,
     private _clippingService: ClippingService,
-    private _subscriptionService: SubscriptionService
+    private _subscriptionService: SubscriptionService,
+    private _analyticsReportService: AnalyticsReportService
   ) {}
 
   @Post('/upload')
@@ -644,6 +649,28 @@ export class PublicIntegrationsController {
       releaseId
     );
     return post;
+  }
+
+  // Declared before /analytics/:integration so "report" is not swallowed as an
+  // integration id.
+  @Get('/analytics/report')
+  async getAnalyticsReport(
+    @GetOrgFromRequest() org: Organization,
+    @Query() query: GetReportDto,
+    @Res({ passthrough: true }) res: Response
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    if (query.format !== 'csv') {
+      return this._analyticsReportService.getReport(org.id, query);
+    }
+
+    res.header('Content-Type', 'text/csv; charset=utf-8');
+    res.header(
+      'Content-Disposition',
+      `attachment; filename="postiz-report-${query.from}-${query.to}.csv"`
+    );
+
+    return this._analyticsReportService.getReportCsv(org.id, query);
   }
 
   @Get('/analytics/:integration')

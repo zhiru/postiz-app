@@ -1,3 +1,4 @@
+import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -52,6 +53,10 @@ export class PinterestProvider
   implements SocialProvider
 {
   identifier = 'pinterest';
+  reportMetrics: ReportMetricsMap = {
+    reach: ['Impressions'],
+    engagement: ['Pin Clicks', 'Saves', 'Outbound Clicks'],
+  };
   name = 'Pinterest';
   isBetweenSteps = false;
   scopes = [

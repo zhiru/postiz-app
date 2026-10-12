@@ -3,14 +3,21 @@ import { Activity, ActivityMethod } from 'nestjs-temporal-core';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { Integration } from '@prisma/client';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
+import { AnalyticsReportService } from '@gitroom/nestjs-libraries/database/prisma/analytics/analytics.report.service';
 
 @Injectable()
 @Activity()
 export class IntegrationsActivity {
   constructor(
     private _integrationService: IntegrationService,
-    private _refreshIntegrationService: RefreshIntegrationService
+    private _refreshIntegrationService: RefreshIntegrationService,
+    private _analyticsReportService: AnalyticsReportService
   ) {}
+
+  @ActivityMethod()
+  async collectDailyAnalytics() {
+    return this._analyticsReportService.collectDaily();
+  }
 
   @ActivityMethod()
   async getIntegrationsById(id: string, orgId: string) {
