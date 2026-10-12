@@ -40,7 +40,60 @@ export function isBlockedIPv6(ip: string): boolean {
   );
 }
 
-export function isBlockedIp(ip: string): boolean {
+// Self-hosters legitimately point webhooks at an internal host (e.g. an n8n
+// instance on the same Docker network). SSRF_ALLOWED_HOSTS is a comma-separated
+// list of exact hostnames and/or IPv4 CIDRs that bypass the private-IP block
+// below; empty by default so the hosted product stays fully protected.
+function parseSsrfAllowlist(): { hosts: Set<string>; cidrs: string[] } {
+  const raw = (process.env.SSRF_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+
+  const hosts = new Set<string>();
+  const cidrs: string[] = [];
+  for (const entry of raw) {
+    if (entry.includes('/')) {
+      cidrs.push(entry);
+    } else {
+      hosts.add(entry);
+    }
+  }
+  return { hosts, cidrs };
+}
+
+function ipv4ToInt(ip: string): number | null {
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
+    return null;
+  }
+  return parts.reduce((acc, n) => acc * 256 + n, 0);
+}
+
+function isIpInCidr(ip: string, cidr: string): boolean {
+  const [range, prefixRaw] = cidr.split('/');
+  const prefix = Number(prefixRaw);
+  if (net.isIP(ip) !== 4 || net.isIP(range) !== 4 || Number.isNaN(prefix)) {
+    return false;
+  }
+  const ipInt = ipv4ToInt(ip);
+  const rangeInt = ipv4ToInt(range);
+  if (ipInt === null || rangeInt === null) return false;
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  return (ipInt & mask) === (rangeInt & mask);
+}
+
+export function isSsrfAllowlisted(ip: string, hostname?: string): boolean {
+  const { hosts, cidrs } = parseSsrfAllowlist();
+  if (hostname && hosts.has(hostname.toLowerCase())) return true;
+  return cidrs.some((cidr) => isIpInCidr(ip, cidr));
+}
+
+export function isBlockedIp(ip: string, hostname?: string): boolean {
+  if (isSsrfAllowlisted(ip, hostname)) {
+    return false;
+  }
+
   const version = net.isIP(ip);
   if (version === 4) {
     return isBlockedIPv4(ip);
@@ -78,14 +131,14 @@ export async function isSafePublicHttpsUrl(value: unknown): Promise<boolean> {
 
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
 
-  if (hostname === 'localhost') {
+  if (hostname === 'localhost' && !isSsrfAllowlisted(hostname, hostname)) {
     return false;
   }
 
   // If user supplied a literal IP directly, validate it immediately
   const literalIpVersion = net.isIP(hostname);
   if (literalIpVersion) {
-    return !isBlockedIp(hostname);
+    return !isBlockedIp(hostname, hostname);
   }
 
   try {
@@ -96,7 +149,7 @@ export async function isSafePublicHttpsUrl(value: unknown): Promise<boolean> {
     }
 
     for (const record of records) {
-      if (isBlockedIp(record.address)) {
+      if (isBlockedIp(record.address, hostname)) {
         return false;
       }
     }

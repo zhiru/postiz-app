@@ -32,6 +32,9 @@ export const instanceCredentialGroups: {
   // read once at boot by the provider: needs a restart after changing
   { name: 'Telegram', identifiers: [], keys: ['TELEGRAM_TOKEN'] },
   { name: 'AI (Agent, AI images)', identifiers: [], keys: ['OPENAI_API_KEY'], docs: 'https://platform.openai.com/api-keys' },
+  // comma-separated exact hostnames and/or IPv4 CIDRs allowed to bypass the
+  // webhook/self-hosted-URL SSRF guard (see webhook.url.validator.ts)
+  { name: 'Security / Network', identifiers: [], keys: ['SSRF_ALLOWED_HOSTS'] },
 ];
 
 export const instanceCredentialKeys = instanceCredentialGroups.flatMap(
