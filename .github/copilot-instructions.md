@@ -2,19 +2,19 @@
 # Copilot Coding Agent Instructions for Postiz
 
 ## Project Architecture
-- Monorepo managed by NX, with apps in `apps/` and shared code in `libraries/`.
-- Main services: `frontend` (Next.js), `backend` (NestJS), `cron`, `commands`, `extension`, `sdk`, and `workers`.
+- Monorepo managed as a pnpm workspace, with apps in `apps/` and shared code in `libraries/`.
+- Main services: `frontend` (Next.js), `backend` (NestJS), `orchestrator` (Temporal, NestJS), `commands`, `extension`, and `sdk`.
 - Data layer uses Prisma ORM (`libraries/nestjs-libraries/src/database/prisma/schema.prisma`) with PostgreSQL as the default database.
-- Redis (BullMQ) is used for queues and caching.
+- Background jobs run as Temporal workflows/activities in `apps/orchestrator`; Redis is used for caching.
 - Email notifications via Resend.
 - Social login integrations (Instagram, Facebook) and Make.com/N8N integrations.
 
 ## Developer Workflows
-- Use Node.js 20.17.0 and pnpm 8+.
+- Use the Node.js and pnpm versions pinned in `package.json` (`engines`, `packageManager`).
 - Install dependencies: `pnpm install`
 - Build all apps: `pnpm run build`
 - Run all apps in dev mode: `pnpm run dev`
-- Test: `pnpm test` (Jest, coverage enabled)
+- `pnpm test` does not run (`jest.config.ts` imports `@nx/jest`, which isn't installed). Run individual specs instead: `npx tsx --test <file>`.
 - Individual app scripts are in each app's `package.json` (e.g., `pnpm --filter ./apps/backend run dev`).
 - Prisma DB commands: `pnpm run prisma-generate`, `pnpm run prisma-db-push`, `pnpm run prisma-reset`.
 - Docker: `docker compose -f ./docker-compose.dev.yaml up -d`

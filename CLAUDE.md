@@ -13,7 +13,7 @@ We have 3 important folders
 
 - apps/backend - this is where the API code is (NESTJS)
 - apps/orchestrator - this is temporal, it's for background jobs (NESTJS) it contains all the workflows and activities
-- apps/frontend - this is the code of the frontend (Vite ReactJS)
+- apps/frontend - this is the code of the frontend (Next.js)
 - /libraries contains a lot of services shared between backend and orchestrator and frontend components.
 
 We are using only pnpm, don't use any other dependency manager.
@@ -22,7 +22,7 @@ Never install frontend components from npmjs, focus on writing native components
 The project uses tailwind 3, before writing any component look at:
 - /apps/frontend/src/app/colors.scss
 - /apps/frontend/src/app/global.scss
-- /apps/frontend/tailwind.config.js
+- /apps/frontend/tailwind.config.cjs
 
 All the --color-custom* are deprecated, don't use them.
 
