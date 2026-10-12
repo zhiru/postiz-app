@@ -27,3 +27,26 @@ export const graphPaginate = async (
   }
   return items;
 };
+
+// Follows `paging.next` (same cap/timeout as graphPaginate) calling `finder` on
+// each page's `data`; returns as soon as `finder` returns a defined value, or
+// `undefined` once the pages run out.
+export const graphFindPaginated = async <T>(
+  startUrl: string,
+  finder: (items: any[]) => T | undefined,
+  opts: { maxPages?: number; timeoutMs?: number } = {}
+): Promise<T | undefined> => {
+  const { maxPages = GRAPH_MAX_PAGES, timeoutMs = GRAPH_TIMEOUT_MS } = opts;
+  const seenUrls = new Set<string>();
+  let nextUrl: string | undefined = startUrl;
+  while (nextUrl && !seenUrls.has(nextUrl) && seenUrls.size < maxPages) {
+    seenUrls.add(nextUrl);
+    const response: any = await graphFetch(nextUrl, timeoutMs);
+    if (Array.isArray(response.data)) {
+      const found = finder(response.data);
+      if (found !== undefined) return found;
+    }
+    nextUrl = response.paging?.next;
+  }
+  return undefined;
+};
