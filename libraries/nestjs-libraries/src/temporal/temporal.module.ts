@@ -2,6 +2,21 @@ import { TemporalModule } from 'nestjs-temporal-core';
 import { socialIntegrationList } from '@gitroom/nestjs-libraries/integrations/integration.manager';
 import { emailQueues } from '@gitroom/nestjs-libraries/temporal/email.queues';
 
+// Providers this server should run workers for (comma-separated, e.g.
+// "twitter,instagram,linkedin"). Unset => all providers start (the
+// backwards-compatible default). Lets a RAM-constrained self-host skip the
+// idle long-pollers for providers it never configured.
+function parseActiveProviders(): Set<string> | null {
+  const raw = process.env.POSTIZ_ACTIVE_PROVIDERS;
+  if (!raw || !raw.trim()) return null;
+  return new Set(
+    raw
+      .split(',')
+      .map((p) => p.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
 export const getTemporalModule = (
   isWorkers: boolean,
   path?: string,
@@ -23,6 +38,9 @@ export const getTemporalModule = (
     1,
     Number(process.env.WORKER_CONCURRENCY_DIVIDER) || 1
   );
+
+  // Unset => all providers (backwards-compatible default).
+  const activeProviders = parseActiveProviders();
 
   return TemporalModule.register({
     isGlobal: true,
@@ -51,7 +69,13 @@ export const getTemporalModule = (
                 integration,
                 taskQueue: integration.identifier.split('-')[0],
               }))
-              .filter(({ taskQueue }) => !excludeQueues.includes(taskQueue))
+              .filter(
+                ({ taskQueue }) =>
+                  !excludeQueues.includes(taskQueue) &&
+                  (taskQueue === 'main' ||
+                    activeProviders === null ||
+                    activeProviders.has(taskQueue))
+              )
               .map(({ integration, taskQueue }) => {
                 // Split the per-provider cap across the servers sharing this
                 // queue. Floor (never below 1) so the global total never exceeds

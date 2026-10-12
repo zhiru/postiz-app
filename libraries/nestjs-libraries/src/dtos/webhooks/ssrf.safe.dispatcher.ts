@@ -20,7 +20,7 @@ function ssrfSafeLookup(
 ) {
   if (net.isIP(hostname)) {
     const family = net.isIP(hostname);
-    if (isBlockedIp(hostname)) {
+    if (isBlockedIp(hostname, hostname)) {
       return callback(new Error('Blocked IP'), '', 0);
     }
     return options && (options as any).all
@@ -32,13 +32,13 @@ function ssrfSafeLookup(
     if (err) return callback(err, '', 0);
     if (Array.isArray(address)) {
       for (const entry of address) {
-        if (isBlockedIp(entry.address)) {
+        if (isBlockedIp(entry.address, hostname)) {
           return callback(new Error('Blocked IP'), '', 0);
         }
       }
       return callback(null, address as any, 0);
     }
-    if (isBlockedIp(address)) {
+    if (isBlockedIp(address, hostname)) {
       return callback(new Error('Blocked IP'), '', 0);
     }
     callback(null, address, family);
