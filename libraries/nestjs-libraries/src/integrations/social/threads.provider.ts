@@ -6,6 +6,7 @@ import {
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { timer } from '@gitroom/helpers/utils/timer';
 import dayjs from 'dayjs';
@@ -732,6 +733,26 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     const until = dayjs().endOf('day').unix();
     const since = dayjs().subtract(date, 'day').unix();
 
+    return withTrend(
+      await this.threadsInsights(id, accessToken, since, until),
+      () =>
+        this.threadsInsights(
+          id,
+          accessToken,
+          dayjs()
+            .subtract(date * 2, 'day')
+            .unix(),
+          since
+        )
+    );
+  }
+
+  private async threadsInsights(
+    id: string,
+    accessToken: string,
+    since: number,
+    until: number
+  ): Promise<AnalyticsData[]> {
     const { data, ...all } = await (
       await fetch(
         `https://graph.threads.net/v1.0/${id}/threads_insights?metric=views,likes,replies,reposts,quotes&access_token=${accessToken}&period=day&since=${since}&until=${until}`
@@ -741,7 +762,7 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     return (
       data?.map((d: any) => ({
         label: capitalize(d.name),
-        percentageChange: 5,
+        percentageChange: 0,
         data: d.total_value
           ? [{ total: d.total_value.value, date: dayjs().format('YYYY-MM-DD') }]
           : d.values.map((v: any) => ({
