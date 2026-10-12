@@ -1105,15 +1105,20 @@ export class PostsService {
     const postList = [];
     const batchId = uuidv4();
     for (const post of body.posts) {
+      // Read the existing root row BEFORE the upsert overwrites it: the
+      // republish guard needs it, and so does the publish-time comparison
+      // further down.
+      const existingRoot =
+        (body.type === 'schedule' || body.type === 'now') && post.value?.[0]?.id
+          ? await this._postRepository.getPostById(post.value[0].id, orgId)
+          : null;
+
       if (
         (body.type === 'schedule' || body.type === 'now') &&
         !body.republish &&
         post.value?.[0]?.id
       ) {
-        this.guardAgainstRepublish(
-          await this._postRepository.getPostById(post.value[0].id, orgId),
-          'createPost'
-        );
+        this.guardAgainstRepublish(existingRoot, 'createPost');
       }
       const provider = this._integrationManager.getSocialIntegration(
         (post.settings as any)?.__type
@@ -1135,12 +1140,15 @@ export class PostsService {
         content: removeLinks ? stripLinks(updateContent[i]) : updateContent[i],
       }));
 
+      const scheduledDate =
+        body.type === 'now'
+          ? dayjs().format('YYYY-MM-DDTHH:mm:00')
+          : post.date || body.date;
+
       const { posts } = await this._postRepository.createOrUpdatePost(
         body.type,
         orgId,
-        body.type === 'now'
-          ? dayjs().format('YYYY-MM-DDTHH:mm:00')
-          : post.date || body.date,
+        scheduledDate,
         post,
         body.tags,
         creationMethod,
@@ -1158,7 +1166,26 @@ export class PostsService {
         posts.filter((p) => existingIds.includes(p.id))
       );
 
-      if (body.type !== 'update') {
+      // Only (re)start the Temporal workflow when it's actually needed: a new
+      // post, or a scheduled post whose publish time changed. Editing a queued
+      // post without moving its time keeps the existing workflow - content and
+      // settings are re-read from the DB at publish time, so a restart (which
+      // would terminate + recreate the workflow) is unnecessary churn.
+      // Only a 'schedule' save may skip: 'draft'/'now' saves must still go
+      // through startWorkflow so the old run is terminated. The existing row
+      // must also BE the root: if the edit promoted a child row (thread head
+      // removed/reordered), the workflow is keyed to the old root, which gets
+      // soft-deleted - the new root needs its own workflow.
+      // The publish date is compared the way the repository stores it
+      // (`dayjs(date).toDate()`), so both sides parse in the same zone.
+      const publishTimeUnchanged =
+        body.type === 'schedule' &&
+        !!existingRoot &&
+        !existingRoot.parentPostId &&
+        existingRoot.state === 'QUEUE' &&
+        dayjs(existingRoot.publishDate).isSame(dayjs(scheduledDate), 'minute');
+
+      if (body.type !== 'update' && !publishTimeUnchanged) {
         this.startWorkflow(
           post.settings.__type.split('-')[0].toLowerCase(),
           posts[0].id,
