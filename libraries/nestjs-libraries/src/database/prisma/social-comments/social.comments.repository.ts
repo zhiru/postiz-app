@@ -66,6 +66,9 @@ export class SocialCommentsRepository {
       orderBy: {
         publishDate: 'desc' as const,
       },
+      // Bounds the Graph calls per cycle: the date window alone does not, a
+      // busy organization can publish a lot in a week.
+      take: Number(process.env.COMMENTS_POLL_MAX_POSTS || 200),
       select: {
         id: true,
         releaseId: true,

@@ -179,17 +179,25 @@ export class SocialCommentsService {
       fresh
     );
 
-    await this._webhooksService.sendEvent(
-      post.organizationId,
-      'comment.received',
-      post.integration.id,
-      fresh.map((comment) => ({
-        ...comment,
-        postId: post.id,
-        integrationId: post.integration.id,
-        providerIdentifier: post.integration.providerIdentifier,
-      }))
-    );
+    // Deliveries retry for up to a minute and a half per webhook, and the poll
+    // walks posts one by one - awaiting here would let a dead endpoint time the
+    // whole activity out. sendEvent can still throw on a DB error, so the
+    // rejection is caught rather than left floating.
+    void this._webhooksService
+      .sendEvent(
+        post.organizationId,
+        'comment.received',
+        post.integration.id,
+        fresh.map((comment) => ({
+          ...comment,
+          postId: post.id,
+          integrationId: post.integration.id,
+          providerIdentifier: post.integration.providerIdentifier,
+        }))
+      )
+      .catch(() => {
+        /** a webhook must never break the poll **/
+      });
 
     return fresh.length;
   }
