@@ -42,6 +42,7 @@ Returns the posts in the window whatever their state (scheduled, draft, publishe
 "startDate" and "endDate" are required (UTC) - prefer a narrow window (days or weeks) over a wide one.
 Results are paged, ${PAGE_SIZE} posts per page: "total" is the number of posts in the window and "hasMore" tells if there are more pages - to get the next page, call again with the same parameters and "page" + 1 (the first page is 0).
 Each item has an "id", its publish date, state, error (for errored posts), content, channel and current provider settings.
+Pass "includeAttachments": true to also get each post's "attachments" (media already uploaded to Postiz). Their "path" values can be passed straight to integrationSchedulePostTool as "attachments" to reuse the same media on another channel - do not re-upload them.
 To delete a post, pass its "id" to deletePostTool - only after the user explicitly confirmed which post(s) to delete.
 `,
       inputSchema: z.object({
@@ -61,6 +62,12 @@ To delete a post, pass its "id" to deletePostTool - only after the user explicit
           .min(0)
           .optional()
           .describe('Page number, starts at 0 (default 0)'),
+        includeAttachments: z
+          .boolean()
+          .optional()
+          .describe(
+            'Set to true to include the attachments of each post (needed to duplicate or mirror a post with its media)'
+          ),
       }),
       outputSchema: z.object({
         output: z.object({
@@ -85,6 +92,18 @@ To delete a post, pass its "id" to deletePostTool - only after the user explicit
               integrationId: z.string(),
               platform: z.string(),
               integrationName: z.string(),
+              attachments: z
+                .array(
+                  z.object({
+                    id: z.string().optional(),
+                    path: z.string(),
+                    thumbnail: z.string().nullable(),
+                  })
+                )
+                .optional()
+                .describe(
+                  'Only present when "includeAttachments" is true - pass the "path" values to integrationSchedulePostTool to reuse the media'
+                ),
             })
           ),
           total: z.number().describe('Number of posts in the window'),
@@ -100,11 +119,15 @@ To delete a post, pass its "id" to deletePostTool - only after the user explicit
 
         const page = inputData.page || 0;
         const all = (
-          (await this._postsService.getPosts(organizationId, {
-            startDate: inputData.startDate,
-            endDate: inputData.endDate,
-            customer: inputData.customer,
-          } as any)) || []
+          (await this._postsService.getPosts(
+            organizationId,
+            {
+              startDate: inputData.startDate,
+              endDate: inputData.endDate,
+              customer: inputData.customer,
+            } as any,
+            inputData.includeAttachments
+          )) || []
         ).sort(
           (a: any, b: any) =>
             dayjs(a.publishDate).valueOf() - dayjs(b.publishDate).valueOf() ||
@@ -127,6 +150,7 @@ To delete a post, pass its "id" to deletePostTool - only after the user explicit
               integrationId: p.integration?.id,
               platform: p.integration?.providerIdentifier,
               integrationName: p.integration?.name,
+              attachments: p.attachments,
             })),
             total: all.length,
             page,
