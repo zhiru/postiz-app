@@ -250,6 +250,34 @@ export class InstagramStandaloneProvider
     );
   }
 
+  async listComments(
+    accessToken: string,
+    postId: string,
+    integration: Integration
+  ) {
+    return instagramProvider.listComments(
+      accessToken,
+      postId,
+      integration,
+      'graph.instagram.com'
+    );
+  }
+
+  async replyToComment(
+    accessToken: string,
+    commentId: string,
+    message: string,
+    integration: Integration
+  ) {
+    return instagramProvider.replyToComment(
+      accessToken,
+      commentId,
+      message,
+      integration,
+      'graph.instagram.com'
+    );
+  }
+
   async analytics(id: string, accessToken: string, date: number) {
     return instagramProvider.analytics(
       id,

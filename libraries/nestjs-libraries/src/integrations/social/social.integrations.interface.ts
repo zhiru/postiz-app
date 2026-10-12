@@ -121,7 +121,31 @@ export interface ISocialMediaIntegration {
     postDetails: PostDetails[],
     integration: Integration
   ): Promise<PostResponse[]>; // Schedules a new post
+
+  listComments?(
+    accessToken: string,
+    postId: string,
+    integration: Integration
+  ): Promise<SocialCommentDetails[]>; // Comments other people left on a published post, newest first
+
+  replyToComment?(
+    accessToken: string,
+    commentId: string,
+    message: string,
+    integration: Integration
+  ): Promise<{ id: string }>; // Answers one of those comments
 }
+
+// A comment as the platform returned it, flattened to what the inbox needs.
+export type SocialCommentDetails = {
+  id: string; // The platform's comment id
+  parentId?: string; // Set when the comment is itself a reply
+  content: string;
+  authorName?: string;
+  authorId?: string;
+  permalink?: string;
+  publishedAt: string; // ISO date
+};
 
 export type PostResponse = {
   id: string; // The db internal id of the post

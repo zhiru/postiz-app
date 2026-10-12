@@ -4,6 +4,7 @@ import {
   PendingCheckResponse,
   PostDetails,
   PostResponse,
+  SocialCommentDetails,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
@@ -997,6 +998,53 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         status: 'success',
       },
     ];
+  }
+
+  async listComments(
+    accessToken: string,
+    postId: string,
+    integration: Integration
+  ): Promise<SocialCommentDetails[]> {
+    const { data } = await (
+      await this.fetch(
+        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${postId}/comments?fields=id,message,created_time,permalink_url,parent{id},from{id,name}&order=reverse_chronological&limit=50&access_token=${accessToken}`,
+        {},
+        'list comments'
+      )
+    ).json();
+
+    return (data || []).map((comment: any) => ({
+      id: comment.id,
+      parentId: comment.parent?.id,
+      content: comment.message || '',
+      authorName: comment.from?.name,
+      authorId: comment.from?.id,
+      permalink: comment.permalink_url,
+      publishedAt: comment.created_time,
+    }));
+  }
+
+  async replyToComment(
+    accessToken: string,
+    commentId: string,
+    message: string,
+    integration: Integration
+  ): Promise<{ id: string }> {
+    const { id } = await (
+      await this.fetch(
+        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${commentId}/comments?access_token=${accessToken}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message }),
+        },
+        'reply to comment'
+      )
+    ).json();
+
+    return { id };
   }
 
   async analytics(

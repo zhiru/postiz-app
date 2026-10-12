@@ -5,6 +5,7 @@ export const WEBHOOK_EVENTS = [
   'post.published',
   'post.failed',
   'post.deleted',
+  'comment.received',
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];

@@ -21,7 +21,12 @@ import { Checkbox } from '@gitroom/react/form/checkbox';
 
 // Mirrors WEBHOOK_EVENTS in libraries/nestjs-libraries/src/dtos/webhooks -
 // that module pulls node-only deps (crypto, undici) and can't be bundled here.
-const WEBHOOK_EVENTS = ['post.published', 'post.failed', 'post.deleted'];
+const WEBHOOK_EVENTS = [
+  'post.published',
+  'post.failed',
+  'post.deleted',
+  'comment.received',
+];
 const DEFAULT_WEBHOOK_EVENTS = ['post.published'];
 
 export const Webhooks: FC = () => {
