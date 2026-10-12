@@ -19,6 +19,26 @@ export class InfiniteWorkflowRegister implements OnModuleInit {
       try {
         await this._temporalService.client
           ?.getRawClient()
+          ?.workflow?.start('commentsPollWorkflowV100', {
+            workflowId: 'comments-poll-workflow-v1-0-0',
+            taskQueue: 'main',
+            args: [
+              {
+                // Meta rate limits are per hour, so a conservative default:
+                // one pass every 15 minutes over the last 7 days of posts.
+                intervalMs:
+                  Number(process.env.COMMENTS_POLL_INTERVAL_MINUTES || 15) *
+                  60 *
+                  1000,
+                sinceDays: Number(process.env.COMMENTS_POLL_DAYS || 7),
+              },
+            ],
+          });
+      } catch (err) {}
+
+      try {
+        await this._temporalService.client
+          ?.getRawClient()
           ?.workflow?.start('collectAnalyticsWorkflowV1_0_0', {
             workflowId: 'collect-analytics-workflow-v1-0-0',
             taskQueue: 'main',

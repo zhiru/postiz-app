@@ -17,6 +17,7 @@ import {
   OnlyURL, UpdateDto, WebhooksDto
 } from '@gitroom/nestjs-libraries/dtos/webhooks/webhooks.dto';
 import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+import { deliverWebhook } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.delivery';
 
 @ApiTags('Webhooks')
 @Controller('/webhooks')
@@ -45,6 +46,23 @@ export class WebhookController {
     return this._webhooksService.createWebhook(org.id, body);
   }
 
+  @Post('/:id/secret')
+  @CheckPolicies([AuthorizationActions.Create, Sections.WEBHOOKS])
+  async rotateSecret(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._webhooksService.rotateSecret(org.id, id);
+  }
+
+  @Get('/:id/deliveries')
+  async getDeliveries(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._webhooksService.getDeliveries(org.id, id);
+  }
+
   @Delete('/:id')
   async deleteWebhook(
     @GetOrgFromRequest() org: Organization,
@@ -55,16 +73,13 @@ export class WebhookController {
 
   @Post('/send')
   async sendWebhook(@Body() body: any, @Query() query: OnlyURL) {
-    try {
-      await fetch(query.url, {
-        method: 'POST',
-        body: JSON.stringify(body),
-        headers: { 'Content-Type': 'application/json' },
-      });
-    } catch (err) {
-      /** sent **/
-    }
+    // Unsigned single shot: the test button only proves the URL is reachable,
+    // a real event goes out through the dispatcher with its signature.
+    const result = await deliverWebhook(query.url, JSON.stringify(body), {
+      event: 'post.published',
+      maxAttempts: 1,
+    });
 
-    return { send: true };
+    return { send: true, success: result.success, statusCode: result.statusCode };
   }
 }

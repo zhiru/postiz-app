@@ -36,6 +36,7 @@ import { OrganizationsComponent } from '@gitroom/frontend/components/settings/or
 import { AppsComponent } from '@gitroom/frontend/components/settings/apps.component';
 import { ThirdPartyComponent } from '@gitroom/frontend/components/third-parties/third-party.component';
 import { Plugs } from '@gitroom/frontend/components/plugs/plugs';
+import { SocialComments } from '@gitroom/frontend/components/social-comments/social.comments';
 import { AdminCredentialsComponent } from '@gitroom/frontend/components/admin/admin-credentials.component';
 import { AdminStatsComponent } from '@gitroom/frontend/components/admin/admin-stats.component';
 import { AdminErrorsComponent } from '@gitroom/frontend/components/admin/admin-errors.component';
@@ -119,6 +120,7 @@ export const SettingsPopup: FC<{
     }
     arr.push({ tab: 'integrations', label: t('integrations', 'Integrations') });
     arr.push({ tab: 'plugs', label: t('plugs', 'Plugs') });
+    arr.push({ tab: 'comments', label: t('comments_inbox', 'Comments inbox') });
     arr.push({ tab: 'apps', label: t('apps', 'Apps') });
 
     // instance tools, only for the super admin of the instance
@@ -261,6 +263,12 @@ export const SettingsPopup: FC<{
               {tab === 'plugs' && (
                 <div>
                   <Plugs />
+                </div>
+              )}
+
+              {tab === 'comments' && (
+                <div>
+                  <SocialComments />
                 </div>
               )}
 

@@ -21,3 +21,4 @@ export * from './generate.video.workflow';
 export * from './process.media.workflow';
 export * from './clipping.workflow';
 export * from './collect.analytics.workflow.v1.0.0';
+export * from './comments.poll.workflow.v1.0.0';

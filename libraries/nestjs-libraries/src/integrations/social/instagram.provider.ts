@@ -5,8 +5,10 @@ import {
   PendingCheckResponse,
   PostDetails,
   PostResponse,
+  SocialCommentDetails,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { timer } from '@gitroom/helpers/utils/timer';
 import dayjs from 'dayjs';
@@ -1065,6 +1067,53 @@ export class InstagramProvider
     }
   }
 
+  async listComments(
+    token: string,
+    postId: string,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<SocialCommentDetails[]> {
+    const [accessToken] = token.split('___');
+
+    const { data } = await (
+      await this.fetch(
+        `https://${type}/${META_GRAPH_API_VERSION}/${postId}/comments?fields=id,text,timestamp,username,parent_id,from{id,username}&limit=50&access_token=${accessToken}`
+      )
+    ).json();
+
+    return (data || []).map((comment: any) => ({
+      id: comment.id,
+      parentId: comment.parent_id,
+      content: comment.text || '',
+      authorName: comment.from?.username || comment.username,
+      authorId: comment.from?.id,
+      publishedAt: comment.timestamp,
+    }));
+  }
+
+  async replyToComment(
+    token: string,
+    commentId: string,
+    message: string,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<{ id: string }> {
+    const [accessToken] = token.split('___');
+
+    const { id } = await (
+      await this.fetch(
+        `https://${type}/${META_GRAPH_API_VERSION}/${commentId}/replies?message=${encodeURIComponent(
+          message
+        )}&access_token=${accessToken}`,
+        {
+          method: 'POST',
+        }
+      )
+    ).json();
+
+    return { id };
+  }
+
   async comment(
     id: string,
     postId: string,
@@ -1155,9 +1204,32 @@ export class InstagramProvider
     date: number,
     type = 'graph.facebook.com'
   ): Promise<AnalyticsData[]> {
-    const [accessToken, userToken] = token.split('___');
     const until = dayjs().startOf('day').unix();
     const since = dayjs().subtract(date, 'day').unix();
+
+    return withTrend(
+      await this.accountInsights(id, token, type, since, until),
+      () =>
+        this.accountInsights(
+          id,
+          token,
+          type,
+          dayjs()
+            .subtract(date * 2, 'day')
+            .unix(),
+          since
+        )
+    );
+  }
+
+  private async accountInsights(
+    id: string,
+    token: string,
+    type: string,
+    since: number,
+    until: number
+  ): Promise<AnalyticsData[]> {
+    const [accessToken, userToken] = token.split('___');
 
     const { data, ...all } = await (
       await fetch(
@@ -1175,7 +1247,7 @@ export class InstagramProvider
     analytics.push(
       ...(data?.map((d: any) => ({
         label: this.setTitle(d.name),
-        percentageChange: 5,
+        percentageChange: 0,
         data: d.values.map((v: any) => ({
           total: v.value,
           date: dayjs(v.end_time).format('YYYY-MM-DD'),
@@ -1186,7 +1258,7 @@ export class InstagramProvider
     analytics.push(
       ...data2.map((d: any) => ({
         label: this.setTitle(d.name),
-        percentageChange: 5,
+        percentageChange: 0,
         data: [
           {
             total: d.total_value.value,

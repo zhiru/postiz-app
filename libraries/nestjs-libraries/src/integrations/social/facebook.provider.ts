@@ -5,12 +5,14 @@ import {
   PendingCheckResponse,
   PostDetails,
   PostResponse,
+  SocialCommentDetails,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   graphPaginate,
   graphFindPaginated,
 } from '@gitroom/nestjs-libraries/integrations/social/meta.graph';
+import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import dayjs from 'dayjs';
 import {
@@ -1005,6 +1007,53 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     ];
   }
 
+  async listComments(
+    accessToken: string,
+    postId: string,
+    integration: Integration
+  ): Promise<SocialCommentDetails[]> {
+    const { data } = await (
+      await this.fetch(
+        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${postId}/comments?fields=id,message,created_time,permalink_url,parent{id},from{id,name}&order=reverse_chronological&limit=50&access_token=${accessToken}`,
+        {},
+        'list comments'
+      )
+    ).json();
+
+    return (data || []).map((comment: any) => ({
+      id: comment.id,
+      parentId: comment.parent?.id,
+      content: comment.message || '',
+      authorName: comment.from?.name,
+      authorId: comment.from?.id,
+      permalink: comment.permalink_url,
+      publishedAt: comment.created_time,
+    }));
+  }
+
+  async replyToComment(
+    accessToken: string,
+    commentId: string,
+    message: string,
+    integration: Integration
+  ): Promise<{ id: string }> {
+    const { id } = await (
+      await this.fetch(
+        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${commentId}/comments?access_token=${accessToken}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message }),
+        },
+        'reply to comment'
+      )
+    ).json();
+
+    return { id };
+  }
+
   async analytics(
     id: string,
     accessToken: string,
@@ -1013,6 +1062,26 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     const until = dayjs().endOf('day').unix();
     const since = dayjs().subtract(date, 'day').unix();
 
+    return withTrend(
+      await this.pageInsights(id, accessToken, since, until),
+      () =>
+        this.pageInsights(
+          id,
+          accessToken,
+          dayjs()
+            .subtract(date * 2, 'day')
+            .unix(),
+          since
+        )
+    );
+  }
+
+  private async pageInsights(
+    id: string,
+    accessToken: string,
+    since: number,
+    until: number
+  ): Promise<AnalyticsData[]> {
     // Reach/impression metrics (page_impressions_unique, page_posts_impressions_unique,
     // page_video_views) were deprecated by Meta on 2026-06-15 and now return an
     // "invalid metric" error. They are replaced by the Media Views metrics, which
@@ -1053,7 +1122,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
             : d.name === 'page_daily_follows'
             ? 'Page followers'
             : 'Media views',
-        percentageChange: 5,
+        percentageChange: 0,
         data: d?.values?.map((v: any) => ({
           total: sumValue(v.value),
           date: dayjs(v.end_time).format('YYYY-MM-DD'),
