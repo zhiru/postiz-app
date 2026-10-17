@@ -94,6 +94,12 @@ export class AnalyticsReportRepository {
         state: 'PUBLISHED',
         deletedAt: null,
         parentPostId: null,
+        // Once occurrences have real records, the recurring root is a schedule,
+        // not an extra publication to count alongside its snapshots/imports.
+        OR: [
+          { intervalInDays: null },
+          { platformHistoryCovered: false, recurringSnapshots: { none: {} } },
+        ],
         publishDate: {
           gte: dayjs(from).startOf('day').toDate(),
           lte: dayjs(to).endOf('day').toDate(),

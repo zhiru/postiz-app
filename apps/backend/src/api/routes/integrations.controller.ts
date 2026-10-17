@@ -19,6 +19,7 @@ import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions
 import { ApiTags } from '@nestjs/swagger';
 import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
+import { PostsSyncService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts-sync.service';
 import { IntegrationTimeDto } from '@gitroom/nestjs-libraries/dtos/integrations/integration.time.dto';
 import { IntegrationNameDto } from '@gitroom/nestjs-libraries/dtos/integrations/integration.name.dto';
 import { CustomerNameDto } from '@gitroom/nestjs-libraries/dtos/integrations/customer.name.dto';
@@ -45,8 +46,21 @@ export class IntegrationsController {
     private _integrationManager: IntegrationManager,
     private _integrationService: IntegrationService,
     private _postService: PostsService,
-    private _refreshIntegrationService: RefreshIntegrationService
+    private _refreshIntegrationService: RefreshIntegrationService,
+    private _postsSyncService: PostsSyncService
   ) {}
+
+  @Get('/:id/posts-sync')
+  @CheckPolicies([AuthorizationActions.Read, Sections.CHANNEL])
+  getPostsSyncStatus(@GetOrgFromRequest() org: Organization, @Param('id') id: string) {
+    return this._postsSyncService.status(org.id, id);
+  }
+
+  @Post('/:id/posts-sync')
+  @CheckPolicies([AuthorizationActions.Update, Sections.CHANNEL])
+  syncPosts(@GetOrgFromRequest() org: Organization, @Param('id') id: string) {
+    return this._postsSyncService.request(org.id, id);
+  }
 
   @Post('/provider/:id/connect')
   @CheckPolicies([AuthorizationActions.Create, Sections.CHANNEL])
@@ -126,6 +140,7 @@ export class IntegrationsController {
             disabled: p.disabled,
             editor: findIntegration.editor,
             stripLinks: !!findIntegration?.stripLinks?.(),
+            supportsPostsSync: !!findIntegration?.listPublishedPosts,
             picture: p.picture || '/no-picture.jpg',
             identifier: p.providerIdentifier,
             inBetweenSteps: p.inBetweenSteps,

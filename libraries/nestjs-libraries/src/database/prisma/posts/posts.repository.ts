@@ -1,4 +1,5 @@
-import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import { PrismaRepository, PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import { PublishedPlatformPost } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { Injectable } from '@nestjs/common';
 import { Post as PostBody } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
 import {
@@ -6,6 +7,7 @@ import {
   CreationMethod,
   Post,
   State,
+  Prisma,
 } from '@prisma/client';
 import { GetPostsDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.dto';
 import { GetPostsListDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.list.dto';
@@ -30,7 +32,8 @@ export class PostsRepository {
     private _comments: PrismaRepository<'comments'>,
     private _tags: PrismaRepository<'tags'>,
     private _tagsPosts: PrismaRepository<'tagsPosts'>,
-    private _errors: PrismaRepository<'errors'>
+    private _errors: PrismaRepository<'errors'>,
+    private _transaction: PrismaTransaction
   ) {}
 
   searchForMissingThreeHoursPosts() {
@@ -206,6 +209,8 @@ export class PostsRepository {
         intervalInDays: true,
         group: true,
         creationMethod: true,
+        importedFromPlatform: true,
+        platformHistoryCovered: true,
         settings: true,
         ...(includeAttachments ? { image: true } : {}),
         tags: {
@@ -229,29 +234,60 @@ export class PostsRepository {
       },
     });
 
+    const templates = list.filter((post) => post.intervalInDays);
+    const snapshots = templates.length
+      ? await this._post.model.post.findMany({
+          where: {
+            organizationId: orgId,
+            recurringSourceId: { in: templates.map((post) => post.id) },
+            recurringSlotDate: { gte: startDate, lte: endDate },
+          },
+          select: { recurringSourceId: true, recurringSlotDate: true },
+        })
+      : [];
+    const materializedSlots = new Set(
+      snapshots.map(
+        (post) =>
+          `${post.recurringSourceId}:${post.recurringSlotDate?.getTime()}`
+      )
+    );
     return list
       .map((post) => ({ ...post, error: this.curatedError(post.error) }))
       .reduce((all, post) => {
-      if (!post.intervalInDays) {
-        return [...all, post];
-      }
-
-      const addMorePosts = [];
-      let startingDate = dayjs.utc(post.publishDate);
-      while (dayjs.utc(endDate).isSameOrAfter(startingDate)) {
-        if (dayjs(startingDate).isSameOrAfter(dayjs.utc(post.publishDate))) {
-          addMorePosts.push({
-            ...post,
-            publishDate: startingDate.toDate(),
-            actualDate: post.publishDate,
-          });
+        const { platformHistoryCovered, ...visible } = post;
+        if (!post.intervalInDays) {
+          return [...all, visible];
         }
 
-        startingDate = startingDate.add(post.intervalInDays, 'days');
-      }
+        const addMorePosts = [];
+        let startingDate = dayjs.utc(post.publishDate);
+        while (dayjs.utc(endDate).isSameOrAfter(startingDate)) {
+          // Once actual history is available, past virtual occurrences of a
+          // recurring template must not masquerade as separate publications.
+          const historicalTemplate =
+            platformHistoryCovered &&
+            post.state === 'PUBLISHED' &&
+            startingDate.isBefore(dayjs.utc());
+          const materialized = materializedSlots.has(
+            `${post.id}:${startingDate.valueOf()}`
+          );
+          if (
+            !historicalTemplate &&
+            !materialized &&
+            dayjs(startingDate).isSameOrAfter(dayjs.utc(post.publishDate))
+          ) {
+            addMorePosts.push({
+              ...visible,
+              publishDate: startingDate.toDate(),
+              actualDate: post.publishDate,
+            });
+          }
 
-      return [...all, ...addMorePosts];
-    }, [] as any[]);
+          startingDate = startingDate.add(post.intervalInDays, 'days');
+        }
+
+        return [...all, ...addMorePosts];
+      }, [] as any[]);
   }
 
   async getPostsList(orgId: string, query: GetPostsListDto) {
@@ -332,6 +368,7 @@ export class PostsRepository {
           intervalInDays: true,
           group: true,
           creationMethod: true,
+          importedFromPlatform: true,
           tags: {
             where: {
               tag: {
@@ -463,31 +500,231 @@ export class PostsRepository {
     });
   }
 
-  updatePost(id: string, postId: string, releaseURL: string) {
-    return this._post.model.post.update({
-      where: {
-        id,
-      },
-      data: {
-        state: 'PUBLISHED',
-        releaseURL,
-        releaseId: postId,
-      },
+  // Both the publisher and importer use this transaction boundary. An import
+  // racing a publish can never leave two calendar entries for the same media.
+  private async platformTransaction<T>(
+    run: (tx: Prisma.TransactionClient) => Promise<T>
+  ): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this._transaction.model.$transaction(run, {
+          isolationLevel: 'Serializable',
+        });
+      } catch (error) {
+        if (
+          attempt >= 4 ||
+          !['P2002', 'P2034'].includes((error as { code?: string }).code || '')
+        )
+          throw error;
+      }
+    }
+  }
+
+  private savePlatformRelease(
+    id: string,
+    postId: string,
+    releaseURL?: string,
+    options: {
+      organizationId?: string;
+      missingOnly?: boolean;
+      published?: boolean;
+    } = {}
+  ) {
+    return this.platformTransaction(async (tx) => {
+      const native = await tx.post.findFirstOrThrow({
+        where: {
+          id,
+          ...(options.organizationId
+            ? { organizationId: options.organizationId }
+            : {}),
+          ...(options.missingOnly ? { releaseId: 'missing' } : {}),
+        },
+      });
+      if (
+        options.published &&
+        !native.parentPostId &&
+        native.intervalInDays &&
+        postId &&
+        postId !== 'missing'
+      ) {
+        const now = new Date();
+        const interval = native.intervalInDays * 86400000;
+        const slot = new Date(
+          native.publishDate.getTime() +
+            Math.max(
+              0,
+              Math.floor(
+                (now.getTime() - native.publishDate.getTime()) / interval
+              )
+            ) *
+              interval
+        );
+        const tags = await tx.tagsPosts.findMany({
+          where: { postId: id },
+          select: { tagId: true },
+        });
+        const snapshot = await tx.post.findUnique({
+          where: {
+            integrationId_externalId: {
+              integrationId: native.integrationId,
+              externalId: String(postId),
+            },
+          },
+        });
+        await tx.post.upsert({
+          where: {
+            integrationId_externalId: {
+              integrationId: native.integrationId,
+              externalId: String(postId),
+            },
+          },
+          create: {
+            organizationId: native.organizationId,
+            integrationId: native.integrationId,
+            externalId: String(postId),
+            releaseId: String(postId),
+            releaseURL,
+            state: 'PUBLISHED',
+            publishDate: now,
+            content: native.content,
+            image: native.image,
+            settings: native.settings,
+            group: uuidv4(),
+            creationMethod: native.creationMethod,
+            importedFromPlatform: true,
+            recurringSourceId: id,
+            recurringSlotDate: slot,
+            tags: { create: tags.map(({ tagId }) => ({ tagId })) },
+          },
+          update: {
+            recurringSourceId: id,
+            recurringSlotDate: snapshot?.recurringSlotDate || slot,
+            ...(releaseURL ? { releaseURL } : {}),
+          },
+        });
+      }
+      // Recurring roots are schedule templates: each real occurrence gets its
+      // own imported record, including the latest one, with the actual timestamp.
+      const externalId =
+        !native.intervalInDays && postId && postId !== 'missing'
+          ? String(postId)
+          : null;
+      if (externalId) {
+        const imported = await tx.post.findUnique({
+          where: {
+            integrationId_externalId: {
+              integrationId: native.integrationId,
+              externalId,
+            },
+          },
+        });
+        if (imported && imported.id !== id) {
+          if (!imported.importedFromPlatform)
+            throw new Error('Media already belongs to another published post');
+          await tx.post.update({
+            where: { id: imported.id },
+            data: { externalId: null, deletedAt: new Date() },
+          });
+        }
+      }
+      return tx.post.update({
+        where: { id },
+        data: {
+          ...(options.published ? { state: 'PUBLISHED' } : {}),
+          ...(releaseURL ? { releaseURL } : {}),
+          releaseId: postId,
+          externalId,
+        },
+      });
     });
   }
 
-  // the post is live but stays in ERROR (a follow-up mutation failed): keep
-  // the platform id / URL so the user can reach it instead of re-publishing
-  setReleaseDetails(id: string, postId: string, releaseURL: string) {
-    return this._post.model.post.update({
-      where: {
-        id,
-      },
-      data: {
-        releaseURL,
-        releaseId: postId,
-      },
+  updatePost(id: string, postId: string, releaseURL: string) {
+    return this.savePlatformRelease(id, postId, releaseURL, {
+      published: true,
     });
+  }
+
+  importPlatformPost(
+    organizationId: string,
+    integrationId: string,
+    item: PublishedPlatformPost
+  ) {
+    return this.platformTransaction(async (tx) => {
+      const existing = await tx.post.findFirst({
+        where: {
+          organizationId,
+          integrationId,
+          intervalInDays: null,
+          OR: [{ externalId: item.id }, { releaseId: item.id }],
+        },
+        orderBy: { importedFromPlatform: 'asc' },
+      });
+      // Native posts keep their content, tags, schedules and analytics identity.
+      // Deleted posts remain deleted rather than reappearing on the next import.
+      if (existing && (!existing.importedFromPlatform || existing.deletedAt))
+        return false;
+      const data = {
+        content:
+          '<p>' +
+          item.content
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\n/g, '<br>') +
+          '</p>',
+        publishDate: new Date(item.publishedAt),
+        releaseURL: item.url,
+        image: JSON.stringify(item.media),
+      };
+      if (existing) {
+        await tx.post.update({ where: { id: existing.id }, data });
+        return false;
+      }
+      await tx.post.create({
+        data: {
+          ...data,
+          organizationId,
+          integrationId,
+          externalId: item.id,
+          releaseId: item.id,
+          importedFromPlatform: true,
+          state: 'PUBLISHED',
+          group: uuidv4(),
+          creationMethod: 'UNKNOWN',
+          settings: '{}',
+        },
+      });
+      return true;
+    });
+  }
+
+  getRecurringSyncCandidates(organizationId: string, integrationId: string) {
+    return this._post.model.post.findMany({
+      where: {
+        organizationId,
+        integrationId,
+        intervalInDays: { not: null },
+        deletedAt: null,
+      },
+      select: { id: true, settings: true },
+    });
+  }
+
+  coverRecurringHistory(
+    organizationId: string,
+    integrationId: string,
+    ids: string[]
+  ) {
+    return this._post.model.post.updateMany({
+      where: { organizationId, integrationId, id: { in: ids } },
+      data: { platformHistoryCovered: true },
+    });
+  }
+
+  // Preserve ERROR state when only a follow-up mutation failed.
+  setReleaseDetails(id: string, postId: string, releaseURL: string) {
+    return this.savePlatformRelease(id, postId, releaseURL);
   }
 
   updateReleaseId(
@@ -496,16 +733,9 @@ export class PostsRepository {
     releaseId: string,
     releaseURL?: string
   ) {
-    return this._post.model.post.update({
-      where: {
-        id,
-        organizationId: orgId,
-        releaseId: 'missing',
-      },
-      data: {
-        releaseId: String(releaseId),
-        ...(releaseURL ? { releaseURL } : {}),
-      },
+    return this.savePlatformRelease(id, releaseId, releaseURL, {
+      organizationId: orgId,
+      missingOnly: true,
     });
   }
 
@@ -515,15 +745,8 @@ export class PostsRepository {
     releaseId: string,
     releaseURL: string
   ) {
-    return this._post.model.post.update({
-      where: {
-        id,
-        organizationId: orgId,
-      },
-      data: {
-        releaseId,
-        releaseURL,
-      },
+    return this.savePlatformRelease(id, releaseId, releaseURL, {
+      organizationId: orgId,
     });
   }
 
@@ -604,6 +827,9 @@ export class PostsRepository {
     return this._post.model.post.count({
       where: {
         organizationId: orgId,
+        // Imported history and recurring snapshots are records of publications,
+        // not additional scheduling requests that consume the monthly quota.
+        importedFromPlatform: false,
         publishDate: {
           gte: date,
         },

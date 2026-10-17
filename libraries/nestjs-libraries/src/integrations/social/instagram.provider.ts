@@ -7,6 +7,7 @@ import {
   PostResponse,
   SocialCommentDetails,
   SocialProvider,
+  PublishedPostsPage,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
@@ -42,7 +43,100 @@ export class InstagramProvider
   implements SocialProvider
 {
   identifier = 'instagram';
+  canImportPublishedPost(settings: Record<string, unknown>) {
+    return settings.post_type !== 'story';
+  }
   reportMetrics: ReportMetricsMap = instagramReportMetrics;
+  async listPublishedPosts(
+    id: string,
+    token: string,
+    cursor?: string,
+    host = 'graph.facebook.com'
+  ): Promise<PublishedPostsPage> {
+    const [pageToken, userToken] = token.split('___');
+    const fields =
+      'id,caption,timestamp,permalink,media_type,media_url,thumbnail_url,children{id,media_type,media_url,thumbnail_url}';
+    const params = new URLSearchParams({
+      fields,
+      limit: '50',
+      access_token: userToken || pageToken,
+      ...(cursor ? { after: cursor } : {}),
+    });
+    const data = await (
+      await this.fetch(
+        `https://${host}/${META_GRAPH_API_VERSION}/${id}/media?${params}`,
+        { signal: AbortSignal.timeout(60000) }
+      )
+    ).json();
+    if (!Array.isArray(data.data)) {
+      throw new Error('The provider did not return a valid media page');
+    }
+    const posts = [];
+    for (const item of data.data) {
+      let media =
+        item.media_type === 'CAROUSEL_ALBUM' ? item.children?.data : [item];
+      // Expanded edges can themselves be paginated; never silently truncate an album.
+      if (
+        item.media_type === 'CAROUSEL_ALBUM' &&
+        (!media || item.children?.paging?.next)
+      ) {
+        media = [];
+        let after: string | undefined;
+        do {
+          const childParams = new URLSearchParams({
+            fields: 'id,media_type,media_url,thumbnail_url',
+            limit: '100',
+            access_token: userToken || pageToken,
+            ...(after ? { after } : {}),
+          });
+          const children = await (
+            await this.fetch(
+              `https://${host}/${META_GRAPH_API_VERSION}/${item.id}/children?${childParams}`,
+              { signal: AbortSignal.timeout(60000) }
+            )
+          ).json();
+          if (!Array.isArray(children.data))
+            throw new Error('Invalid carousel media page');
+          media.push(...children.data);
+          const next = children.paging?.next
+            ? children.paging?.cursors?.after
+            : undefined;
+          if (children.paging?.next && (!next || next === after))
+            throw new Error('Invalid carousel cursor');
+          after = next;
+        } while (after);
+      }
+      if (
+        !item.id ||
+        !item.timestamp ||
+        !item.permalink ||
+        !Number.isFinite(Date.parse(item.timestamp))
+      ) {
+        throw new Error(
+          'The provider returned a media item without its identity or publication date'
+        );
+      }
+      posts.push({
+        id: String(item.id),
+        content: item.caption || '',
+        publishedAt: item.timestamp,
+        url: item.permalink,
+        media: (media || [])
+          .filter((m: any) => m.media_url)
+          .map((m: any) => ({
+            id: String(m.id),
+            path: m.media_url,
+            ...(m.thumbnail_url ? { thumbnail: m.thumbnail_url } : {}),
+          })),
+      });
+    }
+    const nextCursor = data.paging?.next
+      ? data.paging?.cursors?.after
+      : undefined;
+    if (data.paging?.next && (!nextCursor || nextCursor === cursor))
+      throw new Error('Invalid media cursor');
+    return { posts, nextCursor };
+  }
   name = 'Instagram\n(Facebook Business)';
   isBetweenSteps = true;
   toolTip = 'Instagram must be business and connected to a Facebook page';
@@ -421,8 +515,9 @@ export class InstagramProvider
     if (body.indexOf('too little or too many attachments') > -1) {
       return {
         type: 'bad-body' as const,
-        value: 'Instagram carousel should have between 2 and 10 media attachments',
-      }
+        value:
+          'Instagram carousel should have between 2 and 10 media attachments',
+      };
     }
 
     if (body.indexOf('2207027') > -1) {
@@ -570,10 +665,11 @@ export class InstagramProvider
       // ponytail: one request pair per business, all at once; cap if a user has hundreds
       const lists = await Promise.all(
         businesses.flatMap((business: any) =>
-          ['owned_pages', 'client_pages'].map((edge) =>
-            graphPaginate(
-              `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/${edge}?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
-            ).catch(() => [] as any[]) // Continue with other businesses
+          ['owned_pages', 'client_pages'].map(
+            (edge) =>
+              graphPaginate(
+                `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/${edge}?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
+              ).catch(() => [] as any[]) // Continue with other businesses
           )
         )
       );
@@ -730,9 +826,9 @@ export class InstagramProvider
             ? isStory
               ? `video_url=${m.path}&media_type=STORIES`
               : m?.thumbnail
-              ? `video_url=${m.path}&media_type=REELS&cover_url=${encodeURIComponent(
-                  m.thumbnail
-                )}`
+              ? `video_url=${
+                  m.path
+                }&media_type=REELS&cover_url=${encodeURIComponent(m.thumbnail)}`
               : `video_url=${m.path}&media_type=REELS&thumb_offset=${
                   m?.thumbnailTimestamp || 0
                 }`
@@ -954,7 +1050,9 @@ export class InstagramProvider
       // re-running this is safe)
       const { id: containerId } = await (
         await this.fetch(
-          `https://${pendingData.type}/${META_GRAPH_API_VERSION}/${igId}/media?caption=${encodeURIComponent(
+          `https://${
+            pendingData.type
+          }/${META_GRAPH_API_VERSION}/${igId}/media?caption=${encodeURIComponent(
             pendingData.message || ''
           )}&media_type=CAROUSEL&children=${encodeURIComponent(
             pendingData.containers.join(',')

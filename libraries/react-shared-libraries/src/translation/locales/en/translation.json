@@ -1042,5 +1042,19 @@
   "report_backfill": "Fill history",
   "report_backfill_done": "History filled for the selected channels",
   "report_compared_to": "Compared to",
-  "report_no_channels": "No channels connected yet"
+  "report_no_channels": "No channels connected yet",
+  "posts_sync_request_failed": "Could not start synchronization. Check the channel connection and try again.",
+  "posts_sync_description": "Import the available profile history, including posts published directly on the social platform. Updates run automatically every 15 minutes.",
+  "posts_sync_running": "Synchronization in progress… You can close this window.",
+  "posts_sync_queued": "Synchronization queued…",
+  "posts_sync_last_success": "Last synchronized",
+  "posts_sync_not_yet": "No completed synchronization yet.",
+  "posts_sync_history_complete": "Initial history import completed.",
+  "posts_sync_status_failed": "Could not load synchronization status.",
+  "posts_sync_now": "Synchronize now",
+  "posts_sync_title": "Synchronize profile posts",
+  "posts_sync_imported": "Published on the social platform",
+  "posts_sync_view_original": "View original publication",
+  "posts_sync_read_only": "This publication was imported. Manage it on the social platform.",
+  "posts_sync_hide_confirm": "Hide this imported publication from Postiz? The original will remain on the social platform."
 }

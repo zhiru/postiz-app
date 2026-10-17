@@ -11,6 +11,8 @@ import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/in
 import { IntegrationRepository } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.repository';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.repository';
+import { PostsSyncRepository } from './posts/posts-sync.repository';
+import { PostsSyncService } from './posts/posts-sync.service';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { MediaRepository } from '@gitroom/nestjs-libraries/database/prisma/media/media.repository';
@@ -83,6 +85,8 @@ import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/p
     AnalyticsReportRepository,
     PostsService,
     PostsRepository,
+    PostsSyncRepository,
+    PostsSyncService,
     StripeService,
     PaymentService,
     PaymentProviderManager,

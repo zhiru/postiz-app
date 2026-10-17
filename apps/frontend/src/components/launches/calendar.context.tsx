@@ -99,6 +99,7 @@ export interface Integrations {
   inBetweenSteps: boolean;
   editor: 'none' | 'normal' | 'markdown' | 'html';
   stripLinks?: boolean;
+  supportsPostsSync?: boolean;
   display: string;
   identifier: string;
   type: string;
@@ -262,7 +263,7 @@ export const CalendarWeekProvider: FC<{
     filters.display !== 'list' ? `/posts-${params}` : null,
     loadData,
     {
-      refreshInterval: 3600000,
+      refreshInterval: 60000,
       refreshWhenOffline: false,
       refreshWhenHidden: false,
       revalidateOnFocus: false,
@@ -278,7 +279,7 @@ export const CalendarWeekProvider: FC<{
     filters.display === 'list' ? `/posts-list-${listParams}` : null,
     loadListData,
     {
-      refreshInterval: 3600000,
+      refreshInterval: 60000,
       refreshWhenOffline: false,
       refreshWhenHidden: false,
       revalidateOnFocus: false,
