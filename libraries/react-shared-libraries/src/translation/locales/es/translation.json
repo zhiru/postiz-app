@@ -877,5 +877,14 @@
   "organization_name": "Nombre de la organización",
   "organization_name_description": "El nombre que se muestra en el cambiador de organización.",
   "could_not_create_organization": "No se pudo crear la organización",
-  "could_not_update_organization_name": "No se pudo actualizar el nombre de la organización"
+  "could_not_update_organization_name": "No se pudo actualizar el nombre de la organización",
+  "billing_cycle": "Ciclo de facturación",
+  "billing_renews_on": "Tu plan se renueva el",
+  "billing_trial_ends_on": "Tu prueba gratuita termina y se realiza tu primer pago el",
+  "billing_ai_credits_reset_monthly": "Los créditos de IA se restablecen cada mes.",
+  "billing_ai_images": "Imágenes de IA",
+  "billing_ai_videos": "Videos de IA",
+  "billing_clipping_minutes": "Minutos de recorte",
+  "hubspot_installed": "Postiz está instalado en HubSpot",
+  "hubspot_installed_description": "Conecta aquí, en Postiz, los canales en los que quieres publicar. Luego, en HubSpot, abre Agent Hub > Agent Builder, añade una herramienta, elige Postiz MCP en MCP Servers y haz clic en Connect and add."
 }

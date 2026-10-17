@@ -877,5 +877,14 @@
   "organization_name": "Organisationsname",
   "organization_name_description": "Der Name, der im Organisationsumschalter angezeigt wird.",
   "could_not_create_organization": "Organisation konnte nicht erstellt werden",
-  "could_not_update_organization_name": "Organisationsname konnte nicht aktualisiert werden"
+  "could_not_update_organization_name": "Organisationsname konnte nicht aktualisiert werden",
+  "billing_cycle": "Abrechnungszeitraum",
+  "billing_renews_on": "Ihr Plan wird erneuert am",
+  "billing_trial_ends_on": "Ihre kostenlose Testphase endet und Ihre erste Zahlung wird am folgenden Tag abgebucht:",
+  "billing_ai_credits_reset_monthly": "KI-Guthaben wird jeden Monat zurückgesetzt.",
+  "billing_ai_images": "KI-Bilder",
+  "billing_ai_videos": "KI-Videos",
+  "billing_clipping_minutes": "Clipping-Minuten",
+  "hubspot_installed": "Postiz ist in HubSpot installiert",
+  "hubspot_installed_description": "Verbinden Sie hier in Postiz die Kanäle, auf denen Sie posten möchten. Öffnen Sie dann in HubSpot Agent Hub > Agent Builder, fügen Sie ein Tool hinzu, wählen Sie unter MCP Servers Postiz MCP aus und klicken Sie auf Connect and add."
 }

@@ -14,8 +14,8 @@ import { OAuth2Client } from 'google-auth-library/build/src/auth/oauth2client';
 import { YoutubeSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/youtube.settings.dto';
 import {
   BadBody,
-  RefreshToken,
   PublishedWithError,
+  RefreshToken,
   SocialAbstract,
   ValidityMedia,
   rangeReadFailure,
@@ -245,7 +245,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       return {
         type: 'bad-body',
         value:
-          'Your account is not verified, we have uploaded your video but we could not set the thumbnail. Please verify your account and try again.',
+          'Your video was uploaded to YouTube successfully, but we could not set the thumbnail: custom thumbnails require a phone-verified YouTube channel. Verify your channel at youtube.com/verify, and set this video\'s thumbnail manually in YouTube Studio.',
       };
     }
 
@@ -874,6 +874,8 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
           })
         );
       } catch (err: any) {
+        // Authentication failures can refresh and retry this idempotent call.
+        if (err instanceof RefreshToken) throw err;
         // The video is already live: a rejected thumbnail must not lose its
         // id and URL, or users re-upload a duplicate thinking the post never
         // went out. Keep them on the post and still fail it (ERROR, curated

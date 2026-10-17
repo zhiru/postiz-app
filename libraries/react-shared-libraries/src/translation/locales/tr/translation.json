@@ -877,5 +877,14 @@
   "organization_name": "Organizasyon adı",
   "organization_name_description": "Organizasyon değiştiricisinde gösterilen isim.",
   "could_not_create_organization": "Organizasyon oluşturulamadı",
-  "could_not_update_organization_name": "Organizasyon adı güncellenemedi"
+  "could_not_update_organization_name": "Organizasyon adı güncellenemedi",
+  "billing_cycle": "Fatura dönemi",
+  "billing_renews_on": "Planınızın yenileneceği tarih",
+  "billing_trial_ends_on": "Ücretsiz denemeniz sona eriyor ve ilk ödemeniz şu tarihte tahsil edilecek:",
+  "billing_ai_credits_reset_monthly": "Yapay zekâ kredileri her ay sıfırlanır.",
+  "billing_ai_images": "Yapay zeka görselleri",
+  "billing_ai_videos": "Yapay zeka videoları",
+  "billing_clipping_minutes": "Klip oluşturma dakikaları",
+  "hubspot_installed": "Postiz, HubSpot'a yüklendi",
+  "hubspot_installed_description": "Paylaşım yapmak istediğiniz kanalları burada, Postiz'de bağlayın. Ardından HubSpot'ta Agent Hub > Agent Builder'ı açın, bir araç ekleyin, MCP Servers altında Postiz MCP'yi seçin ve Connect and add'e tıklayın."
 }

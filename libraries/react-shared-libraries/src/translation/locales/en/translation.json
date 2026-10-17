@@ -1056,5 +1056,14 @@
   "posts_sync_imported": "Published on the social platform",
   "posts_sync_view_original": "View original publication",
   "posts_sync_read_only": "This publication was imported. Manage it on the social platform.",
-  "posts_sync_hide_confirm": "Hide this imported publication from Postiz? The original will remain on the social platform."
+  "posts_sync_hide_confirm": "Hide this imported publication from Postiz? The original will remain on the social platform.",
+  "billing_cycle": "Billing cycle",
+  "billing_renews_on": "Your plan renews on",
+  "billing_trial_ends_on": "Your free trial ends and your first payment is charged on",
+  "billing_ai_credits_reset_monthly": "AI credits reset every month.",
+  "billing_ai_images": "AI images",
+  "billing_ai_videos": "AI videos",
+  "billing_clipping_minutes": "Clipping minutes",
+  "hubspot_installed": "Postiz is installed in HubSpot",
+  "hubspot_installed_description": "Connect the channels you want to post to here in Postiz. Then, in HubSpot, open Agent Hub > Agent Builder, add a tool, pick Postiz MCP under MCP Servers and click Connect and add."
 }

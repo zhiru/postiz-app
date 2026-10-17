@@ -9,6 +9,7 @@ import { checkAuth } from '@gitroom/nestjs-libraries/chat/auth.context';
 export class DeletePostTool implements AgentToolInterface {
   constructor(private _postsService: PostsService) {}
   name = 'deletePostTool';
+  optionalOnSelfHosted = true;
 
   run() {
     return createTool({
@@ -26,6 +27,7 @@ export class DeletePostTool implements AgentToolInterface {
 Delete an existing post (the same as the "Delete Post" API endpoint). This cannot be undone.
 Find the post first (list your posts) and pass its "id" here, one post per call.
 It deletes the post together with all of its thread items / comments. A post that was scheduled to several channels is a separate post per channel, each with its own "id" - deleting one leaves the others in place.
+Deleting a repeating post deletes every repetition. Pass the id of the main post, not a comment.
 A post that was already published is only removed from Postiz - it stays live on the social network.
 Always show the user which post(s) will be deleted and get their explicit confirmation before calling this tool.
 If it fails, the result contains output.errors.
@@ -54,6 +56,10 @@ If it fails, the result contains output.errors.
 
           if (!post?.group) {
             return { output: { errors: 'Post not found' } };
+          }
+
+          if (post.parentPostId) {
+            return { output: { errors: 'This id belongs to a comment, pass the id of the main post' } };
           }
 
           await this._postsService.deletePost(organizationId, post.group);

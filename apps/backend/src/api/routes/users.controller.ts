@@ -84,23 +84,6 @@ export class UsersController {
     return { token };
   }
 
-  @Get('/agent-media-sso')
-  async getAgentMediaSsoUrl(
-    @GetUserFromRequest() user: User,
-    @GetOrgFromRequest() organization: Organization
-  ) {
-    if (!process.env.AGENT_MEDIA_SSO_KEY) {
-      throw new HttpException('Agent Media SSO is not configured', 400);
-    }
-
-    const token = sign(
-      { id: organization.id, displayName: organization.name },
-      process.env.AGENT_MEDIA_SSO_KEY
-    );
-
-    return { url: `https://app.agent-media.ai/sso/${token}` };
-  }
-
   @Get('/self')
   async getSelf(
     @GetUserFromRequest() user: User,
@@ -400,6 +383,11 @@ export class UsersController {
     if (process.env.NOT_SECURED) {
       response.header('showorg', id);
     }
+  }
+
+  @Get('/delete-account-info')
+  getDeleteAccountInfo(@GetUserFromRequest() user: User) {
+    return this._userService.getDeleteAccountInfo(user.id);
   }
 
   @Post('/delete-account')

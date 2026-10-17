@@ -877,5 +877,14 @@
   "organization_name": "Tên tổ chức",
   "organization_name_description": "Tên được hiển thị trong bộ chuyển đổi tổ chức.",
   "could_not_create_organization": "Không thể tạo tổ chức",
-  "could_not_update_organization_name": "Không thể cập nhật tên tổ chức"
+  "could_not_update_organization_name": "Không thể cập nhật tên tổ chức",
+  "billing_cycle": "Chu kỳ thanh toán",
+  "billing_renews_on": "Gói của bạn sẽ được gia hạn vào",
+  "billing_trial_ends_on": "Thời gian dùng thử miễn phí của bạn sẽ kết thúc và khoản thanh toán đầu tiên sẽ được tính vào",
+  "billing_ai_credits_reset_monthly": "Tín dụng AI sẽ được đặt lại hàng tháng.",
+  "billing_ai_images": "Hình ảnh AI",
+  "billing_ai_videos": "Video AI",
+  "billing_clipping_minutes": "Số phút cắt ghép",
+  "hubspot_installed": "Postiz đã được cài đặt trong HubSpot",
+  "hubspot_installed_description": "Hãy kết nối tại đây, trong Postiz, các kênh bạn muốn đăng bài. Sau đó, trong HubSpot, mở Agent Hub > Agent Builder, thêm một công cụ, chọn Postiz MCP trong MCP Servers và nhấp vào Connect and add."
 }

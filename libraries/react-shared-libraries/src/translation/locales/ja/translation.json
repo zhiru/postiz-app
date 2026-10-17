@@ -877,5 +877,14 @@
   "organization_name": "組織名",
   "organization_name_description": "組織切り替え時に表示される名前です。",
   "could_not_create_organization": "組織を作成できませんでした",
-  "could_not_update_organization_name": "組織名を更新できませんでした"
+  "could_not_update_organization_name": "組織名を更新できませんでした",
+  "billing_cycle": "請求サイクル",
+  "billing_renews_on": "ご契約プランの更新日：",
+  "billing_trial_ends_on": "無料トライアルは終了し、最初の支払いが発生します:",
+  "billing_ai_credits_reset_monthly": "AIクレジットは毎月リセットされます。",
+  "billing_ai_images": "AI画像",
+  "billing_ai_videos": "AI動画",
+  "billing_clipping_minutes": "クリッピング分数",
+  "hubspot_installed": "Postiz を HubSpot にインストールしました",
+  "hubspot_installed_description": "投稿したいチャンネルをここ Postiz で接続してください。次に HubSpot で Agent Hub > Agent Builder を開き、ツールを追加して MCP Servers から Postiz MCP を選択し、Connect and add をクリックしてください。"
 }
