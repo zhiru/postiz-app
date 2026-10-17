@@ -877,5 +877,14 @@
   "organization_name": "组织名称",
   "organization_name_description": "在组织切换器中显示的名称。",
   "could_not_create_organization": "无法创建组织",
-  "could_not_update_organization_name": "无法更新组织名称"
+  "could_not_update_organization_name": "无法更新组织名称",
+  "billing_cycle": "账单周期",
+  "billing_renews_on": "您的套餐将在以下日期续订",
+  "billing_trial_ends_on": "您的免费试用将在以下日期结束，并将开始收取您的首次费用：",
+  "billing_ai_credits_reset_monthly": "AI额度每月重置。",
+  "billing_ai_images": "AI图片",
+  "billing_ai_videos": "AI视频",
+  "billing_clipping_minutes": "剪辑分钟数",
+  "hubspot_installed": "Postiz 已安装到 HubSpot",
+  "hubspot_installed_description": "请先在 Postiz 中连接您要发布内容的渠道。然后在 HubSpot 中打开 Agent Hub > Agent Builder，添加一个工具，在 MCP Servers 下选择 Postiz MCP，然后点击 Connect and add。"
 }

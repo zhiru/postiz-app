@@ -877,5 +877,14 @@
   "organization_name": "שם הארגון",
   "organization_name_description": "השם שמוצג בבורר הארגונים.",
   "could_not_create_organization": "לא ניתן היה ליצור ארגון",
-  "could_not_update_organization_name": "לא ניתן היה לעדכן את שם הארגון"
+  "could_not_update_organization_name": "לא ניתן היה לעדכן את שם הארגון",
+  "billing_cycle": "מחזור חיוב",
+  "billing_renews_on": "התכנית שלך מתחדשת בתאריך",
+  "billing_trial_ends_on": "תקופת הניסיון שלך מסתיימת והתשלום הראשון יחויב ב-",
+  "billing_ai_credits_reset_monthly": "אשראי הבינה המלאכותית מתאפס כל חודש.",
+  "billing_ai_images": "תמונות בינה מלאכותית",
+  "billing_ai_videos": "סרטוני בינה מלאכותית",
+  "billing_clipping_minutes": "דקות חיתוך",
+  "hubspot_installed": "Postiz הותקן ב-HubSpot",
+  "hubspot_installed_description": "חבר כאן ב-Postiz את הערוצים שאליהם תרצה לפרסם. לאחר מכן, ב-HubSpot, פתח את Agent Hub > Agent Builder, הוסף כלי, בחר את Postiz MCP תחת MCP Servers ולחץ על Connect and add."
 }

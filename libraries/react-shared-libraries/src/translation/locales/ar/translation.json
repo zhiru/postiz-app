@@ -877,5 +877,14 @@
   "organization_name": "اسم المنظمة",
   "organization_name_description": "الاسم المعروض في مُبدّل المنظمات.",
   "could_not_create_organization": "تعذّر إنشاء المؤسسة",
-  "could_not_update_organization_name": "تعذر تحديث اسم المؤسسة"
+  "could_not_update_organization_name": "تعذر تحديث اسم المؤسسة",
+  "billing_cycle": "دورة الفوترة",
+  "billing_renews_on": "سيتم تجديد خطتك في",
+  "billing_trial_ends_on": "تنتهي الفترة التجريبية المجانية وسيتم تحصيل أول دفعة منك في",
+  "billing_ai_credits_reset_monthly": "يتم إعادة تعيين أرصدة الذكاء الاصطناعي كل شهر.",
+  "billing_ai_images": "صور الذكاء الاصطناعي",
+  "billing_ai_videos": "فيديوهات الذكاء الاصطناعي",
+  "billing_clipping_minutes": "دقائق القص",
+  "hubspot_installed": "تم تثبيت Postiz في HubSpot",
+  "hubspot_installed_description": "اربط هنا في Postiz القنوات التي تريد النشر عليها. بعد ذلك، افتح Agent Hub > Agent Builder في HubSpot، وأضف أداة، واختر Postiz MCP ضمن MCP Servers، ثم انقر على Connect and add."
 }

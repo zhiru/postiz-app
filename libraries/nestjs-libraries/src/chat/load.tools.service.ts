@@ -46,13 +46,14 @@ export class LoadToolsService {
     );
   }
 
-  // Tools every install has, whatever features it configured
+  // Tools a self-hosted instance must have to connect through the relay
+  // (every install has them, whatever features it configured)
   coreToolNames() {
     return toolList
       .map(
         (p) => this._moduleRef.get(p, { strict: false }) as AgentToolInterface
       )
-      .filter((p) => !p.mcpOnly && !p.available)
+      .filter((p) => !p.mcpOnly && !p.available && !p.optionalOnSelfHosted)
       .map((p) => p.name);
   }
 
@@ -101,7 +102,7 @@ export class LoadToolsService {
       - To duplicate, mirror or repost existing posts on another channel, call postsListTool with "includeAttachments": true and pass the returned attachment "path" values as the new post's attachments - never re-upload media that is already listed.
       - To change the provider settings of an existing post that was not published yet (scheduled or draft), first find it with postsListTool, then use postSettingsTool with the post's id. It only updates the settings - the content and the publish date stay as they are - and only the keys you pass are changed (get them with the integrationSchema tool). Show the user which post and which settings will change and get their confirmation first.
       - Never open the "modal with populated content" to edit an existing post - that modal only CREATES a new post, so using it to edit would duplicate the post. It is only for brand new posts.
-      - To delete a post, first find it with postsListTool, then use deletePostTool with the post's id, one post per call. It deletes the post together with its thread items / comments and cannot be undone; a post scheduled to several channels is a separate post per channel, so delete each one; a published post is only removed from Postiz and stays live on the social network. Always show the user which post(s) will be deleted and get their explicit confirmation first.
+      - To delete a post, first find it with postsListTool, then use deletePostTool with the post's id. It deletes the post on that one channel (with its comments) - when the same post was created for several channels, ask the user which channels to delete it from and call deletePostTool once per post id. A repeating post is listed once per repetition with the same id - deleting it deletes all the repetitions. Deleting a published post only removes it from Postiz, it stays live on the social network. Deletion cannot be undone, so show the user which post will be deleted (channel, date and text), mention the two cases above when they apply, and get their confirmation first.
       - Between tools, we will reference things like: [output:name] and [input:name] to set the information right.
       - When outputting a date for the user, make sure it's human readable with time
       - The content of the post, HTML, Each line must be wrapped in <p> here is the possible tags: h1, h2, h3, u, strong, li, ul, p (you can\'t have u and strong together), don't use a "code" box

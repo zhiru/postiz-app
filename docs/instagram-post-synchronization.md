@@ -70,8 +70,21 @@ sem condicionais específicas de Instagram em serviços genéricos.
    pnpm run prisma-generate
    ```
 
+   Em bancos com posts existentes, o Prisma pode bloquear a criação do índice
+   único mesmo quando `externalId` é uma coluna nova. Nesse caso, gerar a migração
+   pelo próprio Prisma, revisar o arquivo e aplicá-lo antes de iniciar os serviços:
+
+   ```bash
+   pnpm exec prisma migrate diff --from-schema-datasource libraries/nestjs-libraries/src/database/prisma/schema.prisma --to-schema-datamodel libraries/nestjs-libraries/src/database/prisma/schema.prisma --script > posts-sync-additive.sql
+   # Revisar: somente ADD COLUMN, CREATE INDEX e ADD CONSTRAINT desta funcionalidade.
+   pnpm exec prisma db execute --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma --file posts-sync-additive.sql
+   pnpm exec prisma db push --schema libraries/nestjs-libraries/src/database/prisma/schema.prisma --skip-generate
+   ```
+
    Não usar `--accept-data-loss`. Os campos novos são opcionais ou têm default;
-   os IDs externos existentes continuam nulos até a conciliação.
+   os IDs externos existentes continuam nulos até a conciliação. Guardar a migração
+   revisada junto ao backup. Se o diff incluir remoções ou outras alterações,
+   investigar a divergência antes de aplicá-lo.
 3. Publicar frontend, backend e orchestrator. Verificar worker na fila `main`.
 4. Para atualização automática, manter `RUN_CRON` habilitado em uma instância
    inicializadora. O ID fixo do scheduler impede criações simultâneas duplicadas.

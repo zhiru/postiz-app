@@ -877,5 +877,14 @@
   "organization_name": "조직 이름",
   "organization_name_description": "조직 전환기에서 표시되는 이름입니다.",
   "could_not_create_organization": "조직을 생성할 수 없습니다",
-  "could_not_update_organization_name": "조직 이름을 업데이트할 수 없습니다"
+  "could_not_update_organization_name": "조직 이름을 업데이트할 수 없습니다",
+  "billing_cycle": "결제 주기",
+  "billing_renews_on": "플랜이 갱신되는 날짜",
+  "billing_trial_ends_on": "무료 체험이 종료되며 첫 결제가 진행됩니다.",
+  "billing_ai_credits_reset_monthly": "AI 크레딧이 매월 초기화됩니다.",
+  "billing_ai_images": "AI 이미지",
+  "billing_ai_videos": "AI 동영상",
+  "billing_clipping_minutes": "클리핑 분",
+  "hubspot_installed": "Postiz가 HubSpot에 설치되었습니다",
+  "hubspot_installed_description": "게시할 채널을 여기 Postiz에서 연결하세요. 그런 다음 HubSpot에서 Agent Hub > Agent Builder를 열고 도구를 추가한 뒤 MCP Servers에서 Postiz MCP를 선택하고 Connect and add를 클릭하세요."
 }
