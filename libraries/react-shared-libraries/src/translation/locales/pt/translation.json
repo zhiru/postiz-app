@@ -1042,5 +1042,19 @@
   "report_backfill": "Preencher histórico",
   "report_backfill_done": "Histórico preenchido para os canais selecionados",
   "report_compared_to": "Comparado com",
-  "report_no_channels": "Nenhum canal conectado ainda"
+  "report_no_channels": "Nenhum canal conectado ainda",
+  "posts_sync_request_failed": "Não foi possível iniciar a sincronização. Verifique a conexão do canal e tente novamente.",
+  "posts_sync_description": "Importe o histórico disponível do perfil, incluindo as publicações feitas diretamente na rede social. A atualização é automática a cada 15 minutos.",
+  "posts_sync_running": "Sincronização em andamento… Você pode fechar esta janela.",
+  "posts_sync_queued": "Sincronização na fila…",
+  "posts_sync_last_success": "Última sincronização",
+  "posts_sync_not_yet": "Nenhuma sincronização concluída ainda.",
+  "posts_sync_history_complete": "Importação inicial do histórico concluída.",
+  "posts_sync_status_failed": "Não foi possível consultar o status da sincronização.",
+  "posts_sync_now": "Sincronizar agora",
+  "posts_sync_title": "Sincronizar publicações do perfil",
+  "posts_sync_imported": "Publicado pela rede social",
+  "posts_sync_view_original": "Ver publicação original",
+  "posts_sync_read_only": "Esta publicação foi importada. Gerencie o conteúdo original pela rede social.",
+  "posts_sync_hide_confirm": "Ocultar esta publicação importada no Postiz? O original continuará disponível na rede social."
 }

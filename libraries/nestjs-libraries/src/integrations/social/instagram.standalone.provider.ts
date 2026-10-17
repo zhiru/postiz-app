@@ -5,6 +5,7 @@ import {
   PostDetails,
   PostResponse,
   SocialProvider,
+  PublishedPostsPage,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import dayjs from 'dayjs';
@@ -28,7 +29,22 @@ export class InstagramStandaloneProvider
   implements SocialProvider
 {
   identifier = 'instagram-standalone';
+  canImportPublishedPost(settings: Record<string, unknown>) {
+    return instagramProvider.canImportPublishedPost(settings);
+  }
   reportMetrics: ReportMetricsMap = instagramReportMetrics;
+  listPublishedPosts(
+    id: string,
+    token: string,
+    cursor?: string
+  ): Promise<PublishedPostsPage> {
+    return instagramProvider.listPublishedPosts(
+      id,
+      token,
+      cursor,
+      'graph.instagram.com'
+    );
+  }
   name = 'Instagram\n(Standalone)';
   isBetweenSteps = false;
   refreshCron = true;
@@ -38,7 +54,7 @@ export class InstagramStandaloneProvider
     'instagram_business_manage_comments',
     'instagram_business_manage_insights',
   ];
-    override maxConcurrentJob = 200; // Instagram standalone has stricter limits
+  override maxConcurrentJob = 200; // Instagram standalone has stricter limits
   dto = InstagramDto;
 
   editor = 'normal' as const;
@@ -231,7 +247,11 @@ export class InstagramStandaloneProvider
     pendingData: any,
     integration: Integration
   ) {
-    return instagramProvider.finalizePost(accessToken, pendingData, integration);
+    return instagramProvider.finalizePost(
+      accessToken,
+      pendingData,
+      integration
+    );
   }
 
   async comment(

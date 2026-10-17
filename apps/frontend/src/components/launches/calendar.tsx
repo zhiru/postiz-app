@@ -36,6 +36,7 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { ExistingDataContextProvider } from '@gitroom/frontend/components/launches/helpers/use.existing.data';
 import { useDrag, useDrop } from 'react-dnd';
 import { Integration, Post, State, Tags } from '@prisma/client';
+import { postContentPlainText } from '@gitroom/helpers/utils/sanitize.post.content';
 import { useAddProvider } from '@gitroom/frontend/components/launches/add.provider.component';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { timer } from '@gitroom/helpers/utils/timer';
@@ -178,6 +179,23 @@ const usePostActions = (onMutate?: () => void) => {
 
   const editPost = useCallback(
     (loadPost: any, isDuplicate?: boolean) => async () => {
+      if (loadPost.importedFromPlatform) {
+        modal.openModal({
+          title: t('posts_sync_imported', 'Published on the social platform'),
+          withCloseButton: true,
+          children: (
+            <div className="flex flex-col gap-4">
+              <p className="whitespace-pre-wrap">{postContentPlainText(loadPost.content)}</p>
+              <p>{newDayjs(loadPost.publishDate).format('DD/MM/YYYY HH:mm')}</p>
+              <a href={loadPost.releaseURL} target="_blank" rel="noopener noreferrer" className="underline">
+                {t('posts_sync_view_original', 'View original publication')}
+              </a>
+              <p>{t('posts_sync_read_only', 'This publication was imported. Manage it on the social platform.')}</p>
+            </div>
+          ),
+        });
+        return;
+      }
       const post = {
         ...loadPost,
         publishDate: loadPost.actualDate || loadPost.publishDate,
@@ -268,7 +286,7 @@ const usePostActions = (onMutate?: () => void) => {
     (post: any) => async () => {
       if (
         !(await deleteDialog(
-          t(
+          post.importedFromPlatform ? t('posts_sync_hide_confirm', 'Hide this imported publication from Postiz? The original will remain on the social platform.') : t(
             'are_you_sure_you_want_to_delete_post',
             'Are you sure you want to delete post?'
           ),
@@ -1240,6 +1258,7 @@ const CalendarItem: FC<{
   const [{ opacity }, dragRef] = useDrag(
     () => ({
       type: 'post',
+      canDrag: () => !post.importedFromPlatform,
       item: {
         id: post.id,
         interval: !!post.intervalInDays,
@@ -1249,7 +1268,7 @@ const CalendarItem: FC<{
         opacity: monitor.isDragging() ? 0 : 1,
       }),
     }),
-    []
+    [post.importedFromPlatform]
   );
   return (
     <div
@@ -1371,7 +1390,7 @@ const CalendarItem: FC<{
         >
           <Preview />
         </div>
-        <div
+        {!post.importedFromPlatform && <div
           className={clsx(
             'hidden group-hover:block hover:underline cursor-pointer',
             post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
@@ -1379,7 +1398,7 @@ const CalendarItem: FC<{
           onClick={duplicatePost}
         >
           <Duplicate />
-        </div>
+        </div>}
         <div
           className={clsx(
             'hidden group-hover:block hover:underline cursor-pointer text-red-500',
@@ -1417,6 +1436,7 @@ const CalendarItem: FC<{
           )}
         >
           <div className="text-start">
+            {post.importedFromPlatform && <span>{t('posts_sync_imported', 'Published on the social platform')}</span>}
             {state === 'DRAFT' ? t('draft', 'Draft') + ': ' : ''}
           </div>
             <div className="w-full relative">

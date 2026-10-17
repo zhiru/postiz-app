@@ -391,6 +391,11 @@ model Integration {
   customerId            String?
   rootInternalId        String?
   additionalSettings    String?                @default("[]")
+  postsSyncCursor       String?
+  postsSyncCompletedAt  DateTime?
+  postsSyncLastSuccessAt DateTime?
+  postsSyncLastError     String?
+  postsSyncRunningSince DateTime?
   exisingPlugData       ExisingPlugData[]
   customer              Customer?              @relation(fields: [customerId], references: [id])
   organization          Organization           @relation(fields: [organizationId], references: [id])
@@ -494,6 +499,13 @@ model Post {
   description                String?
   parentPostId               String?
   releaseId                  String?
+  externalId                 String?
+  importedFromPlatform       Boolean                   @default(false)
+  platformHistoryCovered     Boolean                   @default(false)
+  recurringSourceId          String?
+  recurringSlotDate          DateTime?
+  recurringSource            Post?                     @relation("RecurringSnapshots", fields: [recurringSourceId], references: [id], onDelete: SetNull)
+  recurringSnapshots         Post[]                    @relation("RecurringSnapshots")
   releaseURL                 String?
   settings                   String?
   image                      String?
@@ -536,6 +548,8 @@ model Post {
   @@index([releaseURL])
   @@index([integrationId])
   socialComments             SocialComments[]
+  @@unique([integrationId, externalId])
+  @@index([recurringSourceId, recurringSlotDate])
 }
 
 model Notifications {

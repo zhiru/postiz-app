@@ -84,6 +84,12 @@ export class PostsService {
     return this._postRepository.searchForMissingThreeHoursPosts();
   }
 
+  private assertNotImported(post: { importedFromPlatform?: boolean } | null) {
+    if (post?.importedFromPlatform) {
+      throw new BadRequestException('Imported publications are read-only. Manage the original on the social platform.');
+    }
+  }
+
   updatePost(id: string, postId: string, releaseURL: string) {
     return this._postRepository.updatePost(id, postId, releaseURL);
   }
@@ -1174,6 +1180,9 @@ export class PostsService {
           ? await this._postRepository.getPostById(post.value[0].id, orgId)
           : null;
 
+      for (const value of post.value || []) {
+        if (value.id) this.assertNotImported(await this._postRepository.getPostById(value.id, orgId));
+      }
       if (
         (body.type === 'schedule' || body.type === 'now') &&
         !body.republish &&
@@ -1464,6 +1473,7 @@ export class PostsService {
     status: 'draft' | 'schedule'
   ) {
     const getPostById = await this._postRepository.getPostById(id, orgId);
+    this.assertNotImported(getPostById);
     if (!getPostById) {
       throw new BadRequestException('Post not found');
     }
@@ -1491,6 +1501,7 @@ export class PostsService {
     republish = false
   ) {
     const getPostById = await this._postRepository.getPostById(id, orgId);
+    this.assertNotImported(getPostById);
 
     if (action === 'schedule' && !republish) {
       this.guardAgainstRepublish(getPostById, 'changeDate');

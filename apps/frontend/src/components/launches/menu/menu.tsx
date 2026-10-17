@@ -67,6 +67,7 @@ const RenameChannelModal: FC<{
     </div>
   );
 };
+import { PostsSync } from '../posts-sync';
 
 export const Menu: FC<{
   canEnable: boolean;
@@ -436,6 +437,23 @@ export const Menu: FC<{
           style={{ left: show.x, top: show.y }}
           className={`fixed p-[12px] bg-newBgColorInner shadow-menu flex flex-col gap-[16px] z-[100] rounded-[8px] border border-tableBorder text-nowrap`}
         >
+          {findIntegration?.supportsPostsSync && (
+            <button
+              type="button"
+              className="flex gap-[12px] items-center py-[8px] px-[10px] text-[14px]"
+              onClick={(event) => {
+                event.stopPropagation();
+                setShow(false);
+                modal.openModal({
+                  title: t('posts_sync_title', 'Synchronize profile posts'),
+                  children: <PostsSync integrationId={id} onSynchronized={reloadCalendarView} />,
+                  withCloseButton: true,
+                });
+              }}
+            >
+              {t('posts_sync_now', 'Synchronize now')}
+            </button>
+          )}
           {canDisable && !findIntegration?.refreshNeeded && (
             <div
               className="flex gap-[12px] items-center py-[8px] px-[10px]"

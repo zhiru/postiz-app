@@ -226,6 +226,12 @@ export interface SocialProvider
   extends IAuthenticator,
     ISocialMediaIntegration {
   identifier: string;
+  canImportPublishedPost?: (settings: Record<string, unknown>) => boolean;
+  listPublishedPosts?(
+    id: string,
+    accessToken: string,
+    cursor?: string
+  ): Promise<PublishedPostsPage>;
   refreshWait?: boolean;
   // Maps this provider's own analytics() labels onto the canonical report
   // metrics. Providers without analytics() simply leave it out.
@@ -292,4 +298,17 @@ export interface SocialProvider
     accessToken: string,
     data: any
   ): Promise<FetchPageInformationResult>;
+}
+
+export interface PublishedPlatformPost {
+  id: string;
+  content: string;
+  publishedAt: string;
+  url: string;
+  media: Array<{ id: string; path: string; thumbnail?: string }>;
+}
+
+export interface PublishedPostsPage {
+  posts: PublishedPlatformPost[];
+  nextCursor?: string;
 }

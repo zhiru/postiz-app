@@ -48,6 +48,10 @@ export class SocialCommentsRepository {
         state: 'PUBLISHED',
         deletedAt: null,
         parentPostId: null,
+          OR: [
+            { intervalInDays: null },
+            { platformHistoryCovered: false, recurringSnapshots: { none: {} } },
+          ],
         releaseId: {
           not: null,
         },
