@@ -929,7 +929,7 @@ describe('FlowsService', () => {
           taskQueue: 'main',
         })
       );
-      expect(results).toHaveLength(1);
+      expect(results.executions).toHaveLength(1);
     });
 
     it('should skip duplicate executions (idempotency)', async () => {
@@ -940,7 +940,71 @@ describe('FlowsService', () => {
       const results = await service.handleIncomingComment(commentPayload);
 
       expect(mockRepository.createExecution).not.toHaveBeenCalled();
-      expect(results).toHaveLength(0);
+      expect(results.executions).toHaveLength(0);
+    });
+
+    it('recovers the same failed execution after Temporal returns and reuses its workflow identity', async () => {
+      const flow = makeFlow();
+      const execution: { id: string; status: FlowExecutionStatus } = { id: 'exec-retry', status: FlowExecutionStatus.RUNNING };
+      let persisted = false;
+      mockRepository.getActiveFlowsForIntegration.mockResolvedValue([flow]);
+      mockRepository.findExistingExecution.mockImplementation(async () => persisted ? execution : null);
+      mockRepository.createExecution.mockImplementation(async () => {
+        persisted = true;
+        return execution;
+      });
+      mockRepository.updateExecution.mockImplementation(async (_id: string, data: any) => Object.assign(execution, data));
+      mockTemporalService.client.getRawClient.mockReturnValueOnce(null).mockReturnValue(mockRawClient);
+      mockWorkflowStart.mockImplementation(async () => {
+        execution.status = FlowExecutionStatus.RUNNING;
+        return { workflowId: 'flow-exec-flow-1-comment-1' };
+      });
+
+      expect(await service.handleIncomingComment(commentPayload)).toEqual(expect.objectContaining({ retry: true }));
+      expect(await service.handleIncomingComment(commentPayload)).toEqual(expect.objectContaining({ retry: false }));
+
+      expect(mockRepository.createExecution).toHaveBeenCalledTimes(2);
+      expect(mockWorkflowStart).toHaveBeenCalledTimes(1);
+      expect(mockWorkflowStart).toHaveBeenCalledWith('flowExecutionWorkflow', expect.objectContaining({
+        workflowId: 'flow-exec-flow-1-comment-1',
+        workflowIdReusePolicy: 'REJECT_DUPLICATE',
+        args: [expect.objectContaining({ executionId: 'exec-retry' })],
+      }));
+    });
+
+    it('recovers a running claim left before Temporal accepted the workflow', async () => {
+      mockRepository.getActiveFlowsForIntegration.mockResolvedValue([makeFlow()]);
+      mockRepository.findExistingExecution.mockResolvedValue({ id: 'exec-pending', status: FlowExecutionStatus.RUNNING });
+      mockRepository.createExecution.mockResolvedValue({ id: 'exec-pending', status: FlowExecutionStatus.RUNNING });
+
+      await service.handleIncomingComment(commentPayload);
+
+      expect(mockWorkflowStart).toHaveBeenCalledWith('flowExecutionWorkflow', expect.objectContaining({
+        workflowId: 'flow-exec-flow-1-comment-1',
+        workflowIdReusePolicy: 'REJECT_DUPLICATE',
+        args: [expect.objectContaining({ executionId: 'exec-pending' })],
+      }));
+    });
+
+    it.each(['offline', 'enqueue-error'] as const)('preserves an existing running execution on %s while requesting retry', async (failure) => {
+      mockRepository.getActiveFlowsForIntegration.mockResolvedValue([makeFlow()]);
+      mockRepository.findExistingExecution.mockResolvedValue({ id: 'exec-running', status: FlowExecutionStatus.RUNNING });
+      mockRepository.createExecution.mockResolvedValue({ id: 'exec-running', status: FlowExecutionStatus.RUNNING });
+      if (failure === 'offline') mockTemporalService.client.getRawClient.mockReturnValue(null);
+      else mockWorkflowStart.mockRejectedValue(new Error('Temporal unavailable'));
+
+      expect(await service.handleIncomingComment(commentPayload)).toEqual(expect.objectContaining({ retry: true }));
+      expect(mockRepository.updateExecution).not.toHaveBeenCalled();
+    });
+
+    it('acknowledges an already-started deterministic workflow without changing its execution', async () => {
+      mockRepository.getActiveFlowsForIntegration.mockResolvedValue([makeFlow()]);
+      mockRepository.findExistingExecution.mockResolvedValue({ id: 'exec-running', status: FlowExecutionStatus.RUNNING });
+      mockRepository.createExecution.mockResolvedValue({ id: 'exec-running', status: FlowExecutionStatus.RUNNING });
+      mockWorkflowStart.mockRejectedValue(Object.assign(new Error(), { name: 'WorkflowExecutionAlreadyStartedError' }));
+
+      expect(await service.handleIncomingComment(commentPayload)).toEqual(expect.objectContaining({ retry: false }));
+      expect(mockRepository.updateExecution).not.toHaveBeenCalled();
     });
 
     it('should filter flows by triggerPostIds', async () => {
@@ -965,7 +1029,7 @@ describe('FlowsService', () => {
       expect(mockRepository.createExecution).toHaveBeenCalledWith(
         expect.objectContaining({ flowId: 'flow-match' })
       );
-      expect(results).toHaveLength(1);
+      expect(results.executions).toHaveLength(1);
     });
 
     it('should mark execution as FAILED when Temporal start fails', async () => {
@@ -982,7 +1046,7 @@ describe('FlowsService', () => {
         error: 'Could not enqueue automation. The event can be delivered again safely.',
         completedAt: expect.any(Date),
       });
-      expect(results).toHaveLength(1);
+      expect(results).toEqual(expect.objectContaining({ retry: true }));
     });
 
     it('lazy binds pending next_publication flows before matching', async () => {
@@ -1029,7 +1093,7 @@ describe('FlowsService', () => {
       expect(mockRepository.createExecution).toHaveBeenCalledWith(
         expect.objectContaining({ flowId: 'flow-pending' })
       );
-      expect(results).toHaveLength(1);
+      expect(results.executions).toHaveLength(1);
     });
 
     it('does not fire a still-pending next_publication flow if bind failed', async () => {
@@ -1053,7 +1117,7 @@ describe('FlowsService', () => {
       const results = await service.handleIncomingComment(commentPayload);
 
       expect(mockRepository.createExecution).not.toHaveBeenCalled();
-      expect(results).toHaveLength(0);
+      expect(results.executions).toHaveLength(0);
     });
 
     it('marks execution as FAILED when Temporal client is null (orchestrator offline)', async () => {
@@ -1097,7 +1161,7 @@ describe('FlowsService', () => {
         })
       );
       expect(mockWorkflowStart).not.toHaveBeenCalled();
-      expect(results).toHaveLength(1);
+      expect(results).toEqual(expect.objectContaining({ retry: true }));
     });
   });
 
@@ -1113,6 +1177,26 @@ describe('FlowsService', () => {
       igStoryId: 'story-1',
       messageText: 'reply text',
     };
+
+    it.each(['offline', 'enqueue-error'] as const)('recovers the same failed story execution after %s', async (failure) => {
+      const flow = makeFlow({ nodes: [{ id: 'trigger', type: FlowNodeType.TRIGGER, data: JSON.stringify({ triggerType: 'story_reply' }) }] });
+      const execution: { id: string; status: FlowExecutionStatus } = { id: 'exec-story-retry', status: FlowExecutionStatus.RUNNING };
+      let persisted = false;
+      mockRepository.getActiveFlowsForIntegration.mockResolvedValue([flow]);
+      mockRepository.findExistingExecutionByMessage = jest.fn().mockImplementation(async () => persisted ? execution : null);
+      mockRepository.createExecution.mockImplementation(async () => { persisted = true; return execution; });
+      mockRepository.updateExecution.mockImplementation(async (_id: string, data: any) => Object.assign(execution, data));
+      if (failure === 'offline') mockTemporalService.client.getRawClient.mockReturnValueOnce(null).mockReturnValue(mockRawClient);
+      else mockWorkflowStart.mockRejectedValueOnce(new Error('Temporal unavailable')).mockResolvedValue({ workflowId: 'flow-exec-flow-1-msg-1' });
+
+      expect(await service.handleIncomingStoryReply(storyPayload)).toEqual(expect.objectContaining({ retry: true }));
+      expect(await service.handleIncomingStoryReply(storyPayload)).toEqual(expect.objectContaining({ retry: false }));
+      expect(mockRepository.createExecution).toHaveBeenCalledTimes(2);
+      expect(mockWorkflowStart).toHaveBeenLastCalledWith('flowExecutionWorkflow', expect.objectContaining({
+        workflowId: 'flow-exec-flow-1-msg-1', workflowIdReusePolicy: 'REJECT_DUPLICATE',
+        args: [expect.objectContaining({ executionId: 'exec-story-retry' })],
+      }));
+    });
 
     it('marks execution as FAILED when Temporal client is null (orchestrator offline)', async () => {
       const storyFlow = makeFlow({
@@ -1138,7 +1222,7 @@ describe('FlowsService', () => {
         completedAt: expect.any(Date),
       });
       expect(mockWorkflowStart).not.toHaveBeenCalled();
-      expect(results).toHaveLength(1);
+      expect(results).toEqual(expect.objectContaining({ retry: true }));
     });
   });
 
@@ -1952,7 +2036,7 @@ describe('FlowsService', () => {
       );
       expect(mockRepository.upsertUnmatchedComment).not.toHaveBeenCalled();
       expect(mockRepository.createExecution).toHaveBeenCalled();
-      expect(results).toHaveLength(1);
+      expect(results.executions).toHaveLength(1);
     });
 
     it('deve persistir UnmatchedComment quando nenhum flow matcha (nem por trigger, nem por alias)', async () => {
@@ -1978,7 +2062,7 @@ describe('FlowsService', () => {
           args: ['uc-1'],
         })
       );
-      expect(results).toEqual([]);
+      expect(results.executions).toEqual([]);
     });
 
     it('NAO deve persistir UnmatchedComment quando media esta em IgnoredMedia', async () => {
@@ -1993,7 +2077,7 @@ describe('FlowsService', () => {
 
       expect(mockRepository.upsertUnmatchedComment).not.toHaveBeenCalled();
       expect(mockWorkflowStart).not.toHaveBeenCalled();
-      expect(results).toEqual([]);
+      expect(results.executions).toEqual([]);
     });
 
     it('deve gravar enrichmentError quando orchestrator offline', async () => {

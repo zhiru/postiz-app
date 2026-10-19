@@ -505,6 +505,36 @@ describe('IgWebhookController', () => {
       }
     );
 
+    it('responds 503 after a comment enqueue failure while processing the other integrations', async () => {
+      process.env.INSTAGRAM_APP_SECRET = 'env-secret';
+      integrationService.getIntegrationsByInternalId.mockResolvedValue([
+        integration('int-1', 'org-1'), integration('int-2', 'org-2'),
+      ] as any);
+      flowsService.handleIncomingComment.mockResolvedValueOnce({ executions: [], retry: true } as any)
+        .mockResolvedValueOnce({ executions: [], retry: false } as any);
+      const response = { status: jest.fn().mockReturnThis() };
+
+      expect(await controller.handleWebhook(makeReq(commentBody('account-1'), 'env-secret'), response as any))
+        .toEqual({ status: 'retry' });
+      expect(response.status).toHaveBeenCalledWith(503);
+      expect(flowsService.handleIncomingComment).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['messaging', 'changes'] as const)('responds 503 after a story enqueue failure in %s', async (transport) => {
+      process.env.INSTAGRAM_APP_SECRET = 'env-secret';
+      integrationService.getIntegrationsByInternalId.mockResolvedValue([integration('int-1', 'org-1')] as any);
+      flowsService.handleIncomingStoryReply.mockResolvedValue({ executions: [], retry: true } as any);
+      const original = storyReplyBody('account-1');
+      const entry = original.entry[0];
+      const body = transport === 'messaging' ? original : {
+        object: 'instagram', entry: [{ id: entry.id, changes: [{ field: 'messages', value: entry.messaging[0] }] }],
+      };
+      const response = { status: jest.fn().mockReturnThis() };
+
+      expect(await controller.handleWebhook(makeReq(body, 'env-secret'), response as any)).toEqual({ status: 'retry' });
+      expect(response.status).toHaveBeenCalledWith(503);
+    });
+
     it('filtra a entry de messaging da vitima em corpo misto e processa so a autorizada', async () => {
       // Assinatura valida da org-1 (escopo orgs:{org-1}); corpo tem postback da
       // conta da org-1 (autorizada) + postback da conta da org-2 (vitima).

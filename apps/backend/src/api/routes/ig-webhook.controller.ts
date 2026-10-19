@@ -196,7 +196,7 @@ export class IgWebhookController {
         this._logger.log(
           `IG webhook dispatching comment ${igCommentId} on media ${igMediaId} by ${igCommenterId}`
         );
-        await this.processComment(
+        const result = await this.processComment(
           {
             igAccountId,
             igCommentId,
@@ -207,6 +207,7 @@ export class IgWebhookController {
           },
           scope
         );
+        if (result.retry) shouldRetry = true;
       }
     }
 
@@ -299,7 +300,7 @@ export class IgWebhookController {
     this._logger.log(
       `IG webhook dispatching story reply ${igMessageId} on story ${igStoryId} by ${senderId}`
     );
-    await this.processStoryReply(
+    return this.processStoryReply(
       {
         igAccountId,
         igThreadId: recipientId,
@@ -334,6 +335,7 @@ export class IgWebhookController {
       `IG webhook: found ${integrations.length} integration(s) for IG account ${data.igAccountId} (story reply)`
     );
 
+    let shouldRetry = false;
     for (const integration of integrations) {
       if (
         integration.providerIdentifier !== 'instagram' ||
@@ -350,7 +352,7 @@ export class IgWebhookController {
         continue;
       }
 
-      await this._flowsService.handleIncomingStoryReply({
+      const result = await this._flowsService.handleIncomingStoryReply({
         integrationId: integration.id,
         organizationId: integration.organizationId,
         igThreadId: data.igThreadId,
@@ -361,7 +363,9 @@ export class IgWebhookController {
         messageText: data.messageText,
         reaction: data.reaction,
       });
+      if (result?.retry) shouldRetry = true;
     }
+    return { retry: shouldRetry };
   }
 
   private async processComment(
@@ -383,6 +387,7 @@ export class IgWebhookController {
       `IG webhook: found ${integrations.length} integration(s) for IG account ${data.igAccountId}`
     );
 
+    let shouldRetry = false;
     for (const integration of integrations) {
       if (
         integration.providerIdentifier !== 'instagram' ||
@@ -406,7 +411,7 @@ export class IgWebhookController {
         continue;
       }
 
-      await this._flowsService.handleIncomingComment({
+      const result = await this._flowsService.handleIncomingComment({
         integrationId: integration.id,
         igCommentId: data.igCommentId,
         igCommenterId: data.igCommenterId,
@@ -415,7 +420,9 @@ export class IgWebhookController {
         commentText: data.commentText,
         organizationId: integration.organizationId,
       });
+      if (result?.retry) shouldRetry = true;
     }
+    return { retry: shouldRetry };
   }
 
   // Resolve, para cada entry.id (igAccountId) do corpo, o conjunto de orgs que
