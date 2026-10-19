@@ -15,6 +15,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ### Adicionado
 
+- Relay opcional de webhooks do Instagram preserva o recebimento no Chatwoot e encaminha apenas contas autorizadas ao Postiz, com fila persistente, tentativas automáticas e recuperação de entregas pendentes.
+
 - Integração da base Robô MultiPost com as melhorias Aireset: preserva sincronização do histórico do Instagram, recorrência, relatórios, comentários, webhooks e administração. Migração aditiva e validação de preservação dos dados legados.
 - Automações passam a reservar envios no banco antes de chamar a Meta, bloqueando repetições após timeout ou confirmação incerta; histórico e permissões por perfil preservados. Workflows já em produção permanecem compatíveis, com versões novas isoladas.
 
