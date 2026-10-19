@@ -1,9 +1,10 @@
 'use client';
+import { BrandLogo } from '@gitroom/frontend/components/ui/brand-logo.component';
 
 export const Logo = () => {
   return (
     <div className="mt-[8px] w-[86px] h-[60px] flex items-center justify-center">
-      <svg
+      <BrandLogo compact><svg
         xmlns="http://www.w3.org/2000/svg"
         xmlSpace="preserve"
         style={{
@@ -26,7 +27,7 @@ export const Logo = () => {
           style={{ fill: '#cd2628' }}
           transform="translate(-237.806 -203.856)"
         />
-      </svg>
+      </svg></BrandLogo>
     </div>
   );
 };

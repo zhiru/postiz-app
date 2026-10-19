@@ -422,3 +422,13 @@ Os scopes sao selecionados no momento da geracao do token — revise o checklist
 - **"O app nao tem acesso avancado a permissao instagram_manage_messages"** → token foi gerado sem a scope de messaging, ou o app Meta ainda esta em Dev Mode. Regerar o token com a scope correta e confirmar que o app esta em Live Mode.
 - **"Token expirado"** → IG User Token nao usado por > 60 dias. Gerar novo no Meta Dashboard e re-adicionar na tela de credenciais.
 - **"Destinatario nao tem funcao no app"** → app ainda em Dev Mode. Mover para Live Mode ou adicionar o usuario como Instagram Tester temporariamente.
+
+## Seleção de contas e salvamento pausado
+
+Em **Automações → Nova automação**, o seletor permite buscar por nome/@ e marcar várias contas do perfil atual. Nome, foto e @ permanecem visíveis em tema claro e escuro. Não depende do dropdown nativo do sistema operacional.
+
+A mesma configuração pode criar uma automação independente para cada conta (máximo de 20). Cada uma possui seu próprio histórico e interruptor Ativo/Pausado. Para várias contas, escolha **qualquer publicação/story** ou **próxima publicação**; posts específicos pertencem a uma única conta e devem ser configurados separadamente. O servidor rejeita o uso cruzado de IDs de mídia.
+
+A tela inicial apenas abre o configurador, sem gravar rascunhos vazios. Novas automações são salvas pausadas por padrão; marque **Ativar após salvar** quando estiver pronto. Editar uma automação que já está ativa ou pausada preserva seu estado. As automações existentes continuam com suas contas e configurações atuais.
+
+A criação em várias contas valida todos os canais/perfis antes de gravar e cria fluxos/nós/conexões em uma única transação. Uma chave estável de requisição evita recriar o mesmo lote após uma resposta HTTP perdida. O envio continua usando o fluxo e as garantias de deduplicação existentes; a criação/configuração não envia mensagens de teste.

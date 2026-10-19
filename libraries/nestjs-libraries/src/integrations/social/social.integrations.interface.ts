@@ -159,6 +159,12 @@ export interface ISocialMediaIntegration {
     integration: Integration
   ): Promise<PostResponse[]>; // Schedules a new post
 
+  listCommentsPage?(
+    accessToken: string,
+    postId: string,
+    integration: Integration,
+    cursor?: string
+  ): Promise<{ comments: SocialCommentDetails[]; nextCursor?: string }>;
   listComments?(
     accessToken: string,
     postId: string,

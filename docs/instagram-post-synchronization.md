@@ -85,6 +85,7 @@ sem condicionais específicas de Instagram em serviços genéricos.
    os IDs externos existentes continuam nulos até a conciliação. Guardar a migração
    revisada junto ao backup. Se o diff incluir remoções ou outras alterações,
    investigar a divergência antes de aplicá-lo.
+
 3. Publicar frontend, backend e orchestrator. Verificar worker na fila `main`.
 4. Para atualização automática, manter `RUN_CRON` habilitado em uma instância
    inicializadora. O ID fixo do scheduler impede criações simultâneas duplicadas.
@@ -138,3 +139,19 @@ QA com conta de teste:
 Foi inspecionado `maiconramos/robo-multipost` em `b6686fe0`. É um fork AGPL do
 Postiz com adaptações próprias; não foi encontrada uma importação de publicações
 externas pronta para portar. Nenhum merge amplo ou código desse fork foi incluído.
+
+## Dados e comentários na visualização
+
+O corpo do cartão do calendário abre **Visualizar**. A edição de posts nativos continua disponível no botão de lápis. Posts importados permanecem somente leitura.
+
+Na visualização de posts publicados, usuários autenticados e autorizados veem **Dados do post e comentários da rede**, métricas disponíveis, horário da última consulta e **Consultar agora**. Comentários internos de revisão continuam em uma área separada. Links públicos de revisão não incluem o novo painel nem ganham acesso às APIs autenticadas.
+
+O workflow de consulta existente mantém seu contrato e intervalo (15 minutos por padrão). O serviço percorre todo o histórico por cursor, em lotes de 100 posts por padrão (`COMMENTS_POLL_MAX_POSTS`, limitado a 200). Uma consulta bem-sucedida de cada post fica válida por seis horas; o tempo de varredura cresce com a quantidade de posts. O cursor avança a cada post processado; uma rodada tem orçamento de cinco minutos para caber no timeout da atividade. Falhas de um canal não bloqueiam os demais. As métricas são consultadas junto dos comentários quando o provider disponibiliza insights; indisponibilidade de insights não descarta comentários.
+
+Consultar agora verifica somente aquele post, respeita uma janela mínima de 30 segundos e compartilha um bloqueio distribuído com as consultas automáticas. O painel atualiza os dados locais a cada minuto enquanto aberto. Respostas e comentários paginados do Instagram são importados em lotes retomáveis de até 10 chamadas por consulta, com timeout por chamada. Um histórico grande salva os comentários já obtidos e continua do cursor na próxima consulta; a tela informa quando ainda está incompleto. Não segue URLs de paginação recebidas da rede: apenas cursores no host fixo do provider. Uma resposta inválida interrompe o lote e preserva os dados já salvos nas consultas anteriores.
+
+Comentários usam a identidade única `(integrationId, providerCommentId)`; somente linhas efetivamente inseridas geram notificações. Cache e bloqueios ficam no Redis por organização/post, após checagem da organização e perfil autenticados. A sincronização de publicações, identidades externas e workflows Temporal existentes não muda.
+
+## Logo da plataforma
+
+Administradores da instância acessam **Administração → Configurações da instância → Identidade visual da plataforma** (`/admin/credentials`). Publique a imagem na biblioteca de mídia e cole sua URL HTTPS em **URL da imagem da logo**. Salvar aplica a logo no menu lateral, login e visualização em até um minuto, sem reconstruir a aplicação. Uma URL inválida é rejeitada; imagem que não carregar usa a logo padrão. O nome da plataforma é usado como identificação acessível da logo. Títulos estáticos do navegador e favicon não fazem parte dessa configuração. Isso adiciona identidade visual principal; não representa um white-label completo de todas as telas/textos herdados.

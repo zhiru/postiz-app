@@ -107,7 +107,7 @@ test('an empty Graph answer gives an empty list, not a crash', async () => {
   globalThis.fetch = (async () => ({
     ok: true,
     status: 200,
-    json: async () => ({}),
+    json: async () => ({ data: [] }),
   })) as any;
 
   assert.deepEqual(
@@ -122,8 +122,10 @@ test('an empty Graph answer gives an empty list, not a crash', async () => {
 
 test('replying posts to the right Graph edge', async () => {
   const urls: string[] = [];
-  globalThis.fetch = (async (url: string) => {
+  const options: RequestInit[] = [];
+  globalThis.fetch = (async (url: string, request: RequestInit = {}) => {
     urls.push(url);
+    options.push(request);
     return { ok: true, status: 200, json: async () => ({ id: 'reply-1' }) };
   }) as any;
 
@@ -142,7 +144,9 @@ test('replying posts to the right Graph edge', async () => {
 
   assert.ok(urls[0].includes('/fb-comment-1/comments'));
   assert.ok(urls[1].includes('/ig-comment-1/replies'));
-  assert.ok(urls[1].includes('message=thanks'));
+  assert.equal(JSON.parse(String(options[1].body)).message, 'thanks');
+  assert.equal(options[1].method, 'POST');
+  assert.ok(!urls[1].includes('access_token='));
   // the user token half is never sent to the Graph API
   assert.ok(!urls[1].includes('user-token'));
 });

@@ -1,6 +1,6 @@
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
-import { SocialCommentStatus } from '@prisma/client';
+import { Prisma, SocialCommentStatus } from '@prisma/client';
 import { SocialCommentDetails } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { GetSocialCommentsDto } from '@gitroom/nestjs-libraries/dtos/comments/get.social.comments.dto';
 
@@ -37,57 +37,71 @@ export class SocialCommentsRepository {
     private _organization: PrismaRepository<'organization'>
   ) {}
 
-  // Published posts recent enough to still get comments: polling everything
-  // ever published would burn the Meta rate limit on the first cycle.
-  getPostsToPoll(providerIdentifiers: string[], sinceDays: number) {
-    const since = new Date();
-    since.setDate(since.getDate() - sinceDays);
+  private postSelect = {
+    id: true,
+    releaseId: true,
+    organizationId: true,
+    integration: {
+      select: {
+        id: true,
+        internalId: true,
+        token: true,
+        organizationId: true,
+        profileId: true,
+        additionalSettings: true,
+        providerIdentifier: true,
+      },
+    },
+  } as const;
 
+  private publishedPostWhere: Prisma.PostWhereInput = {
+    state: 'PUBLISHED' as const,
+    deletedAt: null,
+    parentPostId: null,
+    OR: [
+      { intervalInDays: null },
+      { platformHistoryCovered: false, recurringSnapshots: { none: {} } },
+    ],
+    releaseId: { not: null },
+  };
+
+  getPostToRefresh(orgId: string, postId: string, profileId?: string) {
+    return this._post.model.post.findFirst({
+      where: {
+        ...this.publishedPostWhere,
+        id: postId,
+        organizationId: orgId,
+        integration: {
+          organizationId: orgId,
+          deletedAt: null,
+          ...(profileId ? { profileId } : {}),
+        },
+      },
+      select: this.postSelect,
+    });
+  }
+
+  // Walk the entire history, including old posts receiving new comments. Keyset
+  // pagination avoids starving old posts behind the newest 200 on every cycle.
+  getPostsToPoll(providerIdentifiers: string[], afterId?: string) {
+    const configured = Number(process.env.COMMENTS_POLL_MAX_POSTS || 100);
+    const take = Number.isFinite(configured)
+      ? Math.min(200, Math.max(1, Math.floor(configured)))
+      : 100;
     return this._post.model.post.findMany({
       where: {
-        state: 'PUBLISHED',
-        deletedAt: null,
-        parentPostId: null,
-          OR: [
-            { intervalInDays: null },
-            { platformHistoryCovered: false, recurringSnapshots: { none: {} } },
-          ],
-        releaseId: {
-          not: null,
-        },
-        publishDate: {
-          gte: since,
-        },
+        ...this.publishedPostWhere,
+        ...(afterId ? { id: { gt: afterId } } : {}),
         integration: {
           deletedAt: null,
           refreshNeeded: false,
           inBetweenSteps: false,
-          providerIdentifier: {
-            in: providerIdentifiers,
-          },
+          providerIdentifier: { in: providerIdentifiers },
         },
       },
-      orderBy: {
-        publishDate: 'desc' as const,
-      },
-      // Bounds the Graph calls per cycle: the date window alone does not, a
-      // busy organization can publish a lot in a week.
-      take: Number(process.env.COMMENTS_POLL_MAX_POSTS || 200),
-      select: {
-        id: true,
-        releaseId: true,
-        organizationId: true,
-        integration: {
-          select: {
-            id: true,
-            token: true,
-            organizationId: true,
-            profileId: true,
-            additionalSettings: true,
-            providerIdentifier: true,
-          },
-        },
-      },
+      orderBy: { id: 'asc' },
+      take,
+      select: this.postSelect,
     });
   }
 
@@ -113,10 +127,11 @@ export class SocialCommentsRepository {
     postId: string,
     comments: SocialCommentDetails[]
   ) {
-    return this._socialComments.model.socialComments.createMany({
+    return this._socialComments.model.socialComments.createManyAndReturn({
       // The unique index on (integrationId, providerCommentId) is the real
       // guarantee: two overlapping polls can't insert the same comment twice.
       skipDuplicates: true,
+      select: { providerCommentId: true },
       data: comments.map((comment) => ({
         organizationId: orgId,
         integrationId,
@@ -139,10 +154,20 @@ export class SocialCommentsRepository {
     return this._socialComments.model.socialComments.findMany({
       where: {
         organizationId: orgId,
-        ...(profileId ? { integration: { profileId, organizationId: orgId, deletedAt: null } } : {}),
+        ...(profileId
+          ? {
+              integration: {
+                profileId,
+                organizationId: orgId,
+                deletedAt: null,
+              },
+            }
+          : {}),
         ...(query.integrationId ? { integrationId: query.integrationId } : {}),
         ...(query.postId ? { postId: query.postId } : {}),
-        ...(query.status ? { status: query.status as SocialCommentStatus } : {}),
+        ...(query.status
+          ? { status: query.status as SocialCommentStatus }
+          : {}),
       },
       orderBy: {
         publishedAt: 'desc' as const,
@@ -153,14 +178,28 @@ export class SocialCommentsRepository {
     });
   }
 
-  countComments(orgId: string, query: GetSocialCommentsDto, profileId?: string) {
+  countComments(
+    orgId: string,
+    query: GetSocialCommentsDto,
+    profileId?: string
+  ) {
     return this._socialComments.model.socialComments.count({
       where: {
         organizationId: orgId,
-        ...(profileId ? { integration: { profileId, organizationId: orgId, deletedAt: null } } : {}),
+        ...(profileId
+          ? {
+              integration: {
+                profileId,
+                organizationId: orgId,
+                deletedAt: null,
+              },
+            }
+          : {}),
         ...(query.integrationId ? { integrationId: query.integrationId } : {}),
         ...(query.postId ? { postId: query.postId } : {}),
-        ...(query.status ? { status: query.status as SocialCommentStatus } : {}),
+        ...(query.status
+          ? { status: query.status as SocialCommentStatus }
+          : {}),
       },
     });
   }
@@ -170,7 +209,15 @@ export class SocialCommentsRepository {
       where: {
         id,
         organizationId: orgId,
-        ...(profileId ? { integration: { profileId, organizationId: orgId, deletedAt: null } } : {}),
+        ...(profileId
+          ? {
+              integration: {
+                profileId,
+                organizationId: orgId,
+                deletedAt: null,
+              },
+            }
+          : {}),
       },
       select: {
         ...commentSelect,
@@ -222,15 +269,16 @@ export class SocialCommentsRepository {
   }
 
   async isAutoReplyEnabled(orgId: string) {
-    const organization =
-      await this._organization.model.organization.findUnique({
+    const organization = await this._organization.model.organization.findUnique(
+      {
         where: {
           id: orgId,
         },
         select: {
           autoReplyComments: true,
         },
-      });
+      }
+    );
 
     return !!organization?.autoReplyComments;
   }

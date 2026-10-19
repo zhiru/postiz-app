@@ -1,3 +1,4 @@
+import { AllowViewer } from '@gitroom/nestjs-libraries/services/auth/profile-access/profile-access.decorators';
 import {
   Body,
   Controller,
@@ -17,7 +18,10 @@ import { GetSocialCommentsDto } from '@gitroom/nestjs-libraries/dtos/comments/ge
 import { ReplySocialCommentDto } from '@gitroom/nestjs-libraries/dtos/comments/reply.social.comment.dto';
 import { AutoReplyCommentsDto } from '@gitroom/nestjs-libraries/dtos/comments/auto.reply.comments.dto';
 import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
-import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+import {
+  AuthorizationActions,
+  Sections,
+} from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 @ApiTags('Social Comments')
 @Controller('/social-comments')
@@ -35,7 +39,9 @@ export class SocialCommentsController {
 
   @Get('/auto-reply')
   async getAutoReply(@GetOrgFromRequest() org: Organization) {
-    return { autoReplyComments: await this._socialCommentsService.getAutoReply(org.id) };
+    return {
+      autoReplyComments: await this._socialCommentsService.getAutoReply(org.id),
+    };
   }
 
   @Post('/auto-reply')
@@ -52,13 +58,36 @@ export class SocialCommentsController {
     return { autoReplyComments: body.autoReplyComments };
   }
 
+  @Get('/posts/:postId/data')
+  async getPostData(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('postId') postId: string
+  ) {
+    return this._socialCommentsService.getPostData(org.id, postId, profile?.id);
+  }
+
+  @Post('/posts/:postId/sync')
+  @AllowViewer()
+  async refreshPost(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('postId') postId: string
+  ) {
+    return this._socialCommentsService.refreshPost(org.id, postId, profile?.id);
+  }
+
   @Get('/:id')
   async getComment(
     @GetOrgFromRequest() org: Organization,
     @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id: string
   ) {
-    const comment = await this._socialCommentsService.getComment(org.id, id, profile?.id);
+    const comment = await this._socialCommentsService.getComment(
+      org.id,
+      id,
+      profile?.id
+    );
     if (!comment) {
       throw new NotFoundException('Comment not found');
     }
@@ -74,6 +103,12 @@ export class SocialCommentsController {
     @Param('id') id: string,
     @Body() body: ReplySocialCommentDto
   ) {
-    return this._socialCommentsService.reply(org.id, id, body.message, 'human', profile?.id);
+    return this._socialCommentsService.reply(
+      org.id,
+      id,
+      body.message,
+      'human',
+      profile?.id
+    );
   }
 }

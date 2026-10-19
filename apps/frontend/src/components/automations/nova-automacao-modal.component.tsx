@@ -1,11 +1,11 @@
 'use client';
 
+import { InstagramAccountSelect } from './instagram-account-select';
 import { FC, useEffect, useMemo, useState } from 'react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import { useRouter } from 'next/navigation';
-import { useToaster } from '@gitroom/react/toaster/toaster';
 
 interface Props {
   open: boolean;
@@ -48,17 +48,16 @@ const TRIGGERS: TriggerOption[] = [
   },
 ];
 
-export const NovaAutomacaoModal: FC<Props> = ({ open, onClose, onCreated }) => {
+export const NovaAutomacaoModal: FC<Props> = ({ open, onClose }) => {
   const t = useT();
   const fetchApi = useFetch();
   const router = useRouter();
-  const toaster = useToaster();
   const { data: integrations } = useIntegrationList();
 
-  const [activeTrigger, setActiveTrigger] = useState<TriggerType>('comment_on_post');
+  const [activeTrigger, setActiveTrigger] =
+    useState<TriggerType>('comment_on_post');
   const [flowName, setFlowName] = useState('');
-  const [integrationId, setIntegrationId] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [integrationIds, setIntegrationIds] = useState<string[]>([]);
   const [webhookCheck, setWebhookCheck] = useState<{
     loading: boolean;
     ok?: boolean;
@@ -68,44 +67,60 @@ export const NovaAutomacaoModal: FC<Props> = ({ open, onClose, onCreated }) => {
   useEffect(() => {
     if (!open) {
       setFlowName('');
-      setIntegrationId('');
+      setIntegrationIds([]);
       setActiveTrigger('comment_on_post');
       setWebhookCheck({ loading: false });
     }
   }, [open]);
 
   useEffect(() => {
-    if (!integrationId) {
+    let cancelled = false;
+    if (!integrationIds.length) {
       setWebhookCheck({ loading: false });
       return;
     }
     setWebhookCheck({ loading: true });
-    fetchApi(`/flows/integrations/${integrationId}/webhook-status`)
-      .then((r) => r.json())
-      .then((data) => {
-        setWebhookCheck({ loading: false, ok: data.ok, error: data.error });
+    Promise.all(
+      integrationIds.map(async (id) => {
+        const res = await fetchApi(
+          `/flows/integrations/${encodeURIComponent(id)}/webhook-status`
+        );
+        if (!res.ok) throw new Error();
+        return res.json();
+      })
+    )
+      .then((results) => {
+        if (!cancelled)
+          setWebhookCheck({
+            loading: false,
+            ok: results.every((result) => result.ok),
+            error: results.find((result) => !result.ok)?.error,
+          });
       })
       .catch(() => {
-        setWebhookCheck({
-          loading: false,
-          ok: false,
-          error: t(
-            'webhook_check_failed',
-            'Nao foi possivel verificar o webhook'
-          ),
-        });
+        if (!cancelled)
+          setWebhookCheck({
+            loading: false,
+            ok: false,
+            error: t('webhook_check_failed', 'Could not check the webhook'),
+          });
       });
-  }, [integrationId, fetchApi, t]);
+    return () => {
+      cancelled = true;
+    };
+  }, [integrationIds, fetchApi, t]);
 
   const instagramIntegrations = useMemo(() => {
     if (!Array.isArray(integrations)) return [];
-    return integrations.filter((i: any) => i.identifier === 'instagram');
+    return integrations.filter((i: any) =>
+      ['instagram', 'instagram-standalone'].includes(i.identifier)
+    );
   }, [integrations]);
 
   const canCreate =
     activeTrigger === 'repost_story'
       ? true
-      : !!flowName.trim() && !!integrationId && !!webhookCheck.ok && !creating;
+      : !!flowName.trim() && integrationIds.length > 0 && !!webhookCheck.ok;
 
   const handleCreate = async () => {
     if (activeTrigger === 'repost_story') {
@@ -114,40 +129,13 @@ export const NovaAutomacaoModal: FC<Props> = ({ open, onClose, onCreated }) => {
       return;
     }
     if (!canCreate) return;
-    setCreating(true);
-    try {
-      const response = await fetchApi('/flows', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: flowName.trim(),
-          integrationId,
-        }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        toaster.show(
-          body.message || t('failed_to_create_flow', 'Falha ao criar automacao'),
-          'warning'
-        );
-        return;
-      }
-      const created = await response.json();
-      toaster.show(
-        t('flow_created', 'Automacao criada com sucesso'),
-        'success'
-      );
-      onCreated?.();
-      onClose();
-      const typeParam = activeTrigger === 'story_reply' ? 'story' : 'comment';
-      router.push(`/automacoes/${created.id}/wizard?type=${typeParam}`);
-    } catch {
-      toaster.show(
-        t('failed_to_create_flow', 'Falha ao criar automacao'),
-        'warning'
-      );
-    } finally {
-      setCreating(false);
-    }
+    const query = new URLSearchParams({
+      name: flowName.trim(),
+      accounts: integrationIds.join(','),
+      type: activeTrigger === 'story_reply' ? 'story' : 'comment',
+    });
+    onClose();
+    router.push(`/automacoes/nova?${query}`);
   };
 
   if (!open) return null;
@@ -245,76 +233,65 @@ export const NovaAutomacaoModal: FC<Props> = ({ open, onClose, onCreated }) => {
                 </ul>
               </div>
             ) : (
-            <div className="flex flex-col gap-[14px] max-w-[520px]">
-              <div className="flex flex-col gap-[6px]">
-                <label className="text-[13px] text-textColor">
-                  {t('flow_name', 'Nome')}
-                </label>
-                <div className="bg-newBgColorInner h-[42px] border-newTableBorder border rounded-[8px] flex items-center">
-                  <input
-                    type="text"
-                    className="h-full bg-transparent outline-none flex-1 text-[14px] text-textColor px-[16px]"
-                    placeholder={t(
-                      'flow_name_placeholder',
-                      'Minha automacao do Instagram'
-                    )}
-                    value={flowName}
-                    onChange={(e) => setFlowName(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-[6px]">
-                <label className="text-[13px] text-textColor">
-                  {t('select_instagram_account', 'Conta do Instagram')}
-                </label>
-                {instagramIntegrations.length === 0 ? (
-                  <p className="text-[12px] text-customColor19">
-                    {t(
-                      'no_instagram_connected',
-                      'Nenhuma conta do Instagram conectada. Conecte uma em Integracoes.'
-                    )}
-                  </p>
-                ) : (
+              <div className="flex flex-col gap-[14px] max-w-[520px]">
+                <div className="flex flex-col gap-[6px]">
+                  <label className="text-[13px] text-textColor">
+                    {t('flow_name', 'Nome')}
+                  </label>
                   <div className="bg-newBgColorInner h-[42px] border-newTableBorder border rounded-[8px] flex items-center">
-                    <select
-                      className="h-full bg-transparent outline-none flex-1 text-[14px] text-textColor px-[16px] appearance-none"
-                      value={integrationId}
-                      onChange={(e) => setIntegrationId(e.target.value)}
-                    >
-                      <option value="">
-                        {t('select_account', 'Selecione uma conta...')}
-                      </option>
-                      {instagramIntegrations.map((ig: any) => (
-                        <option key={ig.id} value={ig.id}>
-                          {ig.name || ig.display || ig.id}
-                        </option>
-                      ))}
-                    </select>
+                    <input
+                      type="text"
+                      className="h-full bg-transparent outline-none flex-1 text-[14px] text-textColor px-[16px]"
+                      placeholder={t(
+                        'flow_name_placeholder',
+                        'Minha automacao do Instagram'
+                      )}
+                      value={flowName}
+                      onChange={(e) => setFlowName(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-[6px]">
+                  <label className="text-[13px] text-textColor">
+                    {t('select_instagram_account', 'Conta do Instagram')}
+                  </label>
+                  {instagramIntegrations.length === 0 ? (
+                    <p className="text-[12px] text-customColor19">
+                      {t(
+                        'no_instagram_connected',
+                        'Nenhuma conta do Instagram conectada. Conecte uma em Integracoes.'
+                      )}
+                    </p>
+                  ) : (
+                    <InstagramAccountSelect
+                      accounts={instagramIntegrations}
+                      value={integrationIds}
+                      onChange={setIntegrationIds}
+                    />
+                  )}
+                </div>
+
+                {integrationIds.length > 0 && (
+                  <div className="flex flex-col gap-[4px]">
+                    {webhookCheck.loading ? (
+                      <p className="text-[12px] text-customColor18">
+                        {t('checking_webhook', 'Verificando webhook...')}
+                      </p>
+                    ) : webhookCheck.ok ? (
+                      <p className="text-[12px] text-customColor42">
+                        {t('webhook_ok', 'Webhook configurado corretamente')}
+                      </p>
+                    ) : webhookCheck.error ? (
+                      <div className="rounded-[4px] border border-customColor13/40 bg-customColor13/10 p-[12px]">
+                        <p className="text-[12px] text-customColor13 whitespace-pre-wrap leading-[1.5]">
+                          {webhookCheck.error}
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>
-
-              {integrationId && (
-                <div className="flex flex-col gap-[4px]">
-                  {webhookCheck.loading ? (
-                    <p className="text-[12px] text-customColor18">
-                      {t('checking_webhook', 'Verificando webhook...')}
-                    </p>
-                  ) : webhookCheck.ok ? (
-                    <p className="text-[12px] text-customColor42">
-                      {t('webhook_ok', 'Webhook configurado corretamente')}
-                    </p>
-                  ) : webhookCheck.error ? (
-                    <div className="rounded-[4px] border border-customColor13/40 bg-customColor13/10 p-[12px]">
-                      <p className="text-[12px] text-customColor13 whitespace-pre-wrap leading-[1.5]">
-                        {webhookCheck.error}
-                      </p>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
             )}
           </div>
         </div>
@@ -332,9 +309,7 @@ export const NovaAutomacaoModal: FC<Props> = ({ open, onClose, onCreated }) => {
             disabled={!canCreate}
             className="rounded-[4px] bg-btnPrimary px-[16px] py-[8px] text-[13px] text-white hover:opacity-80 disabled:opacity-50"
           >
-            {creating
-              ? t('creating_flow', 'Criando...')
-              : activeTrigger === 'repost_story'
+            {activeTrigger === 'repost_story'
               ? t('repost_open_wizard', 'Abrir wizard de Repost')
               : t('create_and_continue', 'Criar e continuar')}
           </button>

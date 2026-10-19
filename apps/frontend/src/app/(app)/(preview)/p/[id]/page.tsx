@@ -17,6 +17,7 @@ import { RenderPreviewDateClient } from '@gitroom/frontend/components/preview/re
 import { ReviewCommentsComponents } from '@gitroom/frontend/components/preview/review.comments.components';
 import { getPlatformIconPath } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
 import { LogoTextComponent } from '@gitroom/frontend/components/ui/logo-text.component';
+import { PostEngagement } from '@gitroom/frontend/components/preview/post.engagement';
 import { CreationMethodBadge } from '@gitroom/frontend/components/launches/creation.method.badge';
 
 dayjs.extend(utc);
@@ -155,10 +156,16 @@ export default async function Auth(props: {
                 </div>
               </div>
             ))}
+            {!token && post[0].state === 'PUBLISHED' && (
+              <PostEngagement postId={id} />
+            )}
           </div>
           <div className="w-full lg:w-[380px] lg:flex-shrink-0">
             <div className="bg-newBgColorInner border border-newTableBorder rounded-[12px] p-[20px] lg:sticky lg:top-[12px]">
               <div className="flex flex-col gap-[20px]">
+                <h2 className="font-semibold">
+                  {t('post_review', 'Post review')}
+                </h2>
                 <ReviewCommentsComponents
                   postId={id}
                   token={token}

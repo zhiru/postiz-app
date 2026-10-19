@@ -1417,6 +1417,17 @@ const CalendarItem: FC<{
           </div>
         )}
         {canWrite && !post.importedFromPlatform && (
+          <button
+            type="button"
+            onClick={editPost}
+            aria-label={t('edit_post', 'Edit post')}
+            title={t('edit_post', 'Edit post')}
+            className="hidden group-hover:block cursor-pointer"
+          >
+            ✎
+          </button>
+        )}
+        {canWrite && !post.importedFromPlatform && (
           <div
             className={clsx(
               'hidden group-hover:block hover:underline cursor-pointer',
@@ -1520,7 +1531,16 @@ const CalendarItem: FC<{
         </div>
       )}
       <div
-        onClick={canWrite ? editPost : preview}
+        role="button"
+        tabIndex={0}
+        aria-label={t('preview_post', 'Preview post')}
+        onClick={preview}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            preview();
+          }
+        }}
         className={clsx(
           'gap-[5px] w-full flex h-full flex-1 rounded-br-[10px] rounded-bl-[10px] p-[8px] text-[14px] bg-newColColor',
           'relative',

@@ -1,8 +1,10 @@
+'use client';
+import { BrandLogo } from '@gitroom/frontend/components/ui/brand-logo.component';
 import React from 'react';
 
 export const LogoTextComponent = () => {
   return (
-    <svg
+    <BrandLogo><svg
       xmlns="http://www.w3.org/2000/svg"
       xmlSpace="preserve"
       style={{
@@ -36,6 +38,6 @@ export const LogoTextComponent = () => {
         style={{ fillRule: 'nonzero' }}
         transform="matrix(1.35949 0 0 .46316 -857.369 -69.019)"
       />
-    </svg>
+    </svg></BrandLogo>
   );
 };

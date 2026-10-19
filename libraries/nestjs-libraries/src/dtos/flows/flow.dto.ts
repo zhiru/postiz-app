@@ -1,5 +1,7 @@
 import {
   IsString,
+  IsUUID,
+  ArrayUnique,
   IsOptional,
   IsEnum,
   IsArray,
@@ -104,6 +106,10 @@ export class FlowEdgeDto {
 }
 
 export class QuickCreateFlowDto {
+  @IsOptional()
+  @IsBoolean()
+  activate?: boolean;
+
   @ApiProperty({
     description: 'Nome da automação (apenas para identificação na interface).',
     maxLength: 200,
@@ -172,7 +178,9 @@ export class QuickCreateFlowDto {
     description:
       'IDs de story do Instagram. OBRIGATÓRIO (não-vazio) quando postMode=specific e triggerType=story_reply.',
   })
-  @ValidateIf((o) => o.postMode === 'specific' && o.triggerType === 'story_reply')
+  @ValidateIf(
+    (o) => o.postMode === 'specific' && o.triggerType === 'story_reply'
+  )
   @IsArray()
   @ArrayNotEmpty()
   @ArrayMaxSize(100)
@@ -225,7 +233,8 @@ export class QuickCreateFlowDto {
 
   @ApiPropertyOptional({
     maxLength: 2000,
-    description: 'Mensagem enviada quando o usuário ainda não segue (usado com requireFollow=true).',
+    description:
+      'Mensagem enviada quando o usuário ainda não segue (usado com requireFollow=true).',
   })
   @IsOptional()
   @IsString()
@@ -257,7 +266,8 @@ export class QuickCreateFlowDto {
 
   @ApiPropertyOptional({
     maxLength: 2000,
-    description: 'Texto da mensagem direta (DM) enviada ao autor do comentário.',
+    description:
+      'Texto da mensagem direta (DM) enviada ao autor do comentário.',
     example: 'Aqui está a receita completa 👇',
   })
   @IsOptional()
@@ -302,19 +312,29 @@ export class QuickCreateFlowDto {
   @MaxLength(2000)
   openingDmMessage?: string;
 
-  @ApiPropertyOptional({ maxLength: 80, description: 'Follow-gate 2 etapas: texto do botão da DM inicial.' })
+  @ApiPropertyOptional({
+    maxLength: 80,
+    description: 'Follow-gate 2 etapas: texto do botão da DM inicial.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(80)
   openingDmButtonText?: string;
 
-  @ApiPropertyOptional({ maxLength: 80, description: 'Follow-gate 2 etapas: texto do botão "já sigo".' })
+  @ApiPropertyOptional({
+    maxLength: 80,
+    description: 'Follow-gate 2 etapas: texto do botão "já sigo".',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(80)
   alreadyFollowedButtonText?: string;
 
-  @ApiPropertyOptional({ maxLength: 2000, description: 'Follow-gate: mensagem quando esgotam as tentativas (maxGateAttempts).' })
+  @ApiPropertyOptional({
+    maxLength: 2000,
+    description:
+      'Follow-gate: mensagem quando esgotam as tentativas (maxGateAttempts).',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(2000)
@@ -331,6 +351,19 @@ export class QuickCreateFlowDto {
   @Min(1)
   @Max(10)
   maxGateAttempts?: number;
+}
+
+export class MultiQuickCreateFlowDto extends QuickCreateFlowDto {
+  @IsUUID()
+  requestId: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(20)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  integrationIds: string[];
 }
 
 export class SaveCanvasDto {

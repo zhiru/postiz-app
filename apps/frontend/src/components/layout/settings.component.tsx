@@ -187,7 +187,7 @@ export const SettingsPopup: FC<{
     if (user?.isSuperAdmin) {
       arr.push({
         tab: 'admin_credentials',
-        label: t('view_credentials', 'Credentials'),
+        label: t('instance_settings', 'Instance settings'),
         section: t('administration', 'Administration'),
       });
       arr.push({ tab: 'admin_stats', label: t('statistics', 'Statistics') });
