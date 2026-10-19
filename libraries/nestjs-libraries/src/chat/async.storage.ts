@@ -5,6 +5,7 @@ import type { SelfHostedInstance } from '@gitroom/nestjs-libraries/chat/mcp.rela
 type Ctx = {
   requestId: string;
   auth: any; // replace with your org type if you have it, e.g. Organization
+  profileId?: string;
   // a self-hosted connection: where its tool calls are relayed to
   relay?: SelfHostedInstance & { id: string };
 };
@@ -25,6 +26,10 @@ export function getAuth<T = any>(): T | undefined {
 
 export function getRequestId(): string | undefined {
   return als.getStore()?.requestId;
+}
+
+export function getProfileId(): string | undefined {
+  return als.getStore()?.profileId;
 }
 
 export function getRelay(): Ctx['relay'] {

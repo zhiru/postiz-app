@@ -1,34 +1,36 @@
-import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
-  PendingCheckResponse,
+  ClientInformation,
   PostDetails,
   PostResponse,
   SocialProvider,
+  ReportMetricsMap,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { timer } from '@gitroom/helpers/utils/timer';
 import dayjs from 'dayjs';
 import {
-  BadBody,
+  RefreshToken,
   SocialAbstract,
+  BadBody,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { capitalize, chunk } from 'lodash';
 import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
 import { Integration } from '@prisma/client';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
+import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 export class ThreadsProvider extends SocialAbstract implements SocialProvider {
   identifier = 'threads';
-  reportMetrics: ReportMetricsMap = {
-    reach: ['Views'],
-    engagement: ['Likes', 'Replies', 'Reposts', 'Quotes'],
-  };
+
   name = 'Threads';
+
   isBetweenSteps = false;
+
   scopes = [
     'threads_basic',
     'threads_content_publish',
@@ -36,17 +38,20 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     'threads_manage_insights',
     // 'threads_profile_discovery',
   ];
-  override maxConcurrentJob = 20; // Threads limits are per profile
+
+  override maxConcurrentJob = 2;
+
   refreshCron = true;
 
   editor = 'normal' as const;
+
   maxLength() {
     return 500;
   }
 
   override handleErrors(body: string):
     | {
-        type: 'refresh-token' | 'bad-body' | 'retry';
+        type: 'refresh-token' | 'bad-body';
         value: string;
       }
     | undefined {
@@ -55,33 +60,11 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
       return { type: 'refresh-token', value: 'Threads access token expired' };
     }
 
-    if (body.includes('2207051')) {
-      return {
-        type: 'bad-body',
-        value:
-          'Error from Meta: We restrict certain activity to protect our community',
-      };
-    }
-
-    if (body.includes('4279013')) {
-      return {
-        type: 'bad-body',
-        value:
-          'User restricted',
-      };
-    }
     if (body.includes('The media could not be fetched from this URI')) {
       return {
         type: 'bad-body',
         value:
           "One of the media URLs is invalid or inaccessible, make sure it's being uploaded to Postiz first",
-      };
-    }
-    if (body.includes('4279009')) {
-      return {
-        type: 'retry',
-        value:
-          'Threads could not find the media container yet, please try again in a few seconds',
       };
     }
     if (body.includes('text must be at most 500 characters')) {
@@ -116,12 +99,13 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async generateAuthUrl() {
+  async generateAuthUrl(clientInformation?: ClientInformation) {
+    const clientId = clientInformation?.client_id || process.env.THREADS_APP_ID;
     const state = makeSecureId(6);
     return {
       url:
         'https://www.threads.net/oauth/authorize' +
-        `?client_id=${process.env.THREADS_APP_ID}` +
+        `?client_id=${clientId}` +
         `&redirect_uri=${encodeURIComponent(
           `${
             process?.env.FRONTEND_URL?.indexOf('https') == -1
@@ -136,15 +120,22 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async authenticate(params: {
-    code: string;
-    codeVerifier: string;
-    refresh?: string;
-  }) {
+  async authenticate(
+    params: {
+      code: string;
+      codeVerifier: string;
+      refresh?: string;
+    },
+    clientInformation?: ClientInformation
+  ) {
+    const clientId = clientInformation?.client_id || process.env.THREADS_APP_ID;
+    const clientSecret =
+      clientInformation?.client_secret || process.env.THREADS_APP_SECRET;
+
     const getAccessToken = await (
       await this.fetch(
         'https://graph.threads.net/oauth/access_token' +
-          `?client_id=${process.env.THREADS_APP_ID}` +
+          `?client_id=${clientId}` +
           `&redirect_uri=${encodeURIComponent(
             `${
               process?.env.FRONTEND_URL?.indexOf('https') == -1
@@ -153,7 +144,7 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
             }/integrations/social/threads`
           )}` +
           `&grant_type=authorization_code` +
-          `&client_secret=${process.env.THREADS_APP_SECRET}` +
+          `&client_secret=${clientSecret}` +
           `&code=${params.code}`
       )
     ).json();
@@ -162,7 +153,7 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
       await this.fetch(
         'https://graph.threads.net/access_token' +
           '?grant_type=th_exchange_token' +
-          `&client_secret=${process.env.THREADS_APP_SECRET}` +
+          `&client_secret=${clientSecret}` +
           `&access_token=${getAccessToken.access_token}`
       )
     ).json();
@@ -180,36 +171,6 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
       picture: picture || '',
       username: username,
     };
-  }
-
-  // Single, read-only status check of a media container - no loops and no
-  // timers, so the post workflow can poll it with durable timers.
-  private async checkContainerStatus(
-    mediaContainerId: string,
-    accessToken: string
-  ): Promise<'FINISHED' | 'IN_PROGRESS' | 'PUBLISHED'> {
-    const { status, error_message } = await (
-      await this.fetch(
-        `https://graph.threads.net/v1.0/${mediaContainerId}?fields=status,error_message&access_token=${accessToken}`
-      )
-    ).json();
-
-    if (status === 'ERROR' || status === 'EXPIRED') {
-      throw new BadBody(
-        this.identifier,
-        JSON.stringify({ status, error_message }),
-        '{}',
-        error_message && error_message !== 'UNKNOWN'
-          ? error_message
-          : 'Threads could not process the media, please check the media format and try again'
-      );
-    }
-
-    if (status === 'FINISHED' || status === 'PUBLISHED') {
-      return status;
-    }
-
-    return 'IN_PROGRESS';
   }
 
   private async checkLoaded(
@@ -428,8 +389,315 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     }
   }
 
-  // The thread is live, the permalink is only cosmetic: never fail (and risk
-  // re-publishing) a live post over it.
+  async post(
+    userId: string,
+    accessToken: string,
+    postDetails: PostDetails<{
+      active_thread_finisher: boolean;
+      thread_finisher: string;
+    }>[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    if (!postDetails.length) {
+      return [];
+    }
+
+    const [firstPost] = postDetails;
+    const [response] = await this.postPending(
+      userId,
+      accessToken,
+      postDetails,
+      integration
+    );
+
+    let pendingData = response.pendingData;
+    const started = Date.now();
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method: failing here (non-retryable) is safe, timing the
+      // activity out is not - a retried activity would publish again.
+      if (Date.now() - started > 8 * 60 * 1000) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          '{}',
+          'Threads took too long to process the media, please try again'
+        );
+      }
+
+      const check = await this.checkPostStatus(
+        accessToken,
+        pendingData,
+        integration
+      );
+
+      if (check.status === 'pending') {
+        pendingData = check.pendingData;
+        await timer(2200);
+        continue;
+      }
+
+      const result =
+        check.status === 'ready'
+          ? await this.finalizePost(accessToken, check.pendingData, integration)
+          : check;
+
+      if (result.status === 'completed') {
+        return [
+          {
+            id: firstPost.id,
+            postId: result.postId,
+            status: 'success',
+            releaseURL: result.releaseURL,
+          },
+        ];
+      }
+
+      pendingData = result.pendingData;
+      await timer(2200);
+    }
+  }
+
+  async comment(
+    userId: string,
+    postId: string,
+    lastCommentId: string | undefined,
+    accessToken: string,
+    postDetails: PostDetails<{
+      active_thread_finisher: boolean;
+      thread_finisher: string;
+    }>[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    if (!postDetails.length) {
+      return [];
+    }
+
+    const [commentPost] = postDetails;
+    const replyToId = lastCommentId || postId;
+
+    // Create reply content
+    const replyContentId = await this.createThreadContent(
+      userId,
+      accessToken,
+      commentPost,
+      replyToId
+    );
+
+    // Publish the reply
+    const { threadId: replyThreadId, permalink } = await this.publishThread(
+      userId,
+      accessToken,
+      replyContentId
+    );
+
+    return [
+      {
+        id: commentPost.id,
+        postId: replyThreadId,
+        status: 'success',
+        releaseURL: permalink,
+      },
+    ];
+  }
+
+  async analytics(
+    id: string,
+    accessToken: string,
+    date: number
+  ): Promise<AnalyticsData[]> {
+    const until = dayjs().endOf('day').unix();
+    const since = dayjs().subtract(date, 'day').unix();
+
+    const { data, ...all } = await (
+      await this.analyticsFetch(
+        `https://graph.threads.net/v1.0/${id}/threads_insights?metric=views,likes,replies,reposts,quotes&access_token=${accessToken}&period=day&since=${since}&until=${until}`
+      )
+    ).json();
+
+    return (
+      data?.map((d: any) => ({
+        label: capitalize(d.name),
+        percentageChange: 5,
+        data: d.total_value
+          ? [{ total: d.total_value.value, date: dayjs().format('YYYY-MM-DD') }]
+          : d.values.map((v: any) => ({
+              total: v.value,
+              date: dayjs(v.end_time).format('YYYY-MM-DD'),
+            })),
+      })) || []
+    );
+  }
+
+  @Plug({
+    identifier: 'threads-autoPlugPost',
+    title: 'Auto plug post',
+    description:
+      'When a post reached a certain number of likes, add another post to it so you followers get a notification about your promotion',
+    runEveryMilliseconds: 21600000,
+    totalRuns: 3,
+    fields: [
+      {
+        name: 'likesAmount',
+        type: 'number',
+        placeholder: 'Amount of likes',
+        description: 'The amount of likes to trigger the repost',
+        validation: /^\d+$/,
+      },
+      {
+        name: 'post',
+        type: 'richtext',
+        placeholder: 'Post to plug',
+        description: 'Message content to plug',
+        validation: /^[\s\S]{3,}$/g,
+      },
+    ],
+  })
+  async autoPlugPost(
+    integration: Integration,
+    id: string,
+    fields: { likesAmount: string; post: string }
+  ) {
+    const { data } = await (
+      await fetch(
+        `https://graph.threads.net/v1.0/${id}/insights?metric=likes&access_token=${integration.token}`
+      )
+    ).json();
+
+    const {
+      values: [value],
+    } = data.find((p: any) => p.name === 'likes');
+
+    if (value.value >= fields.likesAmount) {
+      await timer(2000);
+
+      const form = new FormData();
+      form.append('media_type', 'TEXT');
+      form.append('text', stripHtmlValidation('normal', fields.post, true));
+      form.append('reply_to_id', id);
+      form.append('access_token', integration.token);
+
+      const { id: replyId } = await (
+        await this.fetch('https://graph.threads.net/v1.0/me/threads', {
+          method: 'POST',
+          body: form,
+        })
+      ).json();
+
+      await (
+        await this.fetch(
+          `https://graph.threads.net/v1.0/${integration.internalId}/threads_publish?creation_id=${replyId}&access_token=${integration.token}`,
+          {
+            method: 'POST',
+          }
+        )
+      ).json();
+      return true;
+    }
+
+    return false;
+  }
+
+  async postAnalytics(
+    integrationId: string,
+    accessToken: string,
+    postId: string,
+    date: number
+  ): Promise<AnalyticsData[]> {
+    const today = dayjs().format('YYYY-MM-DD');
+
+    try {
+      // Fetch thread insights from Threads API
+      const { data } = await (
+        await this.analyticsFetch(
+          `https://graph.threads.net/v1.0/${postId}/insights?metric=views,likes,replies,reposts,quotes&access_token=${accessToken}`
+        )
+      ).json();
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      const result: AnalyticsData[] = [];
+
+      for (const metric of data) {
+        const value = metric.values?.[0]?.value ?? metric.total_value?.value;
+        if (value === undefined) continue;
+
+        let label = '';
+
+        switch (metric.name) {
+          case 'views':
+            label = 'Views';
+            break;
+          case 'likes':
+            label = 'Likes';
+            break;
+          case 'replies':
+            label = 'Replies';
+            break;
+          case 'reposts':
+            label = 'Reposts';
+            break;
+          case 'quotes':
+            label = 'Quotes';
+            break;
+        }
+
+        if (label) {
+          result.push({
+            label,
+            percentageChange: 0,
+            data: [{ total: String(value), date: today }],
+          });
+        }
+      }
+
+      return result;
+    } catch (err) {
+      if (err instanceof RefreshToken) {
+        throw err;
+      }
+      console.error('Error fetching Threads post analytics:', err);
+      return [];
+    }
+  }
+
+  reportMetrics: ReportMetricsMap = {
+    reach: ['Views'],
+    engagement: ['Likes', 'Replies', 'Reposts', 'Quotes'],
+  };
+
+  private async checkContainerStatus(
+    mediaContainerId: string,
+    accessToken: string
+  ): Promise<'FINISHED' | 'IN_PROGRESS' | 'PUBLISHED'> {
+    const { status, error_message } = await (
+      await this.fetch(
+        `https://graph.threads.net/v1.0/${mediaContainerId}?fields=status,error_message&access_token=${accessToken}`
+      )
+    ).json();
+
+    if (status === 'ERROR' || status === 'EXPIRED') {
+      throw new BadBody(
+        this.identifier,
+        JSON.stringify({ status, error_message }),
+        '{}',
+        error_message && error_message !== 'UNKNOWN'
+          ? error_message
+          : 'Threads could not process the media, please check the media format and try again'
+      );
+    }
+
+    if (status === 'FINISHED' || status === 'PUBLISHED') {
+      return status;
+    }
+
+    return 'IN_PROGRESS';
+  }
+
   private async threadPermalink(
     threadId: string,
     accessToken: string,
@@ -585,7 +853,9 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
 
       const { id: containerId } = await (
         await this.fetch(
-          `https://graph.threads.net/v1.0/${integration.internalId}/threads?${params.toString()}`,
+          `https://graph.threads.net/v1.0/${
+            integration.internalId
+          }/threads?${params.toString()}`,
           {
             method: 'POST',
           }
@@ -610,146 +880,12 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
     return {
       status: 'completed',
       postId: threadId,
-      releaseURL: await this.threadPermalink(threadId, accessToken, integration),
-    };
-  }
-
-  // Old blocking behavior, kept for workflow versions before v1.0.6 that don't
-  // know how to resolve a `pending` response.
-  async post(
-    userId: string,
-    accessToken: string,
-    postDetails: PostDetails<{
-      active_thread_finisher: boolean;
-      thread_finisher: string;
-    }>[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    if (!postDetails.length) {
-      return [];
-    }
-
-    const [firstPost] = postDetails;
-    const [response] = await this.postPending(
-      userId,
-      accessToken,
-      postDetails,
-      integration
-    );
-
-    let pendingData = response.pendingData;
-    const started = Date.now();
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      // Cap below the 10-minute activity timeout of the old workflows using
-      // this method: failing here (non-retryable) is safe, timing the
-      // activity out is not - a retried activity would publish again.
-      if (Date.now() - started > 8 * 60 * 1000) {
-        throw new BadBody(
-          this.identifier,
-          '{}',
-          '{}',
-          'Threads took too long to process the media, please try again'
-        );
-      }
-
-      const check = await this.checkPostStatus(
+      releaseURL: await this.threadPermalink(
+        threadId,
         accessToken,
-        pendingData,
         integration
-      );
-
-      if (check.status === 'pending') {
-        pendingData = check.pendingData;
-        await timer(2200);
-        continue;
-      }
-
-      const result =
-        check.status === 'ready'
-          ? await this.finalizePost(accessToken, check.pendingData, integration)
-          : check;
-
-      if (result.status === 'completed') {
-        return [
-          {
-            id: firstPost.id,
-            postId: result.postId,
-            status: 'success',
-            releaseURL: result.releaseURL,
-          },
-        ];
-      }
-
-      pendingData = result.pendingData;
-      await timer(2200);
-    }
-  }
-
-  async comment(
-    userId: string,
-    postId: string,
-    lastCommentId: string | undefined,
-    accessToken: string,
-    postDetails: PostDetails<{
-      active_thread_finisher: boolean;
-      thread_finisher: string;
-    }>[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    if (!postDetails.length) {
-      return [];
-    }
-
-    const [commentPost] = postDetails;
-    const replyToId = lastCommentId || postId;
-
-    // Create reply content
-    const replyContentId = await this.createThreadContent(
-      userId,
-      accessToken,
-      commentPost,
-      replyToId
-    );
-
-    // Publish the reply
-    const { threadId: replyThreadId, permalink } = await this.publishThread(
-      userId,
-      accessToken,
-      replyContentId
-    );
-
-    return [
-      {
-        id: commentPost.id,
-        postId: replyThreadId,
-        status: 'success',
-        releaseURL: permalink,
-      },
-    ];
-  }
-
-  async analytics(
-    id: string,
-    accessToken: string,
-    date: number
-  ): Promise<AnalyticsData[]> {
-    const until = dayjs().endOf('day').unix();
-    const since = dayjs().subtract(date, 'day').unix();
-
-    return withTrend(
-      await this.threadsInsights(id, accessToken, since, until),
-      () =>
-        this.threadsInsights(
-          id,
-          accessToken,
-          dayjs()
-            .subtract(date * 2, 'day')
-            .unix(),
-          since
-        )
-    );
+      ),
+    };
   }
 
   private async threadsInsights(
@@ -777,163 +913,4 @@ export class ThreadsProvider extends SocialAbstract implements SocialProvider {
       })) || []
     );
   }
-
-  @Plug({
-    identifier: 'threads-autoPlugPost',
-    title: 'Auto plug post',
-    description:
-      'When a post reached a certain number of likes, add another post to it so you followers get a notification about your promotion',
-    runEveryMilliseconds: 21600000,
-    totalRuns: 3,
-    fields: [
-      {
-        name: 'likesAmount',
-        type: 'number',
-        placeholder: 'Amount of likes',
-        description: 'The amount of likes to trigger the repost',
-        validation: /^\d+$/,
-      },
-      {
-        name: 'post',
-        type: 'richtext',
-        placeholder: 'Post to plug',
-        description: 'Message content to plug',
-        validation: /^[\s\S]{3,}$/g,
-      },
-    ],
-  })
-  async autoPlugPost(
-    integration: Integration,
-    id: string,
-    fields: { likesAmount: string; post: string }
-  ) {
-    const { data } = await (
-      await fetch(
-        `https://graph.threads.net/v1.0/${id}/insights?metric=likes&access_token=${integration.token}`
-      )
-    ).json();
-
-    const {
-      values: [value],
-    } = data.find((p: any) => p.name === 'likes');
-
-    if (value.value >= fields.likesAmount) {
-      await timer(2000);
-
-      const form = new FormData();
-      form.append('media_type', 'TEXT');
-      form.append('text', stripHtmlValidation('normal', fields.post, true));
-      form.append('reply_to_id', id);
-      form.append('access_token', integration.token);
-
-      const { id: replyId } = await (
-        await this.fetch('https://graph.threads.net/v1.0/me/threads', {
-          method: 'POST',
-          body: form,
-        })
-      ).json();
-
-      await (
-        await this.fetch(
-          `https://graph.threads.net/v1.0/${integration.internalId}/threads_publish?creation_id=${replyId}&access_token=${integration.token}`,
-          {
-            method: 'POST',
-          }
-        )
-      ).json();
-      return true;
-    }
-
-    return false;
-  }
-
-  async postAnalytics(
-    integrationId: string,
-    accessToken: string,
-    postId: string,
-    date: number
-  ): Promise<AnalyticsData[]> {
-    const today = dayjs().format('YYYY-MM-DD');
-
-    try {
-      // Fetch thread insights from Threads API
-      const { data } = await (
-        await fetch(
-          `https://graph.threads.net/v1.0/${postId}/insights?metric=views,likes,replies,reposts,quotes&access_token=${accessToken}`
-        )
-      ).json();
-
-      if (!data || data.length === 0) {
-        return [];
-      }
-
-      const result: AnalyticsData[] = [];
-
-      for (const metric of data) {
-        const value = metric.values?.[0]?.value ?? metric.total_value?.value;
-        if (value === undefined) continue;
-
-        let label = '';
-
-        switch (metric.name) {
-          case 'views':
-            label = 'Views';
-            break;
-          case 'likes':
-            label = 'Likes';
-            break;
-          case 'replies':
-            label = 'Replies';
-            break;
-          case 'reposts':
-            label = 'Reposts';
-            break;
-          case 'quotes':
-            label = 'Quotes';
-            break;
-        }
-
-        if (label) {
-          result.push({
-            label,
-            percentageChange: 0,
-            data: [{ total: String(value), date: today }],
-          });
-        }
-      }
-
-      return result;
-    } catch (err: any) {
-      console.error(
-        'Error fetching Threads post analytics:',
-        err?.cause?.code || err?.message || err
-      );
-      return [];
-    }
-  }
-
-  // override async mention(
-  //   token: string,
-  //   data: { query: string },
-  //   id: string,
-  //   integration: Integration
-  // ) {
-  //   const p = await (
-  //     await fetch(
-  //       `https://graph.threads.net/v1.0/profile_lookup?username=${data.query}&access_token=${integration.token}`
-  //     )
-  //   ).json();
-  //
-  //   return [
-  //     {
-  //       id: String(p.id),
-  //       label: p.name,
-  //       image: p.profile_picture_url,
-  //     },
-  //   ];
-  // }
-  //
-  // mentionFormat(idOrHandle: string, name: string) {
-  //   return `@${idOrHandle}`;
-  // }
 }

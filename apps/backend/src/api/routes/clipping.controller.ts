@@ -1,3 +1,5 @@
+import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
+import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Organization } from '@prisma/client';
@@ -11,6 +13,7 @@ export class ClippingController {
   constructor(private _clippingService: ClippingService) {}
 
   @Post('/')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
   startClipping(
     @GetOrgFromRequest() org: Organization,
     @Body() body: ClippingDto
@@ -19,6 +22,7 @@ export class ClippingController {
   }
 
   @Get('/')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
   getClippings(
     @GetOrgFromRequest() org: Organization,
     @Query('page') page: number
@@ -27,6 +31,7 @@ export class ClippingController {
   }
 
   @Get('/:id')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
   getClipping(@GetOrgFromRequest() org: Organization, @Param('id') id: string) {
     return this._clippingService.getClipping(org.id, id);
   }

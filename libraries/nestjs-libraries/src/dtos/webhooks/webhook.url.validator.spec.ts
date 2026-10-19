@@ -1,32 +1,113 @@
-// Run: node --test libraries/nestjs-libraries/src/dtos/webhooks/webhook.url.validator.spec.ts
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import 'reflect-metadata';
 import dns from 'node:dns/promises';
-import { isBlockedIp, isSafePublicHttpsUrl } from './webhook.url.validator';
+import { validate } from 'class-validator';
+import {
+  IsSafeWebhookUrlConstraint,
+  isBlockedIp,
+  isSafePublicHttpsUrl,
+} from './webhook.url.validator';
+import { OnlyURL } from './webhooks.dto';
+import { UploadDto } from '../media/upload.dto';
 
-const realLookup = dns.lookup;
-test.afterEach(() => {
-  dns.lookup = realLookup;
-  delete process.env.SSRF_ALLOWED_HOSTS;
-});
+jest.mock('node:dns/promises', () => ({
+  __esModule: true,
+  default: {
+    lookup: jest.fn(),
+  },
+}));
 
-test('blocks a private IP by default', () => {
-  assert.equal(isBlockedIp('10.0.0.5'), true);
-});
+describe('webhook.url.validator', () => {
+  const originalDisableSsrf = process.env.DISABLE_SSRF_PROTECTION;
+  const dnsLookup = dns.lookup as jest.Mock;
 
-test('an SSRF_ALLOWED_HOSTS CIDR entry lets its private IP through', () => {
-  process.env.SSRF_ALLOWED_HOSTS = '10.0.0.0/8';
-  assert.equal(isBlockedIp('10.0.0.5'), false);
-});
+  beforeEach(() => {
+    delete process.env.DISABLE_SSRF_PROTECTION;
+    dnsLookup.mockReset();
+  });
 
-test('an SSRF_ALLOWED_HOSTS hostname entry lets that host through even when it resolves privately', async () => {
-  process.env.SSRF_ALLOWED_HOSTS = 'n8n.internal';
-  dns.lookup = (async () => [{ address: '192.168.1.50', family: 4 }]) as any;
-  assert.equal(await isSafePublicHttpsUrl('https://n8n.internal/webhook'), true);
-});
+  afterAll(() => {
+    if (originalDisableSsrf === undefined) {
+      delete process.env.DISABLE_SSRF_PROTECTION;
+      return;
+    }
 
-test('a host not on the allowlist resolving privately is still blocked', async () => {
-  process.env.SSRF_ALLOWED_HOSTS = 'n8n.internal';
-  dns.lookup = (async () => [{ address: '192.168.1.50', family: 4 }]) as any;
-  assert.equal(await isSafePublicHttpsUrl('https://other.internal/webhook'), false);
+    process.env.DISABLE_SSRF_PROTECTION = originalDisableSsrf;
+  });
+
+  it('mantem a validacao publica estrita mesmo com opt-out self-hosted', async () => {
+    process.env.DISABLE_SSRF_PROTECTION = 'true';
+
+    await expect(isSafePublicHttpsUrl('https://127.0.0.1/hook')).resolves.toBe(
+      false
+    );
+  });
+
+  it('rejeita webhook privado por padrao', async () => {
+    const constraint = new IsSafeWebhookUrlConstraint();
+
+    await expect(
+      constraint.validate('https://127.0.0.1/hook', {} as never)
+    ).resolves.toBe(false);
+  });
+
+  it('permite webhook HTTPS privado no opt-out self-hosted', async () => {
+    process.env.DISABLE_SSRF_PROTECTION = 'true';
+    const constraint = new IsSafeWebhookUrlConstraint();
+
+    await expect(
+      constraint.validate('https://127.0.0.1/hook', {
+        constraints: [true],
+      } as never)
+    ).resolves.toBe(true);
+  });
+
+  it('nao libera validadores de upload no opt-out self-hosted', async () => {
+    process.env.DISABLE_SSRF_PROTECTION = 'true';
+    const constraint = new IsSafeWebhookUrlConstraint();
+
+    await expect(
+      constraint.validate('https://127.0.0.1/media', {
+        constraints: [false],
+      } as never)
+    ).resolves.toBe(false);
+  });
+
+  it('aplica o opt-out no DTO de webhook mas nao no DTO de upload', async () => {
+    process.env.DISABLE_SSRF_PROTECTION = 'true';
+    const webhook = Object.assign(new OnlyURL(), {
+      url: 'https://127.0.0.1/hook',
+    });
+    const upload = Object.assign(new UploadDto(), {
+      url: 'https://127.0.0.1/media.jpg',
+    });
+
+    await expect(validate(webhook)).resolves.toHaveLength(0);
+    await expect(validate(upload)).resolves.not.toHaveLength(0);
+  });
+
+  it('continua rejeitando webhook HTTP no opt-out self-hosted', async () => {
+    process.env.DISABLE_SSRF_PROTECTION = 'true';
+    const constraint = new IsSafeWebhookUrlConstraint();
+
+    await expect(
+      constraint.validate('http://127.0.0.1/hook', {
+        constraints: [true],
+      } as never)
+    ).resolves.toBe(false);
+  });
+  afterEach(() => { delete process.env.SSRF_ALLOWED_HOSTS; });
+
+  it('bloqueia IP privado e permite somente o CIDR configurado', () => {
+    expect(isBlockedIp('10.0.0.5')).toBe(true);
+    process.env.SSRF_ALLOWED_HOSTS = '10.0.0.0/8';
+    expect(isBlockedIp('10.0.0.5')).toBe(false);
+    expect(isBlockedIp('192.168.1.5')).toBe(true);
+  });
+
+  it('permite o hostname explicito e bloqueia outro host privado', async () => {
+    process.env.SSRF_ALLOWED_HOSTS = 'n8n.internal';
+    dnsLookup.mockResolvedValue([{ address: '192.168.1.50', family: 4 }]);
+    await expect(isSafePublicHttpsUrl('https://n8n.internal/webhook')).resolves.toBe(true);
+    await expect(isSafePublicHttpsUrl('https://other.internal/webhook')).resolves.toBe(false);
+  });
 });

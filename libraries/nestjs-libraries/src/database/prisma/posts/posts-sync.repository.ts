@@ -19,9 +19,14 @@ export class PostsSyncRepository {
     });
   }
 
-  get(organizationId: string, id: string) {
+  get(organizationId: string, id: string, profileId?: string) {
     return this._integration.model.integration.findFirst({
-      where: { id, organizationId, deletedAt: null },
+      where: {
+        id,
+        organizationId,
+        deletedAt: null,
+        ...(profileId ? { profileId } : {}),
+      },
     });
   }
 

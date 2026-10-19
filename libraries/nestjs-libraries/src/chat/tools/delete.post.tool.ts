@@ -1,3 +1,4 @@
+import { readRequestContext } from '@gitroom/nestjs-libraries/chat/tools/tool.context.helper';
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -44,8 +45,9 @@ If it fails, the result contains output.errors.
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
+        const profileId = readRequestContext(context).get('profileId') as string | undefined;
         const organizationId = JSON.parse(
-          (context?.requestContext as any)?.get('organization') as string
+          readRequestContext(context).get('organization') as string
         ).id;
 
         try {
@@ -54,7 +56,7 @@ If it fails, the result contains output.errors.
             organizationId
           );
 
-          if (!post?.group) {
+          if (!post?.group || (profileId && post.profileId !== profileId)) {
             return { output: { errors: 'Post not found' } };
           }
 
@@ -62,7 +64,7 @@ If it fails, the result contains output.errors.
             return { output: { errors: 'This id belongs to a comment, pass the id of the main post' } };
           }
 
-          await this._postsService.deletePost(organizationId, post.group);
+          await this._postsService.deletePost(organizationId, post.group, profileId);
 
           return { output: { id: inputData.id } };
         } catch (err: any) {

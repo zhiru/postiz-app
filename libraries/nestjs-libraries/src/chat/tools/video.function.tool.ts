@@ -44,13 +44,13 @@ export class VideoFunctionTool implements AgentToolInterface {
           ),
       }),
       outputSchema: z.object({}).passthrough(),
-      execute: async (inputData, context) => {
-        checkAuth(inputData, context);
+      execute: async (input: any, options: any) => {
+        checkAuth(input, options);
         const videos = this._videoManagerService.getAllVideos();
         const findVideo = videos.find(
           (p) =>
-            p.identifier === inputData.identifier &&
-            p.tools.some((p) => p.functionName === inputData.functionName)
+            p.identifier === input.identifier &&
+            p.tools.some((p) => p.functionName === input.functionName)
         );
 
         if (!findVideo) {
@@ -60,7 +60,7 @@ export class VideoFunctionTool implements AgentToolInterface {
         const func = await this._moduleRef
           // @ts-ignore
           .get(findVideo.target, { strict: false })
-          [inputData.functionName]();
+          [input.functionName]();
         return func;
       },
     });

@@ -1,5 +1,16 @@
 import { Integration } from '@prisma/client';
 
+export class CommentAutomationDeliveryError extends Error {
+  constructor(public readonly outcome: 'rejected' | 'unknown') {
+    super(
+      outcome === 'rejected'
+        ? 'Instagram rejected this delivery.'
+        : 'Instagram delivery result is unknown; do not retry automatically.'
+    );
+    this.name = 'CommentAutomationDeliveryError';
+  }
+}
+
 export interface ClientInformation {
   client_id: string;
   client_secret: string;
@@ -14,7 +25,10 @@ export interface IAuthenticator {
     },
     clientInformation?: ClientInformation
   ): Promise<AuthTokenDetails | string>;
-  refreshToken(refreshToken: string): Promise<AuthTokenDetails>;
+  refreshToken(
+    refreshToken: string,
+    clientInformation?: ClientInformation
+  ): Promise<AuthTokenDetails>;
   reConnect?(
     id: string,
     requiredId: string,
@@ -26,13 +40,15 @@ export interface IAuthenticator {
   analytics?(
     id: string,
     accessToken: string,
-    date: number
+    date: number,
+    integration?: Integration
   ): Promise<AnalyticsData[]>;
   postAnalytics?(
     integrationId: string,
     accessToken: string,
     postId: string,
     fromDate: number,
+    integration?: Integration
   ): Promise<AnalyticsData[]>;
   resolveReleaseId?(
     accessToken: string,
@@ -95,7 +111,6 @@ export type ReportMetric =
 
 export type ReportMetricsMap = Partial<Record<ReportMetric, string[]>>;
 
-
 export type GenerateAuthUrlResponse = {
   url: string;
   codeVerifier: string;
@@ -133,7 +148,7 @@ export interface ISocialMediaIntegration {
     accessToken: string,
     postDetails: PostDetails[],
     integration: Integration
-  ): Promise<PostResponse[]>; // Like `post`, but may return a `pending` response the workflow resolves via checkPostStatus / finalizePost
+  ): Promise<PostResponse[]>; // May return status=pending for workflow polling
 
   comment?(
     id: string,
@@ -173,21 +188,11 @@ export type PostResponse = {
   id: string; // The db internal id of the post
   postId: string; // The ID of the scheduled post returned by the platform
   releaseURL: string; // The URL of the post on the platform
-  status: string; // Status of the operation or initial post status, 'pending' means the workflow must poll checkPostStatus
-  pendingData?: any; // Opaque provider state used by checkPostStatus / finalizePost, never inspected by generic code
+  status: string; // Status of the operation or initial post status
+  pendingData?: any; // Small provider state; credentials are forbidden
 };
 
-// Returned by checkPostStatus / finalizePost:
-// 'pending' - the platform is still processing, poll again later
-// 'ready' - processing is done, the workflow must call finalizePost to run the remaining mutations
-// 'completed' - the post is fully published
-//
-// Contract: once finalizePost's mutations have actually gone through on the
-// platform, checkPostStatus must return 'completed' - never 'ready' again -
-// otherwise a finalizePost retry after an unknown-outcome failure would re-run
-// the mutations and duplicate the post. The only exception: when finalizePost's
-// mutation is idempotent (like setting a thumbnail), returning 'ready' again is
-// allowed, since re-running it cannot duplicate anything.
+// Once a finalization mutation was accepted, status checks must never authorize it again.
 export type PendingCheckResponse =
   | { status: 'pending'; pendingData: any }
   | { status: 'ready'; pendingData: any }
@@ -238,8 +243,14 @@ export interface SocialProvider
   reportMetrics?: ReportMetricsMap;
   convertToJPEG?: boolean;
   stripLinks?: () => boolean;
-  refreshCron?: boolean;
   refreshErrorMessage?(err: any): string | undefined;
+  refreshCron?: boolean;
+  // Provider cujo refreshToken() e stub (sem mecanismo nativo de renovacao —
+  // ex.: facebook/instagram via Facebook Login, cujo Page Access Token nao se
+  // renova por refresh_token). O cron em lote NAO deve tratar o retorno vazio
+  // do stub como falha real e desconectar (falso positivo); a renovacao
+  // acontece via MetaSystemUserService (System User token) ou no post-time.
+  noNativeRefresh?: boolean;
   dto?: any;
   maxLength: (additionalSettings?: any, settings?: any) => number;
   checkValidity(
@@ -280,6 +291,15 @@ export interface SocialProvider
   toolTip?: string;
   oneTimeToken?: boolean;
   isBetweenSteps: boolean;
+  // Quando true, o controller de OAuth usa refreshToken/expiresIn vindos do
+  // authenticate() em vez de body.refresh/default no fluxo de reConnect.
+  // Necessario para providers cujo access token expira em horas (YouTube/GMB),
+  // onde perder o refresh_token real do OAuth quebra a renovacao automatica.
+  keepReconnectAuthTokens?: boolean;
+  // Revoga programaticamente o token antigo antes da reconexao. Forca o
+  // provider a exibir tela de consent e emitir refresh_token novo, mesmo
+  // quando a conta ja autorizou o app antes (Google pula consent silencioso).
+  revokeToken?(accessToken: string): Promise<void>;
   scopes: string[];
   externalUrl?: (
     url: string

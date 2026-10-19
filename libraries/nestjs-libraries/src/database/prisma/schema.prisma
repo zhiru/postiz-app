@@ -9,45 +9,60 @@ datasource db {
 }
 
 model Organization {
-  id                  String               @id @default(uuid())
-  name                String
-  description         String?
-  apiKey              String?
-  paymentId           String?
-  streakSince         DateTime?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  deletedAt           DateTime?
-  allowTrial          Boolean              @default(false)
-  isTrailing          Boolean              @default(false)
-  shortlink           ShortLinkPreference  @default(ASK)
-  autoPost            AutoPost[]
-  Comments            Comments[]
-  credits             Credits[]
-  clippings           Clipping[]
-  customers           Customer[]
-  errors              Errors[]
-  github              GitHub[]
-  Integration         Integration[]
-  media               Media[]
-  buyerOrganization   MessagesGroup[]
-  notifications       Notifications[]
-  plugs               Plugs[]
-  post                Post[]               @relation("organization")
-  submittedPost       Post[]               @relation("submittedForOrg")
-  sets                Sets[]
-  signatures          Signatures[]
-  subscription        Subscription?
-  tags                Tags[]
-  thirdParty          ThirdParty[]
-  usedCodes           UsedCodes[]
-  users               UserOrganization[]
-  webhooks            Webhooks[]
-  socialComments      SocialComments[]
-  autoReplyComments   Boolean              @default(false)
-  oauthApp            OAuthApp[]
-  oauthAuthorizations OAuthAuthorization[]
-  integrationAnalytics IntegrationAnalytics[]
+  id                                   String                 @id @default(uuid())
+  name                                 String
+  description                          String?
+  apiKey                               String?
+  paymentId                            String?
+  streakSince                          DateTime?
+  createdAt                            DateTime               @default(now())
+  updatedAt                            DateTime               @updatedAt
+  deletedAt                            DateTime?
+  allowTrial                           Boolean                @default(false)
+  isTrailing                           Boolean                @default(false)
+  shortlink                            ShortLinkPreference    @default(ASK)
+  autoPost                             AutoPost[]
+  Comments                             Comments[]
+  credits                              Credits[]
+  clippings                            Clipping[]
+  customers                            Customer[]
+  errors                               Errors[]
+  github                               GitHub[]
+  Integration                          Integration[]
+  media                                Media[]
+  buyerOrganization                    MessagesGroup[]
+  notifications                        Notifications[]
+  plugs                                Plugs[]
+  post                                 Post[]                 @relation("organization")
+  submittedPost                        Post[]                 @relation("submittedForOrg")
+  sets                                 Sets[]
+  signatures                           Signatures[]
+  subscription                         Subscription?
+  tags                                 Tags[]
+  thirdParty                           ThirdParty[]
+  usedCodes                            UsedCodes[]
+  users                                UserOrganization[]
+  webhooks                             Webhooks[]
+  socialComments                       SocialComments[]
+  autoReplyComments                    Boolean                @default(false)
+  oauthApp                             OAuthApp[]
+  oauthAuthorizations                  OAuthAuthorization[]
+  integrationAnalytics                 IntegrationAnalytics[]
+  profilesBootstrappedAt               DateTime?
+  lateApiKey                           String?
+  shareLateWithProfiles                Boolean                @default(false)
+  zernioApiKey                         String?
+  shareZernioWithProfiles              Boolean                @default(false)
+  shareProviderCredentialsWithProfiles Boolean                @default(true)
+  language                             String?
+  profiles                             Profile[]
+  providerCredentials                  ProviderCredential[]
+  aiCredentials                        AiProviderCredential[]
+  flows                                Flow[]
+  reviewLinks                          ReviewLink[]
+  repostRules                          RepostRule[]
+  unmatchedComments                    UnmatchedComment[]
+  ignoredMedias                        IgnoredMedia[]
 
   @@index([apiKey])
   @@index([streakSince])
@@ -65,9 +80,12 @@ model Tags {
   updatedAt    DateTime     @updatedAt
   organization Organization @relation(fields: [orgId], references: [id])
   posts        TagsPosts[]
+  profileId    String?
+  profile      Profile?     @relation(fields: [profileId], references: [id])
 
   @@index([orgId])
   @@index([deletedAt])
+  @@index([profileId])
 }
 
 model TagsPosts {
@@ -120,6 +138,10 @@ model User {
   sendFailureEmails     Boolean              @default(true)
   sendStreakEmails      Boolean              @default(true)
   oauthAuthorizations   OAuthAuthorization[]
+  profileMembers        ProfileMember[]
+  reviewLinksCreated    ReviewLink[]         @relation("reviewLinkCreatedBy")
+  boundAliases          FlowMediaAlias[]
+  ignoredMedias         IgnoredMedia[]
 
   @@unique([email, providerName])
   @@index([lastReadNotifications])
@@ -235,10 +257,13 @@ model Media {
   agencies           SocialMediaAgency[]
   userPicture        User[]
   oauthApps          OAuthApp[]
+  profileId          String?
+  profile            Profile?            @relation(fields: [profileId], references: [id])
 
   @@index([name])
   @@index([organizationId])
   @@index([type])
+  @@index([profileId])
 }
 
 model SocialMediaAgency {
@@ -286,9 +311,12 @@ model Credits {
   updatedAt      DateTime     @updatedAt
   type           String       @default("ai_images")
   organization   Organization @relation(fields: [organizationId], references: [id])
+  profileId      String?
+  profile        Profile?     @relation(fields: [profileId], references: [id])
 
   @@index([organizationId])
   @@index([createdAt])
+  @@index([profileId])
 }
 
 model Clipping {
@@ -368,42 +396,54 @@ model Customer {
 }
 
 model Integration {
-  id                    String                 @id @default(cuid())
-  internalId            String
-  organizationId        String
-  name                  String
-  customName            String?
-  picture               String?
-  providerIdentifier    String
-  type                  String
-  token                 String
-  disabled              Boolean                @default(false)
-  tokenExpiration       DateTime?
-  refreshToken          String?
-  profile               String?
-  deletedAt             DateTime?
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime?              @updatedAt
-  inBetweenSteps        Boolean                @default(false)
-  refreshNeeded         Boolean                @default(false)
-  postingTimes          String                 @default("[{\"time\":120}, {\"time\":400}, {\"time\":700}]")
-  customInstanceDetails String?
-  customerId            String?
-  rootInternalId        String?
-  additionalSettings    String?                @default("[]")
-  postsSyncCursor       String?
-  postsSyncCompletedAt  DateTime?
+  id                     String                  @id @default(cuid())
+  internalId             String
+  organizationId         String
+  name                   String
+  customName             String?
+  picture                String?
+  providerIdentifier     String
+  type                   String
+  token                  String
+  disabled               Boolean                 @default(false)
+  tokenExpiration        DateTime?
+  refreshToken           String?
+  profile                String?
+  deletedAt              DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime?               @updatedAt
+  inBetweenSteps         Boolean                 @default(false)
+  refreshNeeded          Boolean                 @default(false)
+  postingTimes           String                  @default("[{\"time\":120}, {\"time\":400}, {\"time\":700}]")
+  customInstanceDetails  String?
+  customerId             String?
+  rootInternalId         String?
+  additionalSettings     String?                 @default("[]")
+  postsSyncCursor        String?
+  postsSyncCompletedAt   DateTime?
   postsSyncLastSuccessAt DateTime?
   postsSyncLastError     String?
-  postsSyncRunningSince DateTime?
-  exisingPlugData       ExisingPlugData[]
-  customer              Customer?              @relation(fields: [customerId], references: [id])
-  organization          Organization           @relation(fields: [organizationId], references: [id])
-  webhooks              IntegrationsWebhooks[]
-  orderItems            OrderItems[]
-  plugs                 Plugs[]
-  posts                 Post[]
-  analytics             IntegrationAnalytics[]
+  postsSyncRunningSince  DateTime?
+  exisingPlugData        ExisingPlugData[]
+  customer               Customer?               @relation(fields: [customerId], references: [id])
+  organization           Organization            @relation(fields: [organizationId], references: [id])
+  webhooks               IntegrationsWebhooks[]
+  orderItems             OrderItems[]
+  plugs                  Plugs[]
+  posts                  Post[]
+  analytics              IntegrationAnalytics[]
+  socialComments         SocialComments[]
+  refreshError           String?
+  refreshErrorAt         DateTime?
+  profileId              String?
+  tokenEncrypted         Boolean                 @default(false)
+  clientProfile          Profile?                @relation(fields: [profileId], references: [id])
+  flows                  Flow[]
+  repostRulesAsSource    RepostRule[]            @relation("RepostRuleSource")
+  repostRuleDestinations RepostRuleDestination[] @relation("RepostRuleDestination")
+  flowMediaAliases       FlowMediaAlias[]
+  unmatchedComments      UnmatchedComment[]
+  ignoredMedias          IgnoredMedia[]
 
   @@unique([organizationId, internalId])
   @@index([rootInternalId])
@@ -416,7 +456,7 @@ model Integration {
   @@index([inBetweenSteps])
   @@index([refreshNeeded])
   @@index([disabled])
-  socialComments         SocialComments[]
+  @@index([profileId])
 }
 
 // One row per channel, per day, per canonical report metric. Written by the
@@ -449,10 +489,13 @@ model Signatures {
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id])
+  profileId      String?
+  profile        Profile?     @relation(fields: [profileId], references: [id])
 
   @@index([createdAt])
   @@index([organizationId])
   @@index([deletedAt])
+  @@index([profileId])
 }
 
 model Comments {
@@ -475,6 +518,13 @@ model Comments {
   user           User?        @relation(fields: [userId], references: [id])
   parent         Comments?    @relation("CommentReplies", fields: [parentId], references: [id])
   replies        Comments[]   @relation("CommentReplies")
+  reviewLinkId   String?
+  guestName      String?
+  guestEmail     String?
+  guestIp        String?
+  guestUserAgent String?
+  kind           CommentKind  @default(COMMENT)
+  reviewLink     ReviewLink?  @relation(fields: [reviewLinkId], references: [id])
 
   @@index([createdAt])
   @@index([organizationId])
@@ -483,6 +533,8 @@ model Comments {
   @@index([parentId])
   @@index([resolvedAt])
   @@index([deletedAt])
+  @@index([reviewLinkId])
+  @@index([kind])
 }
 
 model Post {
@@ -530,7 +582,12 @@ model Post {
   submittedForOrder          Orders?                   @relation(fields: [submittedForOrderId], references: [id])
   submittedForOrganization   Organization?             @relation("submittedForOrg", fields: [submittedForOrganizationId], references: [id])
   tags                       TagsPosts[]
+  socialComments             SocialComments[]
+  profileId                  String?
+  profile                    Profile?                  @relation("profilePosts", fields: [profileId], references: [id])
+  reviewLinks                ReviewLink[]
 
+  @@unique([integrationId, externalId])
   @@index([group])
   @@index([batchId])
   @@index([deletedAt])
@@ -547,9 +604,8 @@ model Post {
   @@index([updatedAt])
   @@index([releaseURL])
   @@index([integrationId])
-  socialComments             SocialComments[]
-  @@unique([integrationId, externalId])
   @@index([recurringSourceId, recurringSlotDate])
+  @@index([profileId])
 }
 
 model Notifications {
@@ -561,10 +617,14 @@ model Notifications {
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id])
+  contentKey     String?
+  contentParams  Json?
+  profileId      String?
 
   @@index([createdAt])
   @@index([organizationId])
   @@index([deletedAt])
+  @@index([profileId])
 }
 
 model MessagesGroup {
@@ -712,9 +772,12 @@ model Webhooks {
   integrations   IntegrationsWebhooks[]
   deliveries     WebhookDeliveries[]
   organization   Organization           @relation(fields: [organizationId], references: [id])
+  profileId      String?
+  profile        Profile?               @relation(fields: [profileId], references: [id])
 
   @@index([organizationId])
   @@index([deletedAt])
+  @@index([profileId])
 }
 
 // Comments read from the social networks (Instagram, Facebook). Not to be
@@ -785,8 +848,11 @@ model AutoPost {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   organization    Organization @relation(fields: [organizationId], references: [id])
+  profileId       String?
+  profile         Profile?     @relation(fields: [profileId], references: [id])
 
   @@index([deletedAt])
+  @@index([profileId])
 }
 
 model Sets {
@@ -797,8 +863,11 @@ model Sets {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id])
+  profileId      String?
+  profile        Profile?     @relation(fields: [profileId], references: [id])
 
   @@index([organizationId])
+  @@index([profileId])
 }
 
 model ThirdParty {
@@ -1941,4 +2010,605 @@ model InstanceCredential {
   value     String
   updatedBy String?
   updatedAt DateTime @updatedAt
+}
+
+enum CommentKind {
+  COMMENT
+  APPROVAL
+  CHANGE_REQUEST
+}
+
+model ReviewLink {
+  id             String       @id @default(uuid())
+  postId         String
+  organizationId String
+  tokenHash      String       @unique
+  allowComment   Boolean      @default(true)
+  allowApprove   Boolean      @default(true)
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdById    String
+  lastUsedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  post           Post         @relation(fields: [postId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdBy      User         @relation("reviewLinkCreatedBy", fields: [createdById], references: [id])
+  comments       Comments[]
+
+  @@index([postId])
+  @@index([organizationId])
+  @@index([revokedAt])
+  @@index([expiresAt])
+}
+
+model ProviderCredential {
+  id             String       @id @default(cuid())
+  organizationId String
+  profileId      String?
+  provider       String
+  encryptedData  String       @db.Text
+  keyVersion     Int          @default(1)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  profile        Profile?     @relation(fields: [profileId], references: [id])
+
+  @@unique([organizationId, profileId, provider])
+  @@index([organizationId])
+  @@index([profileId])
+}
+
+enum AiScope {
+  WORKSPACE
+  PROFILE
+}
+
+enum AiKind {
+  TEXT
+  IMAGE
+  VIDEO
+  WEB_SEARCH
+}
+
+model AiProviderCredential {
+  id             String    @id @default(cuid())
+  organizationId String
+  profileId      String?
+  scope          AiScope
+  kind           AiKind
+  provider       String
+  model          String?
+  fallbackModel  String?
+  options        Json?
+  encryptedData  String    @db.Text
+  shareDefault   Boolean   @default(true)
+  keyVersion     Int       @default(1)
+  lastUsedAt     DateTime?
+  lastTestStatus String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  profile      Profile?     @relation(fields: [profileId], references: [id])
+
+  @@unique([organizationId, profileId, scope, kind])
+  @@index([organizationId, kind])
+  @@index([profileId])
+}
+
+enum ProfileRole {
+  OWNER
+  MANAGER
+  EDITOR
+  VIEWER
+}
+
+model Profile {
+  id             String              @id @default(uuid())
+  name           String
+  slug           String
+  description    String?
+  avatarUrl      String?
+  organizationId String
+  isDefault      Boolean             @default(false)
+  lateApiKey     String?
+  zernioApiKey   String?
+  apiKey         String?
+  shortlink      ShortLinkPreference @default(ASK)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  deletedAt      DateTime?
+
+  organization       Organization               @relation(fields: [organizationId], references: [id])
+  members            ProfileMember[]
+  integrations       Integration[]
+  posts              Post[]                     @relation("profilePosts")
+  media              Media[]
+  tags               Tags[]
+  signatures         Signatures[]
+  credentials        ProviderCredential[]
+  aiCredentials      AiProviderCredential[]
+  webhooks           Webhooks[]
+  autoPosts          AutoPost[]
+  sets               Sets[]
+  credits            Credits[]
+  aiImageCredits     Int?
+  aiVideoCredits     Int?
+  persona            ProfilePersona?
+  knowledgeDocuments ProfileKnowledgeDocument[]
+  flows              Flow[]
+  repostRules        RepostRule[]
+
+  @@unique([organizationId, slug, deletedAt])
+  @@index([organizationId])
+  @@index([isDefault])
+  @@index([apiKey])
+}
+
+enum KnowledgeDocumentStatus {
+  PROCESSING
+  READY
+  FAILED
+}
+
+model ProfileKnowledgeDocument {
+  id           String                  @id @default(uuid())
+  profileId    String
+  filename     String
+  mimeType     String
+  sizeBytes    Int
+  status       KnowledgeDocumentStatus @default(PROCESSING)
+  chunkCount   Int                     @default(0)
+  errorMessage String?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@index([status])
+}
+
+model ProfilePersona {
+  id                  String   @id @default(uuid())
+  profileId           String   @unique
+  brandDescription    String?
+  toneOfVoice         String?
+  writingInstructions String?
+  preferredCtas       String[] @default([])
+  contentRestrictions String?
+  imageStyle          String?
+  targetAudience      String?
+  examplePosts        String[] @default([])
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+}
+
+model ProfileMember {
+  id        String      @id @default(uuid())
+  profileId String
+  userId    String
+  role      ProfileRole @default(EDITOR)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  profile Profile @relation(fields: [profileId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([profileId, userId])
+  @@index([userId])
+}
+
+enum FlowStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum FlowNodeType {
+  TRIGGER
+  CONDITION
+  REPLY_COMMENT
+  SEND_DM
+  DELAY
+}
+
+enum FlowExecutionStatus {
+  RUNNING
+  WAITING_POSTBACK
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum PendingPostbackStatus {
+  PENDING
+  CONSUMED
+  EXPIRED
+  ABANDONED
+}
+
+model Flow {
+  id             String     @id @default(uuid())
+  organizationId String
+  profileId      String?
+  integrationId  String
+  name           String
+  description    String?
+  status         FlowStatus @default(DRAFT)
+  triggerPostIds String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  deletedAt      DateTime?
+
+  organization           Organization       @relation(fields: [organizationId], references: [id])
+  profile                Profile?           @relation(fields: [profileId], references: [id])
+  integration            Integration        @relation(fields: [integrationId], references: [id])
+  nodes                  FlowNode[]
+  edges                  FlowEdge[]
+  executions             FlowExecution[]
+  pendingPostbacks       PendingPostback[]
+  mediaAliases           FlowMediaAlias[]
+  boundUnmatchedComments UnmatchedComment[] @relation("BoundFlow")
+
+  @@index([organizationId])
+  @@index([profileId])
+  @@index([integrationId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model FlowNode {
+  id        String       @id @default(uuid())
+  flowId    String
+  type      FlowNodeType
+  label     String?
+  data      String       @default("{}")
+  positionX Float        @default(0)
+  positionY Float        @default(0)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  flow        Flow       @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  sourceEdges FlowEdge[] @relation("sourceNode")
+  targetEdges FlowEdge[] @relation("targetNode")
+
+  @@index([flowId])
+  @@index([type])
+}
+
+model FlowEdge {
+  id           String   @id @default(uuid())
+  flowId       String
+  sourceNodeId String
+  targetNodeId String
+  sourceHandle String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  flow       Flow     @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  sourceNode FlowNode @relation("sourceNode", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNode FlowNode @relation("targetNode", fields: [targetNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([flowId, sourceNodeId, targetNodeId, sourceHandle])
+  @@index([flowId])
+  @@index([sourceNodeId])
+  @@index([targetNodeId])
+}
+
+model FlowExecution {
+  id                 String              @id @default(uuid())
+  flowId             String
+  temporalWorkflowId String?
+  triggerType        String?
+  igCommentId        String?
+  igCommenterId      String
+  igCommenterName    String?
+  igMediaId          String
+  igThreadId         String?
+  igMessageId        String?
+  commentText        String
+  status             FlowExecutionStatus @default(RUNNING)
+  currentNodeId      String?
+  error              String?
+  executionLog       String?
+  startedAt          DateTime            @default(now())
+  completedAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  flow             Flow              @relation(fields: [flowId], references: [id])
+  pendingPostbacks PendingPostback[]
+
+  @@unique([flowId, igCommentId])
+  @@unique([flowId, igMessageId])
+  @@index([flowId])
+  @@index([status])
+  @@index([igCommenterId])
+  @@index([igMediaId])
+  @@index([igMessageId])
+  @@index([triggerType])
+  @@index([createdAt])
+}
+
+model PendingPostback {
+  id          String @id @default(uuid())
+  payload     String @unique
+  payloadHmac String
+
+  flowId            String
+  originExecutionId String
+  integrationId     String
+  organizationId    String
+
+  igSenderId      String
+  igCommenterName String?
+  igMediaId       String?
+  igCommentId     String?
+
+  kind         String @default("initial")
+  attemptCount Int    @default(0)
+  maxAttempts  Int    @default(3)
+
+  consumedMetaMid String?               @unique
+  status          PendingPostbackStatus @default(PENDING)
+
+  // Snapshots imutaveis capturados no momento da criacao.
+  // O flow pode ser editado dentro das 24h de janela da Meta.
+  snapshotFinalDm          String?
+  snapshotFinalBtnText     String?
+  snapshotFinalBtnUrl      String?
+  snapshotGateDm           String?
+  snapshotAlreadyBtnText   String?
+  snapshotExhaustedMessage String?
+  openingDmMessage         String?
+  openingDmButtonText      String?
+
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  consumedAt DateTime?
+
+  flow      Flow          @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  execution FlowExecution @relation(fields: [originExecutionId], references: [id], onDelete: Cascade)
+
+  @@index([flowId])
+  @@index([originExecutionId])
+  @@index([expiresAt])
+  @@index([status])
+  @@index([igSenderId])
+}
+
+enum AliasSource {
+  MANUAL // user colou ID no campo "IDs de Anuncios" do trigger
+  WEBHOOK_INBOX // user vinculou um UnmatchedComment a um flow no Inbox
+}
+
+enum UnmatchedStatus {
+  PENDING // visivel no Inbox aguardando acao do user
+  BOUND // user vinculou a um flow (criou FlowMediaAlias)
+  IGNORED // user ignorou — IgnoredMedia tambem criado
+}
+
+model FlowMediaAlias {
+  id            String      @id @default(uuid())
+  flowId        String
+  integrationId String // desnormalizado: hot path do matcher
+  aliasMediaId  String // media ID que sera matchada no webhook
+  source        AliasSource @default(MANUAL)
+  note          String?
+  boundBy       String? // userId
+  boundAt       DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  flow        Flow        @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  user        User?       @relation(fields: [boundBy], references: [id], onDelete: SetNull)
+
+  @@unique([flowId, aliasMediaId])
+  @@index([integrationId, aliasMediaId])
+  @@index([flowId])
+  @@index([aliasMediaId])
+}
+
+model UnmatchedComment {
+  id             String @id @default(uuid())
+  integrationId  String
+  organizationId String
+
+  igMediaId       String
+  igCommentId     String
+  igCommenterId   String
+  igCommenterName String?
+  commentText     String  @db.Text
+
+  status UnmatchedStatus @default(PENDING)
+
+  // Metadata enriquecida via workflow Temporal (lazy, nullable)
+  permalink       String?
+  caption         String?   @db.Text
+  thumbnailUrl    String?
+  mediaType       String?
+  isAd            Boolean? // boost_eligibility_info.eligible_to_boost === false
+  enrichedAt      DateTime?
+  enrichmentError String?
+
+  // Audit
+  boundFlowId String?
+  boundAt     DateTime?
+  ignoredAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  integration  Integration  @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  boundFlow    Flow?        @relation("BoundFlow", fields: [boundFlowId], references: [id], onDelete: SetNull)
+
+  @@unique([integrationId, igCommentId])
+  @@index([integrationId, status, createdAt])
+  @@index([organizationId])
+  @@index([igMediaId])
+  @@index([createdAt])
+}
+
+model IgnoredMedia {
+  id             String   @id @default(uuid())
+  integrationId  String
+  organizationId String
+  igMediaId      String
+  reason         String?
+  ignoredBy      String?
+  ignoredAt      DateTime @default(now())
+
+  integration  Integration  @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [ignoredBy], references: [id], onDelete: SetNull)
+
+  @@unique([integrationId, igMediaId])
+}
+
+enum RepostSourceType {
+  INSTAGRAM_STORY
+  INSTAGRAM_POST
+  // V3: TIKTOK_FEED, YOUTUBE_SHORT (quando implementar fetching destas origens)
+}
+
+enum RepostDestinationFormat {
+  INSTAGRAM_POST
+  INSTAGRAM_STORY
+  FACEBOOK_REEL
+  FACEBOOK_STORY
+  TIKTOK_FEED
+  YOUTUBE_SHORT
+  LINKEDIN_POST
+  X_POST
+  THREADS_POST
+  PINTEREST_PIN
+}
+
+enum RepostLogStatus {
+  PENDING
+  DOWNLOADED
+  PUBLISHED
+  PARTIAL
+  SKIPPED
+  FAILED
+}
+
+model RepostRule {
+  id                        String           @id @default(uuid())
+  organizationId            String
+  profileId                 String
+  name                      String
+  enabled                   Boolean          @default(true)
+  sourceIntegrationId       String
+  sourceType                RepostSourceType @default(INSTAGRAM_STORY)
+  // Mantido como shadow pelo periodo de migracao — o novo RepostRuleDestination
+  // eh a fonte da verdade. Sera removido em deploy posterior.
+  destinationIntegrationIds String[]         @default([])
+  intervalMinutes           Int              @default(15)
+  filterIncludeVideos       Boolean          @default(true)
+  filterIncludeImages       Boolean          @default(false)
+  filterMaxDurationSeconds  Int?
+  filterHashtag             String?
+  captionTemplate           String?
+  lastSourceItemId          String?
+  lastRunAt                 DateTime?
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
+  deletedAt                 DateTime?
+
+  organization      Organization            @relation(fields: [organizationId], references: [id])
+  profile           Profile                 @relation(fields: [profileId], references: [id])
+  sourceIntegration Integration             @relation("RepostRuleSource", fields: [sourceIntegrationId], references: [id])
+  logs              RepostLog[]
+  destinations      RepostRuleDestination[]
+
+  @@index([organizationId, profileId])
+  @@index([sourceIntegrationId])
+  @@index([enabled])
+  @@index([deletedAt])
+}
+
+model RepostRuleDestination {
+  id            String                  @id @default(uuid())
+  ruleId        String
+  integrationId String
+  format        RepostDestinationFormat
+  createdAt     DateTime                @default(now())
+
+  rule        RepostRule  @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  integration Integration @relation("RepostRuleDestination", fields: [integrationId], references: [id])
+
+  @@unique([ruleId, integrationId, format])
+  @@index([ruleId])
+  @@index([integrationId])
+}
+
+model RepostLog {
+  id               String          @id @default(uuid())
+  ruleId           String
+  sourceItemId     String
+  mediaType        String
+  mediaUrlOriginal String
+  storedMediaId    String?
+  status           RepostLogStatus @default(PENDING)
+  skippedReason    String?
+  errorMessage     String?
+  publishedPosts   Json?
+  discoveredAt     DateTime        @default(now())
+  processedAt      DateTime?
+
+  rule RepostRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, sourceItemId])
+  @@index([ruleId, status])
+}
+
+enum StatusEventType {
+  CHANNEL_DISCONNECT
+  POST_FAILED
+  AUTOMATION_FAILED
+}
+
+enum StatusEventSeverity {
+  CRITICAL
+  WARNING
+}
+
+model StatusEvent {
+  id                 String              @id @default(cuid())
+  organizationId     String
+  profileId          String?
+  integrationId      String?
+  type               StatusEventType
+  severity           StatusEventSeverity
+  message            String?
+  channelName        String?
+  channelPicture     String?
+  providerIdentifier String?
+  entityId           String?
+  createdAt          DateTime            @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, type])
+  @@index([organizationId, profileId])
+  @@index([createdAt])
+}
+
+// A send is claimed durably before calling a non-idempotent external API.
+model AutomationDelivery {
+  id          String    @id @default(uuid())
+  key         String    @unique
+  status      String    @default("SENDING")
+  providerId  String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
 }

@@ -5,51 +5,37 @@ import {
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import FormData from 'form-data';
 import {
-  BadBody,
   SocialAbstract,
+  BadBody,
   ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { DribbbleDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/dribbble.dto';
 import mime from 'mime-types';
 import { DiscordDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/discord.dto';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 
 export class DribbbleProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 3; // Dribbble has moderate API limits
+  override maxConcurrentJob = 3;
+
   identifier = 'dribbble';
+
   name = 'Dribbble';
+
   isBetweenSteps = false;
+
   scopes = ['public', 'upload'];
+
   editor = 'normal' as const;
+
   maxLength() {
     return 40000;
   }
-  dto = DribbbleDto;
 
-  override async checkValidity([firstItem]: Array<ValidityMedia[]>): Promise<
-    string | true
-  > {
-    const isMp4 = firstItem?.find(
-      (item) => (item?.path?.indexOf?.('mp4') ?? -1) > -1
-    );
-    if (firstItem?.length !== 1) {
-      return 'Requires one item';
-    }
-    if (isMp4) {
-      return 'Does not support mp4 files';
-    }
-    const details = await this.getImageDimensions(firstItem?.[0]?.path);
-    if (
-      (details?.width === 400 && details?.height === 300) ||
-      (details?.width === 800 && details?.height === 600)
-    ) {
-      return true;
-    }
-    return 'Invalid image size. Requires 400x300 or 800x600 px images.';
-  }
+  dto = DribbbleDto;
 
   async refreshToken(refreshToken: string): Promise<AuthTokenDetails> {
     const { access_token, expires_in } = await (
@@ -236,5 +222,27 @@ export class DribbbleProvider extends SocialAbstract implements SocialProvider {
   ): Promise<AnalyticsData[]> {
     // Dribbble doesn't provide detailed post-level analytics via their API
     return [];
+  }
+
+  override async checkValidity([firstItem]: Array<ValidityMedia[]>): Promise<
+    string | true
+  > {
+    const isMp4 = firstItem?.find(
+      (item) => (item?.path?.indexOf?.('mp4') ?? -1) > -1
+    );
+    if (firstItem?.length !== 1) {
+      return 'Requires one item';
+    }
+    if (isMp4) {
+      return 'Does not support mp4 files';
+    }
+    const details = await this.getImageDimensions(firstItem?.[0]?.path);
+    if (
+      (details?.width === 400 && details?.height === 300) ||
+      (details?.width === 800 && details?.height === 600)
+    ) {
+      return true;
+    }
+    return 'Invalid image size. Requires 400x300 or 800x600 px images.';
   }
 }

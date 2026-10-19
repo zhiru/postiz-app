@@ -1,3 +1,4 @@
+import { readRequestContext } from '@gitroom/nestjs-libraries/chat/tools/tool.context.helper';
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -47,13 +48,15 @@ A media with the status "ready" can be used as a post attachment with its { id, 
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
+        const profileId = readRequestContext(context).get('profileId') as string | undefined;
         try {
           const org = JSON.parse(
-            (context?.requestContext as any)?.get('organization') as string
+            readRequestContext(context).get('organization') as string
           );
           const media = await this._mediaService.getUploadSession(
             org.id,
-            inputData.sessionId
+            inputData.sessionId,
+            profileId
           );
           return {
             media: media.map((p) => ({

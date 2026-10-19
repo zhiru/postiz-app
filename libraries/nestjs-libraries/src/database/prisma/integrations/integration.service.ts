@@ -17,8 +17,8 @@ import dayjs from 'dayjs';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import {
-  NotEnoughScopes,
   RefreshToken,
+  NotEnoughScopes,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { IntegrationTimeDto } from '@gitroom/nestjs-libraries/dtos/integrations/integration.time.dto';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
@@ -28,12 +28,17 @@ import utc from 'dayjs/plugin/utc';
 import { AutopostRepository } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.repository';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { TemporalService } from 'nestjs-temporal-core';
+import { EncryptionService } from '@gitroom/nestjs-libraries/crypto/encryption.service';
+import { decryptIntegrationToken } from '@gitroom/nestjs-libraries/crypto/integration-token.helper';
+import { StatusEventService } from '@gitroom/nestjs-libraries/database/prisma/status/status-event.service';
+import { MetaSystemUserService } from '@gitroom/nestjs-libraries/integrations/meta-system-user.service';
 
 dayjs.extend(utc);
 
 @Injectable()
 export class IntegrationService {
   private storage = UploadFactory.createStorage();
+
   constructor(
     private _integrationRepository: IntegrationRepository,
     private _autopostsRepository: AutopostRepository,
@@ -41,7 +46,10 @@ export class IntegrationService {
     private _notificationService: NotificationService,
     @Inject(forwardRef(() => RefreshIntegrationService))
     private _refreshIntegrationService: RefreshIntegrationService,
-    private _temporalService: TemporalService
+    private _temporalService: TemporalService,
+    private _encryption: EncryptionService,
+    private _statusEventService: StatusEventService,
+    private _metaSystemUser: MetaSystemUserService
   ) {}
 
   async changeActiveCron(orgId: string) {
@@ -111,16 +119,32 @@ export class IntegrationService {
     isBetweenSteps = false,
     refresh?: string,
     timezone?: number,
-    customInstanceDetails?: string
+    customInstanceDetails?: string,
+    profileId?: string
   ) {
-    const uploadedPicture = picture
-      ? picture?.indexOf('imagedelivery.net') > -1
-        ? picture
-        : await this.storage.uploadSimple(picture).catch((err) => {
-            console.log('Failed to upload profile picture:', picture, err);
-            return undefined;
-          })
-      : undefined;
+    let uploadedPicture: string | undefined;
+    if (picture) {
+      if (
+        picture.indexOf('imagedelivery.net') > -1 ||
+        picture.startsWith('/icons/')
+      ) {
+        uploadedPicture = picture;
+      } else {
+        try {
+          uploadedPicture = await this.storage.uploadSimple(picture);
+        } catch (err) {
+          // Avatar e cosmetico: uma falha de storage (ex.: credencial R2 errada)
+          // NAO pode derrubar a conexao do canal — o OAuth ja deu certo. Mantem a
+          // URL original do provider (publica e utilizavel).
+          console.error(
+            `[integration] falha ao subir avatar na conexao (mantendo original): ${
+              (err as Error)?.name || 'Error'
+            }: ${(err as Error)?.message || 'sem detalhe'}`
+          );
+          uploadedPicture = picture;
+        }
+      }
+    }
 
     return this._integrationRepository.createOrUpdateIntegration(
       additionalSettings,
@@ -138,8 +162,13 @@ export class IntegrationService {
       isBetweenSteps,
       refresh,
       timezone,
-      customInstanceDetails
+      customInstanceDetails,
+      profileId
     );
+  }
+
+  setIntegrationProfile(id: string, profileId: string) {
+    return this._integrationRepository.setIntegrationProfile(id, profileId);
   }
 
   updateIntegrationGroup(org: string, id: string, group: string) {
@@ -150,12 +179,8 @@ export class IntegrationService {
     return this._integrationRepository.updateOnCustomerName(org, id, name);
   }
 
-  getIntegrationsList(org: string) {
-    return this._integrationRepository.getIntegrationsList(org);
-  }
-
-  getChannelHealth(org: string, includeDeleted = false) {
-    return this._integrationRepository.getChannelHealth(org, includeDeleted);
+  getIntegrationsList(org: string, profileId?: string) {
+    return this._integrationRepository.getIntegrationsList(org, profileId);
   }
 
   getIntegrationForOrder(id: string, order: string, user: string, org: string) {
@@ -167,10 +192,6 @@ export class IntegrationService {
     );
   }
 
-  updateCustomName(org: string, id: string, name: string) {
-    return this._integrationRepository.updateCustomName(org, id, name);
-  }
-
   updateNameAndUrl(id: string, name: string, url: string) {
     return this._integrationRepository.updateNameAndUrl(id, name, url);
   }
@@ -179,17 +200,40 @@ export class IntegrationService {
     return this._integrationRepository.getIntegrationById(org, id);
   }
 
-  getIntegrationByInternalId(org: string, internalId: string) {
-    return this._integrationRepository.getIntegrationByInternalId(
-      org,
-      internalId
-    );
+  getIntegrationsByInternalId(internalId: string) {
+    return this._integrationRepository.getIntegrationsByInternalId(internalId);
   }
 
-  async refreshToken(provider: SocialProvider, refresh: string) {
+  async refreshToken(
+    provider: SocialProvider,
+    refresh: string,
+    organizationId?: string,
+    profileId?: string | null
+  ) {
     try {
+      // Resolve credenciais por workspace antes do refresh — refresh_token
+      // foi emitido pelo client do workspace e tem que ser refrescado com o
+      // mesmo client_id/secret. Sem isso o Google rejeita com invalid_grant
+      // e a integracao entra em loop de "precisa reconectar".
+      let clientInformation;
+      if (organizationId) {
+        const dbCredentials =
+          await this._integrationManager.getProviderCredentials(
+            provider.identifier,
+            organizationId,
+            profileId || undefined
+          );
+        if (dbCredentials) {
+          clientInformation = {
+            client_id: dbCredentials.clientId || '',
+            client_secret: dbCredentials.clientSecret || '',
+            instanceUrl: dbCredentials.instanceUrl || '',
+          };
+        }
+      }
+
       const { refreshToken, accessToken, expiresIn } =
-        await provider.refreshToken(refresh);
+        await provider.refreshToken(refresh, clientInformation);
 
       if (!refreshToken || !accessToken || !expiresIn) {
         return false;
@@ -201,127 +245,52 @@ export class IntegrationService {
     }
   }
 
-  async disconnectChannel(orgId: string, integration: Integration, err = '') {
-    await this._integrationRepository.disconnectChannel(orgId, integration.id);
-    await this.informAboutRefreshError(orgId, integration, err);
-  }
-
-  // A reconnect that came back from a different provider (MIGRATE_PROVIDERS):
-  // match the disconnected channel by profile and move it to the new provider
-  // in place, so scheduled posts, settings and customers survive. Throws the
-  // same error as a mismatched reconnect when the migration is not configured
-  // or the user connected a different account.
-  async migrateIntegration(
-    org: string,
-    oldInternalId: string,
-    newProvider: string,
-    auth: { id: string; username: string }
+  async disconnectChannel(
+    orgId: string,
+    integration: Integration,
+    reason?: string
   ) {
-    const existing = await this._integrationRepository.getIntegrationByInternalId(
-      org,
-      oldInternalId
+    const transitioned = await this._integrationRepository.markRefreshNeeded(
+      orgId,
+      integration.id,
+      reason
     );
-
-    if (
-      !existing ||
-      this._integrationManager.getMigrationTarget(
-        existing.providerIdentifier
-      ) !== newProvider
-    ) {
-      throw new NotEnoughScopes(
-        'Please refresh the channel that needs to be refreshed'
-      );
+    if (transitioned) {
+      await this.informAboutRefreshError(orgId, integration);
+      // Histórico (fail-soft): registra a queda no log só na transição real
+      // (o gate `transitioned` evita duplicar quando vários call-sites atingem
+      // a mesma integration). `reason` já vem sanitizado (name+message).
+      await this._statusEventService.record({
+        organizationId: orgId,
+        type: 'CHANNEL_DISCONNECT',
+        severity: 'CRITICAL',
+        message: reason ?? null,
+        profileId: integration.profileId ?? null,
+        integrationId: integration.id,
+        channelName: integration.name,
+        channelPicture: integration.picture ?? null,
+        providerIdentifier: integration.providerIdentifier,
+      });
     }
-
-    const oldProvider = this._integrationManager.getSocialIntegration(
-      existing.providerIdentifier
-    );
-
-    if (!oldProvider.migrationMatch(auth, existing)) {
-      throw new NotEnoughScopes(
-        `Please connect the same account (@${existing.profile}) that needs to be refreshed`
-      );
-    }
-
-    if (
-      await this._integrationRepository.getIntegrationByInternalId(org, auth.id)
-    ) {
-      throw new NotEnoughScopes(
-        'This account is already connected as another channel, please delete one of them first'
-      );
-    }
-
-    return this._integrationRepository.migrateIntegration(
-      org,
-      existing.id,
-      auth.id,
-      newProvider,
-      existing.rootInternalId === existing.internalId
-        ? auth.id
-        : existing.rootInternalId
-    );
-  }
-
-  // A fresh connect of a migration target (MIGRATE_PROVIDERS) for an account
-  // the org already has on the source provider: adopt that channel instead of
-  // creating a confusing duplicate - the channel is migrated in place exactly
-  // like a reconnect, and the follow-up upsert stores the fresh tokens. A no-op
-  // when nothing matches, so a genuinely new account still creates a channel.
-  async migrateIntegrationOnConnect(
-    org: string,
-    newProvider: string,
-    auth: { id: string; username: string }
-  ) {
-    const sources = this._integrationManager.getMigrationSources(newProvider);
-    if (
-      !sources.length ||
-      this._integrationManager.getSocialIntegration(newProvider).isBetweenSteps
-    ) {
-      return;
-    }
-
-    // the account already exists on the new provider: the normal upsert
-    // updates it, nothing to adopt
-    if (
-      await this._integrationRepository.getIntegrationByInternalId(org, auth.id)
-    ) {
-      return;
-    }
-
-    const existing = (
-      await this._integrationRepository.getIntegrationsList(org)
-    ).find(
-      (p) =>
-        sources.includes(p.providerIdentifier) &&
-        this._integrationManager
-          .getSocialIntegration(p.providerIdentifier)
-          .migrationMatch(auth, p)
-    );
-
-    if (!existing) {
-      return;
-    }
-
-    return this._integrationRepository.migrateIntegration(
-      org,
-      existing.id,
-      auth.id,
-      newProvider,
-      existing.rootInternalId === existing.internalId
-        ? auth.id
-        : existing.rootInternalId
-    );
   }
 
   async informAboutRefreshError(
     orgId: string,
     integration: Integration,
-    err = ''
+    cause?: string
   ) {
     await this._notificationService.inAppNotification(
       orgId,
-      `Could not refresh your ${integration.providerIdentifier} channel`,
-      `Could not refresh your ${integration.providerIdentifier} channel ${err}. Please go back to the system and connect it again ${process.env.FRONTEND_URL}/launches`,
+      {
+        subjectKey: 'notif_channel_refresh_failed_subject',
+        messageKey: 'notif_channel_refresh_failed',
+        params: {
+          name: integration.name,
+          provider: integration.providerIdentifier,
+          url: `${process.env.FRONTEND_URL}/launches`,
+        },
+        profileId: integration.profileId ?? null,
+      },
       true,
       false,
       'info'
@@ -339,39 +308,118 @@ export class IntegrationService {
   async refreshTokens() {
     const integrations = await this._integrationRepository.needsToBeRefreshed();
     for (const integration of integrations) {
-      const provider = this._integrationManager.getSocialIntegration(
-        integration.providerIdentifier
-      );
-
-      const data = await this.refreshToken(provider, integration.refreshToken!);
-
-      if (!data) {
-        await this.informAboutRefreshError(
-          integration.organizationId,
-          integration
+      try {
+        const provider = this._integrationManager.getSocialIntegration(
+          integration.providerIdentifier
         );
-        await this._integrationRepository.refreshNeeded(
+
+        const data = await this.refreshToken(
+          provider,
+          decryptIntegrationToken(this._encryption, integration.refreshToken),
           integration.organizationId,
-          integration.id
+          integration.profileId
         );
-        return;
+
+        if (!data) {
+          // Self-heal Meta: com token de Usuario do Sistema configurado,
+          // re-deriva o Page Access Token (FB/IG via Facebook Login) e
+          // persiste sem desconectar.
+          const healed = await this._metaSystemUser.resolveHealedToken(
+            integration,
+            provider
+          );
+          if (healed) {
+            await this.createOrUpdateIntegration(
+              undefined,
+              !!provider.oneTimeToken,
+              integration.organizationId,
+              integration.name,
+              undefined,
+              'social',
+              integration.internalId,
+              integration.providerIdentifier,
+              healed.accessToken,
+              healed.refreshToken,
+              healed.expiresIn
+            );
+            continue;
+          }
+
+          if (provider.noNativeRefresh) {
+            // FB/IG (Facebook Login) nao tem refresh nativo: o stub retorna
+            // vazio SEMPRE. Sem System User token nao ha como renovar em
+            // lote — mas o Page Access Token pode continuar valido (a
+            // expiracao registrada e sintetica). Desconectar aqui era falso
+            // positivo que derrubava canal saudavel na janela de expiracao.
+            // A morte real do token e detectada e tratada no post-time
+            // (RefreshIntegrationService.refreshProcess).
+            continue;
+          }
+
+          // Nao conseguiu renovar: marca desconectado + notifica uma vez.
+          // `continue` (NAO `return`) para nao abortar o lote inteiro por causa
+          // de um unico canal quebrado.
+          await this.disconnectChannel(
+            integration.organizationId,
+            integration,
+            'Automatic token refresh failed'
+          );
+          continue;
+        }
+
+        const { refreshToken, accessToken, expiresIn } = data;
+
+        await this.createOrUpdateIntegration(
+          undefined,
+          !!provider.oneTimeToken,
+          integration.organizationId,
+          integration.name,
+          undefined,
+          'social',
+          integration.internalId,
+          integration.providerIdentifier,
+          accessToken,
+          refreshToken,
+          expiresIn
+        );
+      } catch (err) {
+        // Erro inesperado (ex.: provider desconhecido, decrypt falhou) nao pode
+        // derrubar o refresh dos demais canais. Loga SOMENTE name+message, nunca
+        // o objeto cru (pode carregar corpo de requisicao com refresh_token).
+        console.error(
+          `[refresh-tokens] integration=${integration.id} org=${
+            integration.organizationId
+          } falhou: ${(err as Error)?.name || 'Error'}: ${
+            (err as Error)?.message || 'sem detalhe'
+          }`
+        );
       }
+    }
+  }
 
-      const { refreshToken, accessToken, expiresIn } = data;
-
-      await this.createOrUpdateIntegration(
-        undefined,
-        !!provider.oneTimeToken,
-        integration.organizationId,
-        integration.name,
-        undefined,
-        'social',
-        integration.internalId,
-        integration.providerIdentifier,
-        accessToken,
-        refreshToken,
-        expiresIn
-      );
+  async validateIntegrationProfile(
+    orgId: string,
+    integrationId: string,
+    profileId?: string,
+    opts?: { requireProfile?: boolean }
+  ) {
+    if (!profileId) {
+      // Org USER sempre opera com perfil resolvido; sem ele, negar em vez de
+      // degradar para escopo org-wide. Admins e chaves de org passam.
+      if (opts?.requireProfile) {
+        throw new Error('Profile context required for this operation');
+      }
+      return;
+    }
+    const integration = await this._integrationRepository.getIntegrationById(
+      orgId,
+      integrationId
+    );
+    if (!integration) {
+      throw new Error('Integration not found');
+    }
+    if (integration.profileId && integration.profileId !== profileId) {
+      throw new Error('Integration does not belong to this profile');
     }
   }
 
@@ -379,9 +427,14 @@ export class IntegrationService {
     return this._integrationRepository.disableChannel(org, id);
   }
 
-  async enableChannel(org: string, totalChannels: number, id: string) {
+  async enableChannel(
+    org: string,
+    totalChannels: number,
+    id: string,
+    profileId?: string
+  ) {
     const integrations = (
-      await this._integrationRepository.getIntegrationsList(org)
+      await this._integrationRepository.getIntegrationsList(org, profileId)
     ).filter((f) => !f.disabled);
     if (
       !!process.env.STRIPE_PUBLISHABLE_KEY &&
@@ -403,10 +456,6 @@ export class IntegrationService {
 
   async disableIntegrations(org: string, totalChannels: number) {
     return this._integrationRepository.disableIntegrations(org, totalChannels);
-  }
-
-  async enableAllIntegrations(org: string) {
-    return this._integrationRepository.enableAllIntegrations(org);
   }
 
   async checkForDeletedOnceAndUpdate(org: string, page: string) {
@@ -436,10 +485,36 @@ export class IntegrationService {
       );
     }
 
+    getIntegration.token = decryptIntegrationToken(
+      this._encryption,
+      getIntegration.token
+    );
     const getIntegrationInformation = await provider.fetchPageInformation(
       getIntegration.token,
       data
     );
+
+    // Antes de salvar, verifica se o canal ja existe em outro perfil da mesma
+    // org. Sem essa checagem, o updateIntegration faria upsert silencioso na
+    // integracao existente, mantendo o profileId antigo e deixando o user
+    // achando que adicionou no perfil X quando na verdade ficou no perfil Y.
+    const conflicting =
+      await this._integrationRepository.findActiveByOrgAndInternalIdWithProfile(
+        org,
+        String(getIntegrationInformation.id)
+      );
+    if (
+      conflicting &&
+      conflicting.id !== id &&
+      conflicting.profileId !== getIntegration.profileId
+    ) {
+      const profileName =
+        (conflicting as any).clientProfile?.name || 'outro perfil';
+      throw new HttpException(
+        `Canal ja conectado no perfil "${profileName}". Remova de la antes de conectar aqui.`,
+        HttpStatus.CONFLICT
+      );
+    }
 
     await this.checkForDeletedOnceAndUpdate(
       org,
@@ -462,14 +537,21 @@ export class IntegrationService {
     org: Organization,
     integration: string,
     date: string,
-    forceRefresh = false
+    forceRefresh = false,
+    profileId?: string
   ): Promise<AnalyticsData[]> {
-    // Days to load, missing or invalid on some public API calls (same default as the app)
-    const days = Number(date) > 0 ? Number(date) : 7;
     const getIntegration = await this.getIntegrationById(org.id, integration);
 
     if (!getIntegration) {
       throw new Error('Invalid integration');
+    }
+
+    if (
+      profileId &&
+      getIntegration.profileId &&
+      getIntegration.profileId !== profileId
+    ) {
+      throw new Error('Integration does not belong to this profile');
     }
 
     if (getIntegration.type !== 'social') {
@@ -506,7 +588,7 @@ export class IntegrationService {
     }
 
     const getIntegrationData = await ioRedis.get(
-      `integration:${org.id}:${integration}:${days}`
+      `integration:${org.id}:${integration}:${date}`
     );
     if (getIntegrationData) {
       return JSON.parse(getIntegrationData);
@@ -514,13 +596,20 @@ export class IntegrationService {
 
     if (integrationProvider.analytics) {
       try {
+        // Decifra in-place: analytics recebe o objeto getIntegration e pode ler
+        // .token internamente. No-op se :457 ja reatribuiu um accessToken puro.
+        getIntegration.token = decryptIntegrationToken(
+          this._encryption,
+          getIntegration.token
+        );
         const loadAnalytics = await integrationProvider.analytics(
           getIntegration.internalId,
           getIntegration.token,
-          days
+          +date,
+          getIntegration
         );
         await ioRedis.set(
-          `integration:${org.id}:${integration}:${days}`,
+          `integration:${org.id}:${integration}:${date}`,
           JSON.stringify(loadAnalytics),
           'EX',
           !process.env.NODE_ENV || process.env.NODE_ENV === 'development'
@@ -540,20 +629,6 @@ export class IntegrationService {
 
   customers(orgId: string) {
     return this._integrationRepository.customers(orgId);
-  }
-
-  async updateCustomerName(orgId: string, id: string, name: string) {
-    const exists = await this._integrationRepository.getCustomerByName(
-      orgId,
-      name
-    );
-    if (exists && exists.id !== id) {
-      throw new HttpException(
-        'A group with this name already exists',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-    return this._integrationRepository.updateCustomerName(orgId, id, name);
   }
 
   getPlugsByIntegrationId(org: string, integrationId: string) {
@@ -589,6 +664,15 @@ export class IntegrationService {
     if (!getIntegration || !originalIntegration) {
       return;
     }
+    // Plug methods leem .token de AMBAS as integracoes internamente.
+    getIntegration.token = decryptIntegrationToken(
+      this._encryption,
+      getIntegration.token
+    );
+    originalIntegration.token = decryptIntegrationToken(
+      this._encryption,
+      originalIntegration.token
+    );
 
     const getAllInternalPlugs = this._integrationManager
       .getInternalPlugs(getIntegration.providerIdentifier)
@@ -624,6 +708,11 @@ export class IntegrationService {
     if (!getPlugById) {
       return true;
     }
+    // Plug method le getPlugById.integration.token internamente.
+    getPlugById.integration.token = decryptIntegrationToken(
+      this._encryption,
+      getPlugById.integration.token
+    );
 
     const integration = this._integrationManager.getSocialIntegration(
       getPlugById.integration.providerIdentifier
@@ -713,5 +802,136 @@ export class IntegrationService {
         ];
       }, [] as number[])
     );
+  }
+
+  getChannelHealth(org: string, includeDeleted = false) {
+    return this._integrationRepository.getChannelHealth(org, includeDeleted);
+  }
+
+  updateCustomName(org: string, id: string, name: string) {
+    return this._integrationRepository.updateCustomName(org, id, name);
+  }
+
+  getIntegrationByInternalId(org: string, internalId: string) {
+    return this._integrationRepository.getIntegrationByInternalId(
+      org,
+      internalId
+    );
+  }
+
+  async migrateIntegration(
+    org: string,
+    oldInternalId: string,
+    newProvider: string,
+    auth: { id: string; username: string }
+  ) {
+    const existing =
+      await this._integrationRepository.getIntegrationByInternalId(
+        org,
+        oldInternalId
+      );
+
+    if (
+      !existing ||
+      this._integrationManager.getMigrationTarget(
+        existing.providerIdentifier
+      ) !== newProvider
+    ) {
+      throw new NotEnoughScopes(
+        'Please refresh the channel that needs to be refreshed'
+      );
+    }
+
+    const oldProvider = this._integrationManager.getSocialIntegration(
+      existing.providerIdentifier
+    );
+
+    if (!oldProvider.migrationMatch(auth, existing)) {
+      throw new NotEnoughScopes(
+        `Please connect the same account (@${existing.profile}) that needs to be refreshed`
+      );
+    }
+
+    if (
+      await this._integrationRepository.getIntegrationByInternalId(org, auth.id)
+    ) {
+      throw new NotEnoughScopes(
+        'This account is already connected as another channel, please delete one of them first'
+      );
+    }
+
+    return this._integrationRepository.migrateIntegration(
+      org,
+      existing.id,
+      auth.id,
+      newProvider,
+      existing.rootInternalId === existing.internalId
+        ? auth.id
+        : existing.rootInternalId
+    );
+  }
+
+  async migrateIntegrationOnConnect(
+    org: string,
+    newProvider: string,
+    auth: { id: string; username: string }
+  ) {
+    const sources = this._integrationManager.getMigrationSources(newProvider);
+    if (
+      !sources.length ||
+      this._integrationManager.getSocialIntegration(newProvider).isBetweenSteps
+    ) {
+      return undefined;
+    }
+
+    // the account already exists on the new provider: the normal upsert
+    // updates it, nothing to adopt
+    if (
+      await this._integrationRepository.getIntegrationByInternalId(org, auth.id)
+    ) {
+      return undefined;
+    }
+
+    const existing = (
+      await this._integrationRepository.getIntegrationsList(org)
+    ).find(
+      (p) =>
+        sources.includes(p.providerIdentifier) &&
+        this._integrationManager
+          .getSocialIntegration(p.providerIdentifier)
+          .migrationMatch(auth, p)
+    );
+
+    if (!existing) {
+      return undefined;
+    }
+
+    return this._integrationRepository.migrateIntegration(
+      org,
+      existing.id,
+      auth.id,
+      newProvider,
+      existing.rootInternalId === existing.internalId
+        ? auth.id
+        : existing.rootInternalId
+    );
+  }
+
+  async enableAllIntegrations(org: string) {
+    return this._integrationRepository.enableAllIntegrations(org);
+  }
+
+  async updateCustomerName(orgId: string, id: string, name: string) {
+    const exists = await this._integrationRepository.getCustomerByName(
+      orgId,
+      name
+    );
+    if (exists && exists.id !== id) {
+      throw new HttpException(
+        'A group with this name already exists',
+        HttpStatus.BAD_REQUEST
+      );
+    }
+    return this._integrationRepository.updateCustomerName(orgId, id, name);
   }
 }

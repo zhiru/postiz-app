@@ -11,9 +11,11 @@ import { Select } from '@gitroom/react/form/select';
 import { Button } from '@gitroom/react/form/button';
 import { useRouter } from 'next/navigation';
 import { useToaster } from '@gitroom/react/toaster/toaster';
+import { getPlatformIconPath } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
 import { PlugsContext } from '@gitroom/frontend/components/plugs/plugs.context';
 import { Plug } from '@gitroom/frontend/components/plugs/plug';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { SVGLine } from '@gitroom/frontend/components/launches/launches.component';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 export const Plugs = () => {
   const fetch = useFetch();
@@ -106,12 +108,75 @@ export const Plugs = () => {
               'You have to add: X, LinkedIn Page, Threads or Bluesky'
             )}
           </div>
-          <Button onClick={() => router.push('/launches')}>
-            {t(
-              'go_to_the_calendar_to_add_channels',
-              'Go to the calendar to add channels'
-            )}
-          </Button>
+          {sortedIntegrations.map((integration, index) => (
+            <div
+              key={integration.id}
+              onClick={() => {
+                if (integration.refreshNeeded) {
+                  toaster.show(
+                    t(
+                      'please_refresh_integration',
+                      'Please refresh the integration from the calendar'
+                    ),
+                    'warning'
+                  );
+                  return;
+                }
+                setRefresh(true);
+                setTimeout(() => {
+                  setRefresh(false);
+                }, 10);
+                setCurrent(index);
+              }}
+              className={clsx(
+                'flex gap-[8px] items-center justify-center group/profile hover:bg-boxHover rounded-e-[8px]',
+                currentIntegration.id !== integration.id &&
+                  'opacity-20 hover:opacity-100 cursor-pointer'
+              )}
+            >
+              <div
+                className={clsx(
+                  'relative rounded-full flex justify-center items-center gap-[8px]',
+                  integration.disabled && 'opacity-50'
+                )}
+              >
+                {(integration.inBetweenSteps || integration.refreshNeeded) && (
+                  <div className="absolute start-0 top-0 w-[39px] h-[46px] cursor-pointer">
+                    <div className="bg-red-500 w-[15px] h-[15px] rounded-full start-0 -top-[5px] absolute z-[200] text-[10px] flex justify-center items-center">
+                      !
+                    </div>
+                    <div className="bg-primary/60 w-[39px] h-[46px] start-0 top-0 absolute rounded-full z-[199]" />
+                  </div>
+                )}
+                <div className="h-full w-[4px] -ms-[12px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity">
+                  <SVGLine />
+                </div>
+                <ImageWithFallback
+                  fallbackSrc={getPlatformIconPath(integration.identifier)}
+                  src={integration.picture}
+                  className="rounded-[8px]"
+                  alt={integration.identifier}
+                  width={36}
+                  height={36}
+                />
+                <SafeImage
+                  src={getPlatformIconPath(integration.identifier)}
+                  className="rounded-[8px] absolute z-10 bottom-[5px] -end-[5px] border border-fifth"
+                  alt={integration.identifier}
+                  width={18.41}
+                  height={18.41}
+                />
+              </div>
+              <div
+                className={clsx(
+                  'flex-1 whitespace-nowrap text-ellipsis overflow-hidden group-[.sidebar]:hidden',
+                  integration.disabled && 'opacity-50'
+                )}
+              >
+                {integration.name}
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <>

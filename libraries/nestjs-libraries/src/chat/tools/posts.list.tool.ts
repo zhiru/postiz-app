@@ -1,3 +1,4 @@
+import { readRequestContext } from '@gitroom/nestjs-libraries/chat/tools/tool.context.helper';
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -113,8 +114,9 @@ To delete a post, pass its "id" to deletePostTool - only after the user explicit
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
+        const profileId = readRequestContext(context).get('profileId') as string | undefined;
         const organizationId = JSON.parse(
-          (context?.requestContext as any)?.get('organization') as string
+          readRequestContext(context).get('organization') as string
         ).id;
 
         const page = inputData.page || 0;
@@ -126,7 +128,8 @@ To delete a post, pass its "id" to deletePostTool - only after the user explicit
               endDate: inputData.endDate,
               customer: inputData.customer,
             } as any,
-            inputData.includeAttachments
+            inputData.includeAttachments,
+            profileId
           )) || []
         ).sort(
           (a: any, b: any) =>

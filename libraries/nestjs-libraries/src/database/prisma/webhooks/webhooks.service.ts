@@ -11,28 +11,28 @@ import {
 export class WebhooksService {
   constructor(private _webhooksRepository: WebhooksRepository) {}
 
-  getTotal(orgId: string) {
-    return this._webhooksRepository.getTotal(orgId);
+  getTotal(orgId: string, profileId?: string) {
+    return this._webhooksRepository.getTotal(orgId, profileId);
   }
 
-  getWebhooks(orgId: string) {
-    return this._webhooksRepository.getWebhooks(orgId);
+  getWebhooks(orgId: string, profileId?: string) {
+    return this._webhooksRepository.getWebhooks(orgId, profileId);
   }
 
-  createWebhook(orgId: string, body: WebhooksDto) {
-    return this._webhooksRepository.createWebhook(orgId, body);
+  createWebhook(orgId: string, body: WebhooksDto, profileId?: string) {
+    return this._webhooksRepository.createWebhook(orgId, body, profileId);
   }
 
-  deleteWebhook(orgId: string, id: string) {
-    return this._webhooksRepository.deleteWebhook(orgId, id);
+  deleteWebhook(orgId: string, id: string, profileId?: string) {
+    return this._webhooksRepository.deleteWebhook(orgId, id, profileId);
   }
 
-  rotateSecret(orgId: string, id: string) {
-    return this._webhooksRepository.rotateSecret(orgId, id);
+  rotateSecret(orgId: string, id: string, profileId?: string) {
+    return this._webhooksRepository.rotateSecret(orgId, id, profileId);
   }
 
-  getDeliveries(orgId: string, id: string) {
-    return this._webhooksRepository.getDeliveries(orgId, id);
+  getDeliveries(orgId: string, id: string, profileId?: string) {
+    return this._webhooksRepository.getDeliveries(orgId, id, profileId);
   }
 
   // Lets a caller skip building a payload nobody is going to receive.
@@ -53,7 +53,7 @@ export class WebhooksService {
     payload: any
   ) {
     const webhooks = (
-      await this._webhooksRepository.getWebhooksForDispatch(orgId)
+      await this._webhooksRepository.getWebhooksForDispatch(orgId, integrationId)
     ).filter(
       (f) =>
         webhookSubscribesTo(f.events, event) &&

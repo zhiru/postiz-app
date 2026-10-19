@@ -1,5 +1,10 @@
+import { AutomationDeliveryService } from './flows/automation-delivery.service';
 import { Global, Module } from '@nestjs/common';
-import { PrismaRepository, PrismaService, PrismaTransaction } from './prisma.service';
+import {
+  PrismaRepository,
+  PrismaService,
+  PrismaTransaction,
+} from './prisma.service';
 import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
@@ -46,10 +51,35 @@ import { ThirdPartyService } from '@gitroom/nestjs-libraries/database/prisma/thi
 import { VideoManager } from '@gitroom/nestjs-libraries/videos/video.manager';
 import { FalService } from '@gitroom/nestjs-libraries/openai/fal.service';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
+import { MetaSystemUserService } from '@gitroom/nestjs-libraries/integrations/meta-system-user.service';
+import { CredentialRepository } from '@gitroom/nestjs-libraries/database/prisma/credentials/credential.repository';
+import { CredentialService } from '@gitroom/nestjs-libraries/database/prisma/credentials/credential.service';
+import { EncryptionService } from '@gitroom/nestjs-libraries/crypto/encryption.service';
+import { ProfileRepository } from '@gitroom/nestjs-libraries/database/prisma/profiles/profile.repository';
+import { ProfileService } from '@gitroom/nestjs-libraries/database/prisma/profiles/profile.service';
+import { StartupMigrationService } from '@gitroom/nestjs-libraries/database/prisma/startup-migration.service';
+import { VectorInitService } from '@gitroom/nestjs-libraries/chat/vector/vector.init.service';
+import { KnowledgeRepository } from '@gitroom/nestjs-libraries/database/prisma/knowledge/knowledge.repository';
+import { KnowledgeService } from '@gitroom/nestjs-libraries/database/prisma/knowledge/knowledge.service';
 import { OAuthRepository } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.repository';
 import { OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
 import { AnnouncementsRepository } from '@gitroom/nestjs-libraries/database/prisma/announcements/announcements.repository';
 import { AnnouncementsService } from '@gitroom/nestjs-libraries/database/prisma/announcements/announcements.service';
+import { FlowsRepository } from '@gitroom/nestjs-libraries/database/prisma/flows/flows.repository';
+import { FlowsService } from '@gitroom/nestjs-libraries/database/prisma/flows/flows.service';
+import { UnmatchedCommentService } from '@gitroom/nestjs-libraries/database/prisma/flows/unmatched-comment.service';
+import { InstagramProvider } from '@gitroom/nestjs-libraries/integrations/social/instagram.provider';
+import { ReviewLinksRepository } from '@gitroom/nestjs-libraries/database/prisma/review-links/review-links.repository';
+import { ReviewLinksService } from '@gitroom/nestjs-libraries/database/prisma/review-links/review-links.service';
+import { InstagramMessagingService } from '@gitroom/nestjs-libraries/integrations/social/instagram-messaging.service';
+import { RepostRepository } from '@gitroom/nestjs-libraries/database/prisma/repost/repost.repository';
+import { RepostService } from '@gitroom/nestjs-libraries/database/prisma/repost/repost.service';
+import { StatusService } from '@gitroom/nestjs-libraries/database/prisma/status/status.service';
+import { StatusEventService } from '@gitroom/nestjs-libraries/database/prisma/status/status-event.service';
+import { StatusEventRepository } from '@gitroom/nestjs-libraries/database/prisma/status/status-event.repository';
+import { InfraHealthService } from '@gitroom/nestjs-libraries/database/prisma/status/infra-health.service';
+import { InfraHealthRepository } from '@gitroom/nestjs-libraries/database/prisma/status/infra-health.repository';
+import { AiModule } from '@gitroom/nestjs-libraries/ai/ai.module';
 import { ErrorsRepository } from '@gitroom/nestjs-libraries/database/prisma/errors/errors.repository';
 import { ErrorsService } from '@gitroom/nestjs-libraries/database/prisma/errors/errors.service';
 import { AdminStatsRepository } from '@gitroom/nestjs-libraries/database/prisma/admin-stats/admin-stats.repository';
@@ -61,7 +91,7 @@ import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/p
 
 @Global()
 @Module({
-  imports: [],
+  imports: [AiModule],
   controllers: [],
   providers: [
     PrismaService,
@@ -101,6 +131,7 @@ import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/p
     AgenciesRepository,
     IntegrationManager,
     RefreshIntegrationService,
+    MetaSystemUserService,
     ExtractContentService,
     OpenaiService,
     DeepgramService,
@@ -117,8 +148,32 @@ import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/p
     OAuthRepository,
     OAuthService,
     VideoManager,
+    CredentialRepository,
+    CredentialService,
+    EncryptionService,
+    ProfileRepository,
+    ProfileService,
+    StartupMigrationService,
+    VectorInitService,
+    KnowledgeRepository,
+    KnowledgeService,
     AnnouncementsRepository,
     AnnouncementsService,
+    AutomationDeliveryService,
+    FlowsRepository,
+    FlowsService,
+    UnmatchedCommentService,
+    InstagramProvider,
+    ReviewLinksRepository,
+    ReviewLinksService,
+    InstagramMessagingService,
+    RepostRepository,
+    RepostService,
+    StatusService,
+    StatusEventService,
+    StatusEventRepository,
+    InfraHealthService,
+    InfraHealthRepository,
     ErrorsRepository,
     ErrorsService,
     AdminStatsRepository,

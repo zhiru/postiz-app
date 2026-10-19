@@ -10,6 +10,8 @@ import {
 import { ApiTags } from '@nestjs/swagger';
 import { Organization } from '@prisma/client';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
+import { GetProfileFromRequest } from '@gitroom/nestjs-libraries/user/profile.from.request';
+import { Profile } from '@prisma/client';
 import { SocialCommentsService } from '@gitroom/nestjs-libraries/database/prisma/social-comments/social.comments.service';
 import { GetSocialCommentsDto } from '@gitroom/nestjs-libraries/dtos/comments/get.social.comments.dto';
 import { ReplySocialCommentDto } from '@gitroom/nestjs-libraries/dtos/comments/reply.social.comment.dto';
@@ -25,9 +27,10 @@ export class SocialCommentsController {
   @Get('/')
   async getComments(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @Query() query: GetSocialCommentsDto
   ) {
-    return this._socialCommentsService.getComments(org.id, query);
+    return this._socialCommentsService.getComments(org.id, query, profile?.id);
   }
 
   @Get('/auto-reply')
@@ -52,9 +55,10 @@ export class SocialCommentsController {
   @Get('/:id')
   async getComment(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id: string
   ) {
-    const comment = await this._socialCommentsService.getComment(org.id, id);
+    const comment = await this._socialCommentsService.getComment(org.id, id, profile?.id);
     if (!comment) {
       throw new NotFoundException('Comment not found');
     }
@@ -66,9 +70,10 @@ export class SocialCommentsController {
   @Post('/:id/reply')
   async reply(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id: string,
     @Body() body: ReplySocialCommentDto
   ) {
-    return this._socialCommentsService.reply(org.id, id, body.message, 'human');
+    return this._socialCommentsService.reply(org.id, id, body.message, 'human', profile?.id);
   }
 }

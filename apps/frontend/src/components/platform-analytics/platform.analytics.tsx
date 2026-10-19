@@ -1,5 +1,7 @@
 'use client';
 
+import { getPlatformIconPath } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
+
 import useSWR from 'swr';
 import { useCallback, useMemo, useState } from 'react';
 import { capitalize, orderBy } from 'lodash';
@@ -250,7 +252,7 @@ export const PlatformAnalytics = () => {
                     <SVGLine />
                   </div>
                   <ImageWithFallback
-                    fallbackSrc={`/icons/platforms/${integration.identifier}.png`}
+                    fallbackSrc={getPlatformIconPath(integration.identifier)}
                     src={integration.picture}
                     className="rounded-[8px]"
                     alt={integration.identifier}
@@ -258,7 +260,7 @@ export const PlatformAnalytics = () => {
                     height={36}
                   />
                   <SafeImage
-                    src={`/icons/platforms/${integration.identifier}.png`}
+                    src={getPlatformIconPath(integration.identifier)}
                     className="rounded-[8px] absolute z-10 bottom-[5px] -end-[5px] border border-fifth"
                     alt={integration.identifier}
                     width={18.41}

@@ -5,9 +5,11 @@ import {
   Req,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { SkipProfileAccess } from '@gitroom/nestjs-libraries/services/auth/profile-access/profile-access.decorators';
 import { PaymentService } from '@gitroom/nestjs-libraries/services/payment/payment.service';
 
 @ApiTags('Stripe')
+@SkipProfileAccess()
 @Controller('/stripe')
 export class StripeController {
   constructor(private readonly _paymentService: PaymentService) {}

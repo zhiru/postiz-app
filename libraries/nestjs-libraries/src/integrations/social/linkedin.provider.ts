@@ -1,20 +1,18 @@
 import {
   AuthTokenDetails,
-  PendingCheckResponse,
+  ClientInformation,
   PostDetails,
   PostResponse,
   SocialProvider,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import sharp from 'sharp';
 import { lookup } from 'mime-types';
-import { hasExtension } from '@gitroom/helpers/utils/has.extension';
-import { timer } from '@gitroom/helpers/utils/timer';
 import {
   BadBody,
-  RefreshToken,
   SocialAbstract,
+  RefreshToken,
   ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { Integration } from '@prisma/client';
@@ -23,11 +21,24 @@ import { LinkedinDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-sett
 import imageToPDF from 'image-to-pdf';
 import { Readable } from 'stream';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { createReadStream, statSync } from 'node:fs';
+import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { hasExtension } from '@gitroom/helpers/utils/has.extension';
+import { timer } from '@gitroom/helpers/utils/timer';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 
-// Travels through the workflow history between postPending, checkPostStatus
-// and finalizePost - keep it small JSON (media urns and the post content, never
-// buffers).
+const mediaPathname = (path: string) => {
+  try {
+    return new URL(path).pathname;
+  } catch {
+    return path.split(/[?#]/, 1)[0];
+  }
+};
+
+const hasMediaExtension = (path: string, extension: string) =>
+  mediaPathname(path).toLowerCase().endsWith(`.${extension.toLowerCase()}`);
+
 type LinkedinPendingData = {
   authorId: string;
   postType: 'company' | 'personal';
@@ -58,48 +69,33 @@ type LinkedinPendingData = {
 )
 export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   identifier = 'linkedin';
+
   name = 'LinkedIn';
+
   oneTimeToken = true;
 
   isBetweenSteps = false;
-  // Community Management API scopes (r_basicprofile, rw_organization_admin,
-  // w_organization_social, r_organization_social) require LinkedIn's Community
-  // Management product, which cannot coexist with "Sign In with LinkedIn using
-  // OpenID Connect" / "Share on LinkedIn" on the same app. Requesting both sets
-  // makes LinkedIn reject the whole authorization request for personal apps.
-  scopes = ['openid', 'profile', 'w_member_social'];
-  override maxConcurrentJob = 8; // LinkedIn limits are daily budgets
+
+  scopes = [
+    'openid',
+    'profile',
+    'w_member_social',
+    'r_basicprofile',
+    'rw_organization_admin',
+    'w_organization_social',
+    'r_organization_social',
+  ];
+
+  override maxConcurrentJob = 2;
+
   refreshWait = true;
+
   editor = 'normal' as const;
+
   dto = LinkedinDto;
+
   maxLength() {
     return 3000;
-  }
-
-  override async checkValidity(
-    posts: Array<ValidityMedia[]>,
-    vals: any
-  ): Promise<string | true> {
-    const [firstPost, ...restPosts] = posts ?? [];
-
-    if (
-      this.assetBoolean(vals?.post_as_images_carousel) &&
-      ((firstPost?.length ?? 0) < 2 ||
-        firstPost?.some((p) => (p?.path?.indexOf?.('mp4') ?? -1) > -1))
-    ) {
-      return 'Carousel can only be created with 2 or more images and no videos.';
-    }
-
-    if (
-      (firstPost?.length ?? 0) > 1 &&
-      firstPost?.some((p) => (p?.path?.indexOf?.('mp4') ?? -1) > -1)
-    ) {
-      return 'Can have maximum 1 media when selecting a video.';
-    }
-    if (restPosts?.some((p) => (p?.length ?? 0) > 0)) {
-      return 'Comments can only contain text.';
-    }
-    return true;
   }
 
   override handleErrors(
@@ -114,7 +110,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
       };
     }
 
-    if (body.indexOf('resource is forbidden') > -1 || body.indexOf('Service Unavailable') > -1) {
+    if (body.indexOf('resource is forbidden') > -1) {
       return {
         type: 'retry',
         value: 'Resource is forbidden',
@@ -175,12 +171,12 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async generateAuthUrl() {
+  async generateAuthUrl(clientInformation?: ClientInformation) {
     const state = makeSecureId(6);
-    const codeVerifier = makeSecureId(30);
-    const url = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${
-      process.env.LINKEDIN_CLIENT_ID
-    }&prompt=consent&redirect_uri=${encodeURIComponent(
+    const codeVerifier = makeId(30);
+    const clientId =
+      clientInformation?.client_id || process.env.LINKEDIN_CLIENT_ID;
+    const url = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&prompt=none&redirect_uri=${encodeURIComponent(
       `${process.env.FRONTEND_URL}/integrations/social/linkedin`
     )}&state=${state}&scope=${encodeURIComponent(this.scopes.join(' '))}`;
     return {
@@ -190,11 +186,18 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async authenticate(params: {
-    code: string;
-    codeVerifier: string;
-    refresh?: string;
-  }) {
+  async authenticate(
+    params: {
+      code: string;
+      codeVerifier: string;
+      refresh?: string;
+    },
+    clientInformation?: ClientInformation
+  ) {
+    const clientId =
+      clientInformation?.client_id || process.env.LINKEDIN_CLIENT_ID!;
+    const clientSecret =
+      clientInformation?.client_secret || process.env.LINKEDIN_CLIENT_SECRET!;
     const body = new URLSearchParams();
     body.append('grant_type', 'authorization_code');
     body.append('code', params.code);
@@ -204,8 +207,8 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
         params.refresh ? `?refresh=${params.refresh}` : ''
       }`
     );
-    body.append('client_id', process.env.LINKEDIN_CLIENT_ID!);
-    body.append('client_secret', process.env.LINKEDIN_CLIENT_SECRET!);
+    body.append('client_id', clientId);
+    body.append('client_secret', clientSecret);
 
     const {
       access_token: accessToken,
@@ -463,33 +466,6 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     return { id: finalOutput, grace: true };
   }
 
-  // Single read of the media processing status, no loops and no timers - the
-  // polling loop lives in the post workflow (checkPostStatus).
-  // videos: https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/videos-api#get-a-video
-  // images: https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/images-api#get-a-single-image
-  private async mediaProcessingStatus(
-    accessToken: string,
-    urn: string,
-    endpoint: 'videos' | 'images' | 'documents'
-  ): Promise<{ status?: string; processingFailureReason?: string }> {
-    // The full response body is returned (not just the two fields) so a
-    // processing failure can attach LinkedIn's complete answer to the error.
-    return await (
-      await this.fetch(
-        `https://api.linkedin.com/rest/${endpoint}/${encodeURIComponent(urn)}`,
-        {
-          method: 'GET',
-          headers: {
-            'X-Restli-Protocol-Version': '2.0.0',
-            'LinkedIn-Version': '202601',
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      )
-    ).json();
-  }
-
   protected fixText(text: string) {
     const pattern = /@\[.+?]\(urn:li:organization.+?\)/g;
     const matches = text.match(pattern) || [];
@@ -553,10 +529,10 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
 
     // Create a PDF sized to the largest image; it fills the page,
     // smaller images are fitted and centered within the same dimensions
-    const pdfStream = imageToPDF(
-      imageBuffers,
-      [largest.width, largest.height]
-    ) as unknown as Readable;
+    const pdfStream = imageToPDF(imageBuffers, [
+      largest.width,
+      largest.height,
+    ]) as unknown as Readable;
     const pdfBuffer = await this.streamToBuffer(pdfStream);
 
     // Replace the first post's media with the single PDF
@@ -651,6 +627,77 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     return { mediaUploads, poll, graceChecks };
   }
 
+  private async videoSize(path: string): Promise<number> {
+    let size: number;
+    if (/^https?:\/\//i.test(path)) {
+      const response = await ssrfSafeFetch(path, {
+        method: 'HEAD',
+        headers: { 'Accept-Encoding': 'identity' },
+      });
+      const contentLength = response.headers.get('content-length');
+      size = Number(contentLength);
+
+      if (!response.ok || !contentLength) {
+        size = Number.NaN;
+      }
+    } else {
+      size = statSync(path).size;
+    }
+
+    if (!Number.isSafeInteger(size) || size <= 0) {
+      throw new BadBody(
+        'linkedin-error-upload',
+        '{}',
+        Buffer.from('{}'),
+        'Could not determine the video size for LinkedIn upload'
+      );
+    }
+
+    return size;
+  }
+
+  private async videoChunk(
+    path: string,
+    start: number,
+    end: number
+  ): Promise<Buffer> {
+    const expectedLength = end - start + 1;
+    let chunk: Buffer;
+
+    if (/^https?:\/\//i.test(path)) {
+      const response = await ssrfSafeFetch(path, {
+        headers: {
+          Range: `bytes=${start}-${end}`,
+          'Accept-Encoding': 'identity',
+        },
+      });
+
+      if (response.status !== 206) {
+        throw new BadBody(
+          'linkedin-error-upload',
+          '{}',
+          Buffer.from('{}'),
+          `Media server ignored the HTTP Range request (status ${response.status})`
+        );
+      }
+
+      chunk = Buffer.from(await response.arrayBuffer());
+    } else {
+      chunk = await this.streamToBuffer(createReadStream(path, { start, end }));
+    }
+
+    if (chunk.length !== expectedLength) {
+      throw new BadBody(
+        'linkedin-error-upload',
+        '{}',
+        Buffer.from('{}'),
+        `Media server returned ${chunk.length} bytes for a ${expectedLength}-byte HTTP Range request`
+      );
+    }
+
+    return chunk;
+  }
+
   private async prepareMediaBuffer(mediaUrl: string): Promise<Buffer> {
     const isGif = lookup(mediaUrl) === 'image/gif';
 
@@ -674,7 +721,9 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     // DISABLE_IMAGE_COMPRESSION=true, where the frontend no longer shrinks
     // uploads and full-size images reach LinkedIn directly. Do not remove it on
     // the assumption that the frontend compression already caps dimensions.
-    const pipeline = sharp(await this.readOrFetch(mediaUrl), { animated: false }).resize({
+    const pipeline = sharp(await this.readOrFetch(mediaUrl), {
+      animated: false,
+    }).resize({
       width: 6000,
       height: 6000,
       fit: 'inside',
@@ -684,7 +733,11 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     return await (keepFormat ? pipeline : pipeline.toFormat('jpeg')).toBuffer();
   }
 
-  private buildPostContent(isPdf: boolean, mediaIds: string[], pdfTitle?: string) {
+  private buildPostContent(
+    isPdf: boolean,
+    mediaIds: string[],
+    pdfTitle?: string
+  ) {
     if (mediaIds.length === 0) {
       return {};
     }
@@ -793,9 +846,9 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
       {
         method: 'POST',
         headers: {
-        'LinkedIn-Version': '202306',
-        'X-Restli-Protocol-Version': '2.0.0',
-        'Content-Type': 'application/json',
+          'LinkedIn-Version': '202306',
+          'X-Restli-Protocol-Version': '2.0.0',
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
@@ -829,6 +882,250 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  async post(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails<LinkedinDto>[],
+    integration: Integration,
+    type = 'personal' as 'company' | 'personal'
+  ): Promise<PostResponse[]> {
+    const [response] = await this.postPending(
+      id,
+      accessToken,
+      postDetails,
+      integration,
+      type
+    );
+
+    let pendingData = response.pendingData;
+    const started = Date.now();
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method: failing here is safe (the post is only created once all
+      // the media is ready), timing the activity out is not - a retried
+      // activity would upload and publish again.
+      if (Date.now() - started > 8 * 60 * 1000) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          '{}',
+          'LinkedIn took too long to process the media, please try again'
+        );
+      }
+
+      const check = await this.checkPostStatus(
+        accessToken,
+        pendingData,
+        integration
+      );
+
+      if (check.status === 'pending') {
+        pendingData = check.pendingData;
+        await timer(20000);
+        continue;
+      }
+
+      const result =
+        check.status === 'ready'
+          ? await this.finalizePost(accessToken, check.pendingData, integration)
+          : check;
+
+      if (result.status === 'completed') {
+        return [this.createPostResponse(result.postId, response.id, true)];
+      }
+
+      // finalize only armed the handshake (nothing to wait for), loop straight
+      // into the witnessing check
+      pendingData = result.pendingData;
+    }
+  }
+
+  async comment(
+    id: string,
+    postId: string,
+    lastCommentId: string | undefined,
+    accessToken: string,
+    postDetails: PostDetails<LinkedinDto>[],
+    integration: Integration,
+    type = 'personal' as 'company' | 'personal'
+  ): Promise<PostResponse[]> {
+    const [commentPost] = postDetails;
+
+    const commentPostId = await this.createCommentPost(
+      id,
+      accessToken,
+      commentPost,
+      postId,
+      type
+    );
+
+    return [this.createPostResponse(commentPostId, commentPost.id, false)];
+  }
+
+  @PostPlug({
+    identifier: 'linkedin-add-comment',
+    title: 'Add comments by a different account',
+    description: 'Add accounts to comment on your post',
+    pickIntegration: ['linkedin', 'linkedin-page'],
+    fields: [
+      {
+        name: 'comment',
+        description: 'The comment to add to the post',
+        type: 'textarea',
+        placeholder: 'Enter your comment here',
+      },
+    ],
+  })
+  async addComment(
+    integration: Integration,
+    originalIntegration: Integration,
+    postId: string,
+    information: any,
+    isPersonal = true
+  ) {
+    return this.comment(
+      integration.internalId,
+      postId,
+      undefined,
+      integration.token,
+      [
+        {
+          id: makeId(10),
+          message: information.comment,
+          media: [],
+          settings: {
+            post_as_images_carousel: false,
+          },
+        },
+      ],
+      integration,
+      isPersonal ? 'personal' : 'company'
+    );
+  }
+
+  @PostPlug({
+    identifier: 'linkedin-repost-post-users',
+    title: 'Add Re-posters',
+    description: 'Add accounts to repost your post',
+    pickIntegration: ['linkedin', 'linkedin-page'],
+    fields: [],
+  })
+  async repostPostUsers(
+    integration: Integration,
+    originalIntegration: Integration,
+    postId: string,
+    information: any,
+    isPersonal = true
+  ) {
+    await this.fetch(`https://api.linkedin.com/rest/posts`, {
+      body: JSON.stringify({
+        author:
+          (isPersonal ? 'urn:li:person:' : `urn:li:organization:`) +
+          `${integration.internalId}`,
+        commentary: '',
+        visibility: 'PUBLIC',
+        distribution: {
+          feedDistribution: 'MAIN_FEED',
+          targetEntities: [],
+          thirdPartyDistributionChannels: [],
+        },
+        lifecycleState: 'PUBLISHED',
+        isReshareDisabledByAuthor: false,
+        reshareContext: {
+          parent: postId,
+        },
+      }),
+      method: 'POST',
+      headers: {
+        'X-Restli-Protocol-Version': '2.0.0',
+        'Content-Type': 'application/json',
+        'LinkedIn-Version': '202601',
+        Authorization: `Bearer ${integration.token}`,
+      },
+    });
+  }
+
+  override async mention(token: string, data: { query: string }) {
+    const { elements } = await (
+      await fetch(
+        `https://api.linkedin.com/v2/organizations?q=vanityName&vanityName=${encodeURIComponent(
+          data.query
+        )}&projection=(elements*(id,localizedName,logoV2(original~:playableStreams)))`,
+        {
+          headers: {
+            'X-Restli-Protocol-Version': '2.0.0',
+            'Content-Type': 'application/json',
+            'LinkedIn-Version': '202601',
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
+    ).json();
+
+    return elements.map((p: any) => ({
+      id: String(p.id),
+      label: p.localizedName,
+      image:
+        p.logoV2?.['original~']?.elements?.[0]?.identifiers?.[0]?.identifier ||
+        '',
+    }));
+  }
+
+  mentionFormat(idOrHandle: string, name: string) {
+    return `@[${name.replace('@', '')}](urn:li:organization:${idOrHandle})`;
+  }
+
+  override async checkValidity(
+    posts: Array<ValidityMedia[]>,
+    vals: any
+  ): Promise<string | true> {
+    const [firstPost, ...restPosts] = posts ?? [];
+
+    if (
+      this.assetBoolean(vals?.post_as_images_carousel) &&
+      ((firstPost?.length ?? 0) < 2 ||
+        firstPost?.some((p) => (p?.path?.indexOf?.('mp4') ?? -1) > -1))
+    ) {
+      return 'Carousel can only be created with 2 or more images and no videos.';
+    }
+
+    if (
+      (firstPost?.length ?? 0) > 1 &&
+      firstPost?.some((p) => (p?.path?.indexOf?.('mp4') ?? -1) > -1)
+    ) {
+      return 'Can have maximum 1 media when selecting a video.';
+    }
+    if (restPosts?.some((p) => (p?.length ?? 0) > 0)) {
+      return 'Comments can only contain text.';
+    }
+    return true;
+  }
+
+  private async mediaProcessingStatus(
+    accessToken: string,
+    urn: string,
+    endpoint: 'videos' | 'images' | 'documents'
+  ): Promise<{ status?: string; processingFailureReason?: string }> {
+    // The full response body is returned (not just the two fields) so a
+    // processing failure can attach LinkedIn's complete answer to the error.
+    return await (
+      await this.fetch(
+        `https://api.linkedin.com/rest/${endpoint}/${encodeURIComponent(urn)}`,
+        {
+          method: 'GET',
+          headers: {
+            'X-Restli-Protocol-Version': '2.0.0',
+            'LinkedIn-Version': '202601',
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      )
+    ).json();
+  }
+
   async postPending(
     id: string,
     accessToken: string,
@@ -838,7 +1135,9 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   ): Promise<PostResponse[]> {
     let processedPostDetails = postDetails;
     const [firstPost] = postDetails;
-    const isPdf = this.assetBoolean(firstPost.settings?.post_as_images_carousel);
+    const isPdf = this.assetBoolean(
+      firstPost.settings?.post_as_images_carousel
+    );
 
     // Check if we should convert images to PDF carousel
     if (isPdf) {
@@ -1032,210 +1331,5 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
       postId: mainPostId,
       releaseURL: `https://www.linkedin.com/feed/update/${mainPostId}`,
     };
-  }
-
-  // Old blocking behavior, kept for workflow versions before v1.0.6 that still
-  // run and don't know how to resolve a `pending` response - they wait for the
-  // media processing and create the post inside the activity like before.
-  async post(
-    id: string,
-    accessToken: string,
-    postDetails: PostDetails<LinkedinDto>[],
-    integration: Integration,
-    type = 'personal' as 'company' | 'personal'
-  ): Promise<PostResponse[]> {
-    const [response] = await this.postPending(
-      id,
-      accessToken,
-      postDetails,
-      integration,
-      type
-    );
-
-    let pendingData = response.pendingData;
-    const started = Date.now();
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      // Cap below the 10-minute activity timeout of the old workflows using
-      // this method: failing here is safe (the post is only created once all
-      // the media is ready), timing the activity out is not - a retried
-      // activity would upload and publish again.
-      if (Date.now() - started > 8 * 60 * 1000) {
-        throw new BadBody(
-          this.identifier,
-          '{}',
-          '{}',
-          'LinkedIn took too long to process the media, please try again'
-        );
-      }
-
-      const check = await this.checkPostStatus(
-        accessToken,
-        pendingData,
-        integration
-      );
-
-      if (check.status === 'pending') {
-        pendingData = check.pendingData;
-        await timer(20000);
-        continue;
-      }
-
-      const result =
-        check.status === 'ready'
-          ? await this.finalizePost(accessToken, check.pendingData, integration)
-          : check;
-
-      if (result.status === 'completed') {
-        return [this.createPostResponse(result.postId, response.id, true)];
-      }
-
-      // finalize only armed the handshake (nothing to wait for), loop straight
-      // into the witnessing check
-      pendingData = result.pendingData;
-    }
-  }
-
-  async comment(
-    id: string,
-    postId: string,
-    lastCommentId: string | undefined,
-    accessToken: string,
-    postDetails: PostDetails<LinkedinDto>[],
-    integration: Integration,
-    type = 'personal' as 'company' | 'personal'
-  ): Promise<PostResponse[]> {
-    const [commentPost] = postDetails;
-
-    const commentPostId = await this.createCommentPost(
-      id,
-      accessToken,
-      commentPost,
-      postId,
-      type
-    );
-
-    return [this.createPostResponse(commentPostId, commentPost.id, false)];
-  }
-
-  @PostPlug({
-    identifier: 'linkedin-add-comment',
-    title: 'Add comments by a different account',
-    description: 'Add accounts to comment on your post',
-    pickIntegration: ['linkedin', 'linkedin-page'],
-    fields: [
-      {
-        name: 'comment',
-        description: 'The comment to add to the post',
-        type: 'textarea',
-        placeholder: 'Enter your comment here',
-      },
-    ],
-  })
-  async addComment(
-    integration: Integration,
-    originalIntegration: Integration,
-    postId: string,
-    information: any,
-    isPersonal = true
-  ) {
-    return this.comment(
-      integration.internalId,
-      postId,
-      undefined,
-      integration.token,
-      [
-        {
-          id: makeId(10),
-          message: information.comment,
-          media: [],
-          settings: {
-            post_as_images_carousel: false,
-          },
-        },
-      ],
-      integration,
-      isPersonal ? 'personal' : 'company'
-    );
-  }
-
-  @PostPlug({
-    identifier: 'linkedin-repost-post-users',
-    title: 'Add Re-posters',
-    description: 'Add accounts to repost your post',
-    pickIntegration: ['linkedin', 'linkedin-page'],
-    fields: [],
-  })
-  async repostPostUsers(
-    integration: Integration,
-    originalIntegration: Integration,
-    postId: string,
-    information: any,
-    isPersonal = true
-  ) {
-    await this.fetch(`https://api.linkedin.com/rest/posts`, {
-      body: JSON.stringify({
-        author:
-          (isPersonal ? 'urn:li:person:' : `urn:li:organization:`) +
-          `${integration.internalId}`,
-        commentary: '',
-        visibility: 'PUBLIC',
-        distribution: {
-          feedDistribution: 'MAIN_FEED',
-          targetEntities: [],
-          thirdPartyDistributionChannels: [],
-        },
-        lifecycleState: 'PUBLISHED',
-        isReshareDisabledByAuthor: false,
-        reshareContext: {
-          parent: postId,
-        },
-      }),
-      method: 'POST',
-      headers: {
-        'X-Restli-Protocol-Version': '2.0.0',
-        'Content-Type': 'application/json',
-        'LinkedIn-Version': '202601',
-        Authorization: `Bearer ${integration.token}`,
-      },
-    });
-  }
-
-  @Tool({
-    description:
-      'Find a company page to tag by its exact vanity name (the part after linkedin.com/company/). Tag it in the post content with <span data-mention-id="{id}" data-mention-label="{label}">@{label}</span>',
-    dataSchema: [
-      { key: 'query', type: 'string', description: 'Company page vanity name' },
-    ],
-  })
-  override async mention(token: string, data: { query: string }) {
-    const { elements } = await (
-      await this.fetch(
-        `https://api.linkedin.com/v2/organizations?q=vanityName&vanityName=${encodeURIComponent(
-          data.query
-        )}&projection=(elements*(id,localizedName,logoV2(original~:playableStreams)))`,
-        {
-          headers: {
-            'X-Restli-Protocol-Version': '2.0.0',
-            'Content-Type': 'application/json',
-            'LinkedIn-Version': '202601',
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      )
-    ).json();
-
-    return elements.map((p: any) => ({
-      id: String(p.id),
-      label: p.localizedName,
-      image:
-        p.logoV2?.['original~']?.elements?.[0]?.identifiers?.[0]?.identifier ||
-        '',
-    }));
-  }
-
-  mentionFormat(idOrHandle: string, name: string) {
-    return `@[${name.replace('@', '')}](urn:li:organization:${idOrHandle})`;
   }
 }

@@ -26,6 +26,8 @@ import { useUppyUploader } from '@gitroom/frontend/components/media/new.uploader
 import dynamic from 'next/dynamic';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import { AiImage } from '@gitroom/frontend/components/launches/ai.image';
+import { AiCaption } from '@gitroom/frontend/components/launches/ai.caption';
+import { AiSearch } from '@gitroom/frontend/components/launches/ai.search';
 import { DropFiles } from '@gitroom/frontend/components/layout/drop.files';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -48,6 +50,8 @@ import {
   DesignMediaIcon,
   VerticalDividerIcon,
   NoMediaIcon,
+  LockIcon,
+  CheckmarkIcon,
   TrashIcon,
 } from '@gitroom/frontend/components/ui/icons';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
@@ -239,6 +243,10 @@ export const MediaBox: FC<{
     loadMedia
   );
   const [selected, setSelected] = useState([]);
+  // Selecao de exclusao em massa — independente de `selected`, que serve para
+  // inserir midia no post.
+  const [selectedToDelete, setSelectedToDelete] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState(false);
   const t = useT();
   const uploaderRef = useRef<any>(null);
   const mediaDirectory = useMediaDirectory();
@@ -398,6 +406,97 @@ export const MediaBox: FC<{
     []
   );
 
+  // A lista visivel ja filtrada pelo tipo — a barra de selecao em massa
+  // precisa dela para "selecionar todos desta pagina".
+  const mediaList = useMemo(
+    () =>
+      (data?.results || []).filter((f: any) => {
+        if (type === 'video') {
+          return f.path.indexOf('mp4') > -1;
+        } else if (type === 'image') {
+          return f.path.indexOf('mp4') === -1;
+        }
+        return true;
+      }),
+    [data, type]
+  );
+
+  // `inUse` vem do backend: midia usada em post que ainda vai publicar (ou
+  // como avatar/logo) nao entra na selecao de exclusao.
+  const deletableMedia = useMemo(
+    () => mediaList.filter((media: any) => !media.inUse),
+    [mediaList]
+  );
+
+  const allPageSelected =
+    deletableMedia.length > 0 &&
+    deletableMedia.every((media: any) => selectedToDelete.includes(media.id));
+
+  const toggleDeleteSelection = useCallback((media: any) => {
+    if (media.inUse) {
+      return;
+    }
+    setSelectedToDelete((prev) =>
+      prev.includes(media.id)
+        ? prev.filter((id) => id !== media.id)
+        : [...prev, media.id]
+    );
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedToDelete((prev) => {
+      const pageIds = deletableMedia.map((media: any) => media.id);
+      return allPageSelected
+        ? prev.filter((id) => !pageIds.includes(id))
+        : [...new Set([...prev, ...pageIds])];
+    });
+  }, [deletableMedia, allPageSelected]);
+
+  // Traduz o relatorio do backend (apagados / bloqueados / falhas) em uma
+  // mensagem unica — o usuario precisa saber que nem tudo que ele marcou saiu.
+  const reportDeletion = useCallback(
+    (result: any) => {
+      const deleted = result?.deleted?.length || 0;
+      const blocked = result?.blocked?.length || 0;
+      const failed = result?.failed?.length || 0;
+      const parts: string[] = [];
+
+      if (deleted) {
+        parts.push(
+          t(
+            'media_deleted_report',
+            '{{total}} mídia(s) removida(s) do bucket.',
+            { total: deleted }
+          )
+        );
+      }
+      if (blocked) {
+        parts.push(
+          t(
+            'media_blocked_report',
+            '{{total}} mantida(s): em uso em post agendado, rascunho ou como foto de perfil.',
+            { total: blocked }
+          )
+        );
+      }
+      if (failed) {
+        parts.push(
+          t(
+            'media_failed_report',
+            '{{total}} falhou(ram) ao remover do storage e continuam na biblioteca.',
+            { total: failed }
+          )
+        );
+      }
+      if (!parts.length) {
+        return;
+      }
+
+      toaster.show(parts.join(' '), blocked || failed ? 'warning' : 'success');
+    },
+    [t, toaster]
+  );
+
   const deleteImage = useCallback(
     (media: Media) => async (e: any) => {
       e.stopPropagation();
@@ -411,44 +510,56 @@ export const MediaBox: FC<{
       ) {
         return;
       }
-      await fetch(`/media/${media.id}`, {
-        method: 'DELETE',
-      });
+      const result = await (
+        await fetch(`/media/${media.id}`, {
+          method: 'DELETE',
+        })
+      ).json();
+      reportDeletion(result);
+      setSelectedToDelete((prev) => prev.filter((id) => id !== media.id));
       mutate();
     },
-    [mutate]
+    [mutate, reportDeletion, t]
   );
 
-  // phones have no hover, so the selected media are deleted together
   const deleteSelected = useCallback(async () => {
+    const ids = standalone
+      ? selectedToDelete
+      : selected.map((media: any) => media.id);
+    if (!ids.length) {
+      return;
+    }
     if (
       !(await deleteDialog(
         t(
-          'are_you_sure_you_want_to_delete_selected_media',
-          'Are you sure you want to delete the selected media?'
+          'confirm_delete_selected_media',
+          'Os arquivos serão apagados do bucket permanentemente. Excluir {{total}} mídia(s)?',
+          { total: ids.length }
         )
       ))
     ) {
       return;
     }
-    const toDelete = selected;
-    setSelected([]);
+
+    setDeleting(true);
     try {
-      await Promise.all(
-        toDelete.map((media: any) =>
-          fetch(`/media/${media.id}`, {
-            method: 'DELETE',
-          })
-        )
-      );
-    } finally {
-      const result = await mutate();
-      // deleting a whole last page leaves nothing to show there
-      if (page >= (result?.pages || 1)) {
-        setPage(Math.max(0, (result?.pages || 1) - 1));
+      const result = await (
+        await fetch('/media/delete-many', {
+          method: 'POST',
+          body: JSON.stringify({ ids }),
+        })
+      ).json();
+      reportDeletion(result);
+      setSelectedToDelete([]);
+      setSelected([]);
+      const resultPage = await mutate();
+      if (page >= (resultPage?.pages || 1)) {
+        setPage(Math.max(0, (resultPage?.pages || 1) - 1));
       }
+    } finally {
+      setDeleting(false);
     }
-  }, [selected, mutate, page, t]);
+  }, [selectedToDelete, selected, standalone, page, mutate, reportDeletion, t]);
 
   const btn = useMemo(() => {
     return (
@@ -464,21 +575,24 @@ export const MediaBox: FC<{
         ) : (
           <PlusIcon size={14} />
         )}
-        <div className={loading ? 'invisible' : undefined}>{t('upload', 'Upload')}</div>
+        <div className={loading ? 'invisible' : undefined}>
+          {t('upload', 'Upload')}
+        </div>
       </button>
     );
   }, [t, loading]);
 
   return (
-    <DropFiles disabled={loading} className="flex flex-col flex-1" onDrop={dragAndDrop}>
+    <DropFiles
+      disabled={loading}
+      className="flex flex-col flex-1"
+      onDrop={dragAndDrop}
+    >
       <div className="flex flex-col flex-1">
         <div
           className={clsx(
             'flex items-center gap-[12px] mobile:flex-wrap',
-            !isLoading &&
-              !data?.results?.length &&
-              !debouncedSearch &&
-              'hidden'
+            !isLoading && !data?.results?.length && !debouncedSearch && 'hidden'
           )}
         >
           <div className="flex-1 mobile:basis-full">
@@ -497,7 +611,9 @@ export const MediaBox: FC<{
             className="hidden"
             multiple={true}
           />
-          <div className={clsx('flex gap-[8px]', !standalone && 'mobile:hidden')}>
+          <div
+            className={clsx('flex gap-[8px]', !standalone && 'mobile:hidden')}
+          >
             {btn}
             <ThirdPartyMediaLibrary onImported={() => mutate()} />
           </div>
@@ -519,13 +635,40 @@ export const MediaBox: FC<{
             </div>
           )}
         </div>
-        <div
-          className={clsx(
-            'w-full pointer-events-none relative mt-[5px] mb-[5px]',
-            // phones only keep the upload progress while there is something to show
-            !loading && !uploadInfo && 'mobile:hidden'
-          )}
-        >
+        {standalone && !isLoading && !!mediaList.length && (
+          <div className="flex flex-wrap items-center gap-[12px] mt-[10px]">
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              disabled={!deletableMedia.length}
+              className="cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed h-[36px] px-[14px] flex items-center rounded-[8px] border border-newTextColor/10 text-[13px] hover:bg-forth"
+            >
+              {allPageSelected
+                ? t('clear_page_selection', 'Limpar seleção')
+                : t('select_all_on_page', 'Selecionar todos desta página')}
+            </button>
+            <div className="text-[13px] text-newTextColor/[0.6]">
+              {t('media_selected_count', '{{total}} selecionada(s)', {
+                total: selectedToDelete.length,
+              })}
+            </div>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={deleteSelected}
+              disabled={!selectedToDelete.length || deleting}
+              className="cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed h-[36px] px-[14px] gap-[8px] flex items-center rounded-[8px] bg-red-600 hover:bg-red-500 text-white text-[13px]"
+            >
+              {deleting ? (
+                <div className="animate-spin h-[14px] w-[14px] border-2 border-white border-t-transparent rounded-full" />
+              ) : (
+                <TrashIcon size={16} />
+              )}
+              {t('delete_selected_media', 'Excluir selecionadas')}
+            </button>
+          </div>
+        )}
+        <div className="w-full pointer-events-none relative mt-[5px] mb-[5px]">
           <div className="w-full h-[46px] overflow-hidden absolute left-0 bg-newBgColorInner uppyChange">
             <Dashboard
               height={46}
@@ -562,10 +705,7 @@ export const MediaBox: FC<{
                 <NoMediaIcon />
                 <div className="text-[20px] font-[600]">
                   {debouncedSearch
-                    ? t(
-                        'no_media_match_search',
-                        'No media matches your search'
-                      )
+                    ? t('no_media_match_search', 'No media matches your search')
                     : t(
                         'you_dont_have_any_media_yet',
                         "You don't have any media yet"
@@ -602,92 +742,113 @@ export const MediaBox: FC<{
                 ))}
               </>
             )}
-            {data?.results
-              ?.filter((f: any) => {
-                if (type === 'video') {
-                  return hasExtension(f.path, 'mp4');
-                } else if (type === 'image') {
-                  return !hasExtension(f.path, 'mp4');
-                }
-                return true;
-              })
-              .map((media: any) => (
+            {mediaList.map((media: any) => (
+              <div
+                className={clsx(
+                  'group px-[3px] py-[3px] float-left rounded-[6px] w8-max aspect-square',
+                  (!standalone || !media.inUse) && 'cursor-pointer'
+                )}
+                key={media.id}
+              >
                 <div
                   className={clsx(
-                    'group px-[3px] py-[3px] mobile:p-[6px] float-left rounded-[6px] w8-max mobile:!w-1/2 mobile:!max-w-[50%] aspect-square',
-                    !standalone && 'cursor-pointer'
+                    'w-full h-full rounded-[6px] border-[4px] relative',
+                    !!selected.find((p) => p.id === media.id)
+                      ? 'border-[#612BD3]'
+                      : standalone && selectedToDelete.includes(media.id)
+                      ? 'border-red-500'
+                      : 'border-transparent',
+                    standalone && media.inUse && 'opacity-60'
                   )}
-                  key={media.id}
+                  onClick={
+                    standalone
+                      ? () => toggleDeleteSelection(media)
+                      : addRemoveSelected(media)
+                  }
                 >
-                  <div
-                    className={clsx(
-                      'w-full h-full rounded-[6px] border-[4px] relative',
-                      !!selected.find((p) => p.id === media.id)
-                        ? 'border-[#612BD3]'
-                        : 'border-transparent'
-                    )}
-                    onClick={addRemoveSelected(media)}
-                  >
-                    {!!selected.find((p: any) => p.id === media.id) ? (
-                      <div className="text-white flex z-[101] justify-center items-center text-[14px] font-[500] w-[24px] h-[24px] rounded-full bg-[#612BD3] absolute -bottom-[10px] -end-[10px]">
-                        {selected.findIndex((z: any) => z.id === media.id) + 1}
+                  {standalone &&
+                    (media.inUse ? (
+                      <div
+                        title={t(
+                          'media_in_use_tooltip',
+                          'Em uso em post agendado, rascunho ou como foto de perfil — não pode ser excluída.'
+                        )}
+                        className="z-[101] flex justify-center items-center w-[24px] h-[24px] rounded-full bg-black/70 text-white absolute -top-[5px] -start-[5px]"
+                      >
+                        <LockIcon size={14} />
                       </div>
                     ) : (
-                      <DeleteCircleIcon
+                      <div
                         className={clsx(
-                          'cursor-pointer hidden z-[100] group-hover:block absolute -top-[5px] -end-[5px]',
-                          // the picker deletes the selected media on phones
+                          'z-[101] flex justify-center items-center w-[22px] h-[22px] rounded-[6px] border absolute -top-[5px] -start-[5px]',
+                          selectedToDelete.includes(media.id)
+                            ? 'bg-red-500 border-red-500 text-white'
+                            : 'bg-black/50 border-white/40 text-transparent'
+                        )}
+                      >
+                        <CheckmarkIcon />
+                      </div>
+                    ))}
+                  {!!selected.find((p: any) => p.id === media.id) ? (
+                    <div className="text-white flex z-[101] justify-center items-center text-[14px] font-[500] w-[24px] h-[24px] rounded-full bg-[#612BD3] absolute -bottom-[10px] -end-[10px]">
+                      {selected.findIndex((z: any) => z.id === media.id) + 1}
+                    </div>
+                  ) : (
+                    <DeleteCircleIcon
+                      className={clsx(
+                        'cursor-pointer hidden z-[100] group-hover:block absolute -top-[5px] -end-[5px]',
+                        // the picker deletes the selected media on phones
+                        !standalone && 'mobile:!hidden'
+                      )}
+                      onClick={deleteImage(media)}
+                    />
+                  )}
+                  <div
+                    className={clsx(
+                      'absolute bottom-[10px] start-[10px] end-[10px] z-[100] truncate text-end mobile:text-[12px]',
+                      !standalone && 'mobile:hidden'
+                    )}
+                  >
+                    {media.originalName}
+                  </div>
+                  <div className="w-full h-full rounded-[6px] overflow-hidden relative">
+                    <div className="absolute z-[20] left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
+                      <div
+                        onClick={maximize(media)}
+                        className={clsx(
+                          'cursor-pointer p-[4px] bg-black/40 hidden group-hover:block hover:scale-150 transition-all',
                           !standalone && 'mobile:!hidden'
                         )}
-                        onClick={deleteImage(media)}
+                      >
+                        <svg
+                          width="30"
+                          height="30"
+                          viewBox="0 0 14 14"
+                          fill="none"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path
+                            d="M2 9H0V14H5V12H2V9ZM0 5H2V2H5V0H0V5ZM12 12H9V14H14V9H12V12ZM9 0V2H12V5H14V0H9Z"
+                            fill="#F1F5F9"
+                          />
+                        </svg>
+                      </div>
+                    </div>
+                    {hasExtension(media.path, 'mp4') ? (
+                      <VideoFrame url={mediaDirectory.set(media.path)} />
+                    ) : (
+                      <img
+                        width="100%"
+                        height="100%"
+                        className="w-full h-full object-cover"
+                        src={mediaDirectory.set(media.path)}
+                        alt="media"
                       />
                     )}
-                    <div
-                      className={clsx(
-                        'absolute bottom-[10px] start-[10px] end-[10px] z-[100] truncate text-end mobile:text-[12px]',
-                        !standalone && 'mobile:hidden'
-                      )}
-                    >
-                      {media.originalName}
-                    </div>
-                    <div className="w-full h-full rounded-[6px] overflow-hidden relative">
-                      <div className="absolute z-[20] left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
-                        <div
-                          onClick={maximize(media)}
-                          className={clsx(
-                            'cursor-pointer p-[4px] bg-black/40 hidden group-hover:block hover:scale-150 transition-all',
-                            !standalone && 'mobile:!hidden'
-                          )}
-                        >
-                          <svg
-                            width="30"
-                            height="30"
-                            viewBox="0 0 14 14"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                          >
-                            <path
-                              d="M2 9H0V14H5V12H2V9ZM0 5H2V2H5V0H0V5ZM12 12H9V14H14V9H12V12ZM9 0V2H12V5H14V0H9Z"
-                              fill="#F1F5F9"
-                            />
-                          </svg>
-                        </div>
-                      </div>
-                      {hasExtension(media.path, 'mp4') ? (
-                        <VideoFrame url={mediaDirectory.set(media.path)} />
-                      ) : (
-                        <img
-                          width="100%"
-                          height="100%"
-                          className="w-full h-full object-cover"
-                          src={mediaDirectory.set(media.path)}
-                          alt="media"
-                        />
-                      )}
-                    </div>
                   </div>
                 </div>
-              ))}
+              </div>
+            ))}
           </div>
         </div>
         {(data?.pages || 0) > 1 && (
@@ -744,6 +905,8 @@ export const MultiMediaComponent: FC<{
     id: string;
   }>;
   text: string;
+  editor?: any;
+  platform?: string;
   name: string;
   error?: any;
   onOpen?: () => void;
@@ -772,6 +935,8 @@ export const MultiMediaComponent: FC<{
     name,
     error,
     text,
+    editor,
+    platform,
     onChange,
     value,
     allData,
@@ -885,57 +1050,60 @@ export const MultiMediaComponent: FC<{
               handle=".dragging"
             >
               {currentMedia.map((media, index) => (
-                  <div key={media.id} className="cursor-pointer rounded-[5px] w-[40px] h-[40px] mobile:w-[60px] mobile:h-[60px] mobile:rounded-[8px] border-2 mobile:border-0 border-tableBorder relative flex transition-all">
-                    <DragHandleIcon className="z-[20] dragging absolute pe-[1px] pb-[3px] -start-[4px] -top-[4px] cursor-move" />
+                <div
+                  key={`${media.id}-${index}`}
+                  className="cursor-pointer rounded-[5px] w-[40px] h-[40px] border-2 border-tableBorder relative flex transition-all"
+                >
+                  <DragHandleIcon className="z-[20] dragging absolute pe-[1px] pb-[3px] -start-[4px] -top-[4px] cursor-move" />
 
-                    <div className="w-full h-full relative group">
-                      <div
-                        onClick={async () => {
-                          modals.openModal({
-                            title: t('media_settings', 'Media Settings'),
-                            children: (close) => (
-                              <MediaComponentInner
-                                media={media as any}
-                                onClose={close}
-                                onSelect={(value: any) => {
-                                  onChange({
-                                    target: {
-                                      name: 'upload',
-                                      value: currentMedia.map((p) => {
-                                        if (p.id === media.id) {
-                                          return {
-                                            ...p,
-                                            ...value,
-                                          };
-                                        }
-                                        return p;
-                                      }),
-                                    },
-                                  });
-                                }}
-                              />
-                            ),
-                          });
-                        }}
-                        className="absolute top-[50%] left-[50%] -translate-x-[50%] -translate-y-[50%] bg-black/80 rounded-[10px] opacity-0 group-hover:opacity-100 transition-opacity z-[9]"
-                      >
-                        <MediaSettingsIcon className="cursor-pointer relative z-[200]" />
-                      </div>
-                      {hasExtension(media?.path, 'mp4') ? (
-                        <VideoFrame url={mediaDirectory.set(media?.path)} />
-                      ) : (
-                        <img
-                          className="w-full h-full object-cover rounded-[4px] mobile:rounded-[8px]"
-                          src={mediaDirectory.set(media?.path)}
-                        />
-                      )}
+                  <div className="w-full h-full relative group">
+                    <div
+                      onClick={async () => {
+                        modals.openModal({
+                          title: t('media_settings', 'Media Settings'),
+                          children: (close) => (
+                            <MediaComponentInner
+                              media={media as any}
+                              onClose={close}
+                              onSelect={(value: any) => {
+                                onChange({
+                                  target: {
+                                    name: 'upload',
+                                    value: currentMedia.map((p) => {
+                                      if (p.id === media.id) {
+                                        return {
+                                          ...p,
+                                          ...value,
+                                        };
+                                      }
+                                      return p;
+                                    }),
+                                  },
+                                });
+                              }}
+                            />
+                          ),
+                        });
+                      }}
+                      className="absolute top-[50%] left-[50%] -translate-x-[50%] -translate-y-[50%] bg-black/80 rounded-[10px] opacity-0 group-hover:opacity-100 transition-opacity z-[9]"
+                    >
+                      <MediaSettingsIcon className="cursor-pointer relative z-[200]" />
                     </div>
-
-                    <CloseCircleIcon
-                      onClick={clearMedia(index)}
-                      className="absolute -end-[4px] -top-[4px] mobile:-end-[8px] mobile:-top-[8px] mobile:w-[24px] mobile:h-[24px] z-[20] rounded-full bg-white"
-                    />
+                    {hasExtension(media?.path, 'mp4') ? (
+                      <VideoFrame url={mediaDirectory.set(media?.path)} />
+                    ) : (
+                      <img
+                        className="w-full h-full object-cover rounded-[4px] mobile:rounded-[8px]"
+                        src={mediaDirectory.set(media?.path)}
+                      />
+                    )}
                   </div>
+
+                  <CloseCircleIcon
+                    onClick={clearMedia(index)}
+                    className="absolute -end-[4px] -top-[4px] mobile:-end-[8px] mobile:-top-[8px] mobile:w-[24px] mobile:h-[24px] z-[20] rounded-full bg-white"
+                  />
+                </div>
               ))}
             </ReactSortable>
           )}
@@ -987,6 +1155,20 @@ export const MultiMediaComponent: FC<{
 
                 {!!user?.tier?.ai && (
                   <>
+                    {editor && (
+                      <AiSearch
+                        value={text}
+                        editor={editor}
+                        platform={platform}
+                      />
+                    )}
+                    {editor && (
+                      <AiCaption
+                        value={text}
+                        editor={editor}
+                        platform={platform}
+                      />
+                    )}
                     <AiImage value={text} onChange={changeMedia} />
                     {!insertInContent && (
                       <AiVideo value={text} onChange={changeMedia} />

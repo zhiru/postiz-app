@@ -1,31 +1,32 @@
 import {
   AuthTokenDetails,
-  PendingCheckResponse,
   PostDetails,
   PostResponse,
   SocialProvider,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { RedditSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/reddit.dto';
 import { timer } from '@gitroom/helpers/utils/timer';
+import { groupBy } from 'lodash';
 import {
+  SocialAbstract,
   BadBody,
   Disconnect,
   RefreshToken,
-  SocialAbstract,
   ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { lookup } from 'mime-types';
-import FormDataUpload from 'form-data';
+import WebSocket from 'ws';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 import { Integration } from '@prisma/client';
+import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import FormDataUpload from 'form-data';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
-// Travels through the workflow history between postPending, checkPostStatus
-// and finalizePost. The cursor makes every subreddit submit its own
-// finalizePost call, and `armed` is the submit-in-flight handshake: set by
-// checkPostStatus BEFORE finalizePost runs (the workflow commits it first), so
-// an interrupted submit is detected by the next check instead of re-run.
+global.WebSocket = WebSocket as unknown as typeof global.WebSocket;
+
 type RedditPendingData = {
   subreddits: RedditSettingsDto['subreddit'];
   message: string;
@@ -54,39 +55,22 @@ type RedditPendingData = {
 };
 
 export class RedditProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 1; // Reddit has strict rate limits (1 request per second)
+  override maxConcurrentJob = 1;
+
   identifier = 'reddit';
+
   name = 'Reddit';
+
   isBetweenSteps = false;
+
   scopes = ['read', 'identity', 'submit', 'flair'];
+
   editor = 'normal' as const;
+
   dto = RedditSettingsDto;
 
   maxLength() {
     return 10000;
-  }
-
-  override async checkValidity(
-    posts: Array<ValidityMedia[]>,
-    settings: any
-  ): Promise<string | true> {
-    if (
-      settings?.subreddit?.some(
-        (p: any) => p?.value?.type === 'media' && posts?.[0]?.length !== 1
-      )
-    ) {
-      return 'When posting a media post, you must attached exactly one media file.';
-    }
-
-    if (
-      posts?.some((p) =>
-        p?.some((a) => !a?.thumbnail && (a?.path?.indexOf?.('mp4') ?? -1) > -1)
-      )
-    ) {
-      return 'You must attach a thumbnail to your video post.';
-    }
-
-    return true;
   }
 
   async refreshToken(refreshToken: string): Promise<AuthTokenDetails> {
@@ -127,7 +111,7 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
 
   async generateAuthUrl() {
     const state = makeSecureId(6);
-    const codeVerifier = makeSecureId(30);
+    const codeVerifier = makeId(30);
     const url = `https://www.reddit.com/api/v1/authorize?client_id=${
       process.env.REDDIT_CLIENT_ID
     }&response_type=code&state=${state}&redirect_uri=${encodeURIComponent(
@@ -249,10 +233,304 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
     return location;
   }
 
-  // Read-only recovery of a submission: the submit endpoint answers media
-  // posts with only a websocket url, and an interrupted activity may have
-  // submitted without us seeing the response - the user's newest submissions
-  // answer both cases without ever re-submitting.
+  async post(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails<RedditSettingsDto>[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const [response] = await this.postPending(id, accessToken, postDetails);
+
+    let pendingData = response.pendingData;
+    const started = Date.now();
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const check = await this.checkPostStatus(
+        accessToken,
+        pendingData,
+        integration
+      );
+
+      if (check.status === 'ready') {
+        const finalize = await this.finalizePost(
+          accessToken,
+          check.pendingData,
+          integration
+        );
+
+        if (finalize.status === 'completed') {
+          return [
+            {
+              id: response.id,
+              postId: finalize.postId,
+              releaseURL: finalize.releaseURL,
+              status: 'published',
+            },
+          ];
+        }
+
+        pendingData = finalize.pendingData;
+      } else if (check.status === 'completed') {
+        return [
+          {
+            id: response.id,
+            postId: check.postId,
+            releaseURL: check.releaseURL,
+            status: 'published',
+          },
+        ];
+      } else {
+        pendingData = check.pendingData;
+      }
+
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method: some subreddits may already be live at this point, so
+      // timing the activity out (which retries and re-submits) is far worse
+      // than failing here - the old websocket wait could hang forever.
+      if (Date.now() - started > 8 * 60 * 1000) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          Buffer.from('{}'),
+          'Reddit took too long to answer, please check your account before posting again'
+        );
+      }
+
+      // Keeps the old 5-second spacing between subreddit submissions.
+      await timer(5000);
+    }
+  }
+
+  async comment(
+    id: string,
+    postId: string,
+    lastCommentId: string | undefined,
+    accessToken: string,
+    postDetails: PostDetails<RedditSettingsDto>[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const [commentPost] = postDetails;
+
+    // Reddit uses thing_id format like t3_xxx for posts
+    const thingId = postId.startsWith('t3_') ? postId : `t3_${postId}`;
+
+    const {
+      json: {
+        data: {
+          things: [
+            {
+              data: { id: commentId, permalink },
+            },
+          ],
+        },
+      },
+    } = await (
+      await this.fetch('https://oauth.reddit.com/api/comment', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          text: commentPost.message,
+          thing_id: thingId,
+          api_type: 'json',
+        }),
+      })
+    ).json();
+
+    return [
+      {
+        postId: commentId,
+        releaseURL: 'https://www.reddit.com' + permalink,
+        id: commentPost.id,
+        status: 'published',
+      },
+    ];
+  }
+
+  @Tool({
+    description: 'Get list of subreddits with information',
+    dataSchema: [
+      {
+        key: 'word',
+        type: 'string',
+        description: 'Search subreddit by string',
+      },
+    ],
+  })
+  async subreddits(accessToken: string, data: any) {
+    // A pasted "r/name" or reddit.com/r/name URL: search by the name alone (the
+    // full URL matches nothing) and put that exact subreddit first if it exists.
+    const named = String(data.word || '').match(/(?:^|\/)r\/([A-Za-z0-9_]+)/);
+    const word = named ? named[1] : data.word;
+    const exact = named
+      ? await this.subredditByName(accessToken, named[1])
+      : [];
+
+    const {
+      data: { children },
+    } = await (
+      await this.fetch(
+        `https://oauth.reddit.com/subreddits/search?show=public&q=${word}&sort=activity&show_users=false&limit=10`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        },
+        'reddit',
+        0,
+        false
+      )
+    ).json();
+
+    return [
+      ...exact,
+      ...children
+        .filter(
+          ({ data }: { data: any }) =>
+            data.subreddit_type === 'public' &&
+            data.submission_type !== 'image' &&
+            !exact.some((e) => e.id === data.id)
+        )
+        .map(({ data: { title, url, id } }: any) => ({
+          title,
+          name: url,
+          id,
+        })),
+    ];
+  }
+
+  private getPermissions(submissionType: string, allow_images: string) {
+    const permissions = [];
+    if (['any', 'self'].indexOf(submissionType) > -1) {
+      permissions.push('self');
+    }
+
+    if (['any', 'link'].indexOf(submissionType) > -1) {
+      permissions.push('link');
+    }
+
+    if (allow_images) {
+      permissions.push('media');
+    }
+
+    return permissions;
+  }
+
+  @Tool({
+    description: 'Get list of flairs and restrictions for a subreddit',
+    dataSchema: [
+      {
+        key: 'subreddit',
+        type: 'string',
+        description:
+          'Search flairs and restrictions by subreddit key should be "/r/[name]"',
+      },
+    ],
+  })
+  async restrictions(accessToken: string, data: { subreddit: string }) {
+    const {
+      data: { submission_type, allow_images, ...all2 },
+    } = await (
+      await this.fetch(
+        `https://oauth.reddit.com/${data.subreddit}/about`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        },
+        'reddit',
+        0,
+        false
+      )
+    ).json();
+
+    const { is_flair_required, ...all } = await (
+      await this.fetch(
+        `https://oauth.reddit.com/api/v1/${
+          data.subreddit.split('/r/')[1]
+        }/post_requirements`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        },
+        'reddit',
+        0,
+        false
+      )
+    ).json();
+
+    // eslint-disable-next-line no-async-promise-executor
+    const newData = await new Promise<{ id: string; name: string }[]>(
+      async (res) => {
+        try {
+          const flair = await (
+            await this.fetch(
+              `https://oauth.reddit.com/${data.subreddit}/api/link_flair_v2`,
+              {
+                method: 'GET',
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+              },
+              'reddit',
+              0,
+              false
+            )
+          ).json();
+
+          res(flair);
+        } catch (err) {
+          return res([]);
+        }
+      }
+    );
+
+    return {
+      subreddit: data.subreddit,
+      allow: this.getPermissions(submission_type, allow_images),
+      is_flair_required: is_flair_required && newData.length > 0,
+      flairs:
+        newData?.map?.((p: any) => ({
+          id: p.id,
+          name: p.text,
+        })) || [],
+    };
+  }
+
+  override async checkValidity(
+    posts: Array<ValidityMedia[]>,
+    settings: any
+  ): Promise<string | true> {
+    if (
+      settings?.subreddit?.some(
+        (p: any) => p?.value?.type === 'media' && posts?.[0]?.length !== 1
+      )
+    ) {
+      return 'When posting a media post, you must attached exactly one media file.';
+    }
+
+    if (
+      posts?.some((p) =>
+        p?.some((a) => !a?.thumbnail && (a?.path?.indexOf?.('mp4') ?? -1) > -1)
+      )
+    ) {
+      return 'You must attach a thumbnail to your video post.';
+    }
+
+    return true;
+  }
+
   private async findSubmittedPost(
     accessToken: string,
     username: string,
@@ -444,7 +722,10 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
     // finds the armed marker and asks Reddit instead of resubmitting blindly.
     const value = data.subreddits[data.cursor].value;
     data.armed = {
-      sr: value.subreddit.replace(/^\/?r\//, '').replace(/^\/+|\/+$/g, '').toLowerCase(),
+      sr: value.subreddit
+        .replace(/^\/?r\//, '')
+        .replace(/^\/+|\/+$/g, '')
+        .toLowerCase(),
       title: value.title || '',
       armedAt: Date.now(),
       media: value.type === 'media',
@@ -503,7 +784,10 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
           }
         : {}),
       text: data.message,
-      sr: value.subreddit.replace(/^\/?r\//, '').replace(/^\/+|\/+$/g, '').toLowerCase(),
+      sr: value.subreddit
+        .replace(/^\/?r\//, '')
+        .replace(/^\/+|\/+$/g, '')
+        .toLowerCase(),
     };
 
     const all = await (
@@ -565,180 +849,6 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
     return { status: 'pending', pendingData: data };
   }
 
-  // Old blocking behavior, kept for workflow versions before v1.0.6 that still
-  // run and don't know how to resolve a `pending` response - they submit every
-  // subreddit inside the activity like before.
-  async post(
-    id: string,
-    accessToken: string,
-    postDetails: PostDetails<RedditSettingsDto>[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    const [response] = await this.postPending(id, accessToken, postDetails);
-
-    let pendingData = response.pendingData;
-    const started = Date.now();
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const check = await this.checkPostStatus(
-        accessToken,
-        pendingData,
-        integration
-      );
-
-      if (check.status === 'ready') {
-        const finalize = await this.finalizePost(
-          accessToken,
-          check.pendingData,
-          integration
-        );
-
-        if (finalize.status === 'completed') {
-          return [
-            {
-              id: response.id,
-              postId: finalize.postId,
-              releaseURL: finalize.releaseURL,
-              status: 'published',
-            },
-          ];
-        }
-
-        pendingData = finalize.pendingData;
-      } else if (check.status === 'completed') {
-        return [
-          {
-            id: response.id,
-            postId: check.postId,
-            releaseURL: check.releaseURL,
-            status: 'published',
-          },
-        ];
-      } else {
-        pendingData = check.pendingData;
-      }
-
-      // Cap below the 10-minute activity timeout of the old workflows using
-      // this method: some subreddits may already be live at this point, so
-      // timing the activity out (which retries and re-submits) is far worse
-      // than failing here - the old websocket wait could hang forever.
-      if (Date.now() - started > 8 * 60 * 1000) {
-        throw new BadBody(
-          this.identifier,
-          '{}',
-          Buffer.from('{}'),
-          'Reddit took too long to answer, please check your account before posting again'
-        );
-      }
-
-      // Keeps the old 5-second spacing between subreddit submissions.
-      await timer(5000);
-    }
-  }
-
-  async comment(
-    id: string,
-    postId: string,
-    lastCommentId: string | undefined,
-    accessToken: string,
-    postDetails: PostDetails<RedditSettingsDto>[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    const [commentPost] = postDetails;
-
-    // Reddit uses thing_id format like t3_xxx for posts
-    const thingId = postId.startsWith('t3_') ? postId : `t3_${postId}`;
-
-    const {
-      json: {
-        data: {
-          things: [
-            {
-              data: { id: commentId, permalink },
-            },
-          ],
-        },
-      },
-    } = await (
-      await this.fetch('https://oauth.reddit.com/api/comment', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          text: commentPost.message,
-          thing_id: thingId,
-          api_type: 'json',
-        }),
-      })
-    ).json();
-
-    return [
-      {
-        postId: commentId,
-        releaseURL: 'https://www.reddit.com' + permalink,
-        id: commentPost.id,
-        status: 'published',
-      },
-    ];
-  }
-
-  @Tool({
-    description: 'Get list of subreddits with information',
-    dataSchema: [
-      {
-        key: 'word',
-        type: 'string',
-        description: 'Search subreddit by string',
-      },
-    ],
-  })
-  async subreddits(accessToken: string, data: any) {
-    // A pasted "r/name" or reddit.com/r/name URL: search by the name alone (the
-    // full URL matches nothing) and put that exact subreddit first if it exists.
-    const named = String(data.word || '').match(/(?:^|\/)r\/([A-Za-z0-9_]+)/);
-    const word = named ? named[1] : data.word;
-    const exact = named
-      ? await this.subredditByName(accessToken, named[1])
-      : [];
-
-    const {
-      data: { children },
-    } = await (
-      await this.fetch(
-        `https://oauth.reddit.com/subreddits/search?show=public&q=${word}&sort=activity&show_users=false&limit=10`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
-        'reddit',
-        0,
-        false
-      )
-    ).json();
-
-    return [
-      ...exact,
-      ...children
-        .filter(
-          ({ data }: { data: any }) =>
-            data.subreddit_type === 'public' &&
-            data.submission_type !== 'image' &&
-            !exact.some((e) => e.id === data.id)
-        )
-        .map(({ data: { title, url, id } }: any) => ({
-          title,
-          name: url,
-          id,
-        })),
-    ];
-  }
-
   private async subredditByName(accessToken: string, name: string) {
     let about: any;
     try {
@@ -775,109 +885,5 @@ export class RedditProvider extends SocialAbstract implements SocialProvider {
     return [
       { title: about.data.title, name: about.data.url, id: about.data.id },
     ];
-  }
-
-  private getPermissions(submissionType: string, allow_images: string) {
-    const permissions = [];
-    if (['any', 'self'].indexOf(submissionType) > -1) {
-      permissions.push('self');
-    }
-
-    if (['any', 'link'].indexOf(submissionType) > -1) {
-      permissions.push('link');
-    }
-
-    if (allow_images) {
-      permissions.push('media');
-    }
-
-    return permissions;
-  }
-
-  @Tool({
-    description: 'Get list of flairs and restrictions for a subreddit',
-    dataSchema: [
-      {
-        key: 'subreddit',
-        type: 'string',
-        description:
-          'Search flairs and restrictions by subreddit key should be "/r/[name]"',
-      },
-    ],
-  })
-  async restrictions(accessToken: string, data: { subreddit: string }) {
-    const {
-      data: { submission_type, allow_images, ...all2 },
-    } = await (
-      await this.fetch(
-        `https://oauth.reddit.com/${data.subreddit}/about`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
-        'reddit',
-        0,
-        false
-      )
-    ).json();
-
-    const { is_flair_required, ...all } = await (
-      await this.fetch(
-        `https://oauth.reddit.com/api/v1/${
-          data.subreddit.split('/r/')[1]
-        }/post_requirements`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
-        'reddit',
-        0,
-        false
-      )
-    ).json();
-
-    // eslint-disable-next-line no-async-promise-executor
-    const newData = await new Promise<{ id: string; name: string }[]>(
-      async (res) => {
-        try {
-          const flair = await (
-            await this.fetch(
-              `https://oauth.reddit.com/${data.subreddit}/api/link_flair_v2`,
-              {
-                method: 'GET',
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                  'Content-Type': 'application/x-www-form-urlencoded',
-                },
-              },
-              'reddit',
-              0,
-              false
-            )
-          ).json();
-
-          res(flair);
-        } catch (err) {
-          return res([]);
-        }
-      }
-    );
-
-    return {
-      subreddit: data.subreddit,
-      allow: this.getPermissions(submission_type, allow_images),
-      is_flair_required: is_flair_required && newData.length > 0,
-      flairs:
-        newData?.map?.((p: any) => ({
-          id: p.id,
-          name: p.text,
-        })) || [],
-    };
   }
 }

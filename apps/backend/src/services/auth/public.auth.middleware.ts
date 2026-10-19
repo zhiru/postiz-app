@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import { Organization } from '@prisma/client';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
+import { ProfileService } from '@gitroom/nestjs-libraries/database/prisma/profiles/profile.service';
 import { HttpForbiddenException } from '@gitroom/nestjs-libraries/services/exception.filter';
 import { setSentryUserContext } from '@gitroom/nestjs-libraries/sentry/initialize.sentry';
 
@@ -12,7 +13,8 @@ export class PublicAuthMiddleware implements NestMiddleware {
 
   constructor(
     private _organizationService: OrganizationService,
-    private _oauthService: OAuthService
+    private _oauthService: OAuthService,
+    private _profileService: ProfileService
   ) {}
 
   private setOrg(req: Request, org: Organization) {
@@ -30,6 +32,7 @@ export class PublicAuthMiddleware implements NestMiddleware {
     }
     try {
       let org: Organization & { subscription?: unknown };
+      let profileApiKey = false;
       const isOAuthApp = auth.startsWith('pos_');
 
       // @ts-ignore
@@ -49,12 +52,20 @@ export class PublicAuthMiddleware implements NestMiddleware {
         // @ts-ignore
         req.oauthUserId = authorization.userId;
       } else {
+        const profile = await this._profileService.getProfileByApiKey(auth);
+        if (profile) {
+          org = profile.organization;
+          profileApiKey = true;
+          // @ts-ignore
+          req.publicApiProfileId = profile.id;
+        } else {
         org = await this._organizationService.getOrgByApiKey(auth);
         if (!org) {
           res
             .status(HttpStatus.UNAUTHORIZED)
             .json({ msg: 'Invalid API key' });
           return;
+        }
         }
       }
 
@@ -77,7 +88,7 @@ export class PublicAuthMiddleware implements NestMiddleware {
 
       if (overrideOrgId) {
         if (
-          isOAuthApp ||
+          isOAuthApp || profileApiKey ||
           !(await this._organizationService.canUseSuperAdminApi(org.id))
         ) {
           res.status(HttpStatus.FORBIDDEN).json({ msg: 'Unauthorized' });

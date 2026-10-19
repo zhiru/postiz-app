@@ -10,6 +10,12 @@ import { ClippingStatusTool } from '@gitroom/nestjs-libraries/chat/tools/clippin
 import { ClippingWidgetTicketTool } from '@gitroom/nestjs-libraries/chat/tools/clipping.widget.ticket.tool';
 import { GenerateImageTool } from '@gitroom/nestjs-libraries/chat/tools/generate.image.tool';
 import { IntegrationListTool } from '@gitroom/nestjs-libraries/chat/tools/integration.list.tool';
+import { KnowledgeQueryTool } from '@gitroom/nestjs-libraries/chat/tools/knowledge.query.tool';
+import { WebSearchTool } from '@gitroom/nestjs-libraries/chat/tools/web-search.tool';
+import { ExtractUrlsTool } from '@gitroom/nestjs-libraries/chat/tools/extract-urls.tool';
+import { CreateCommentAutomationTool } from '@gitroom/nestjs-libraries/chat/tools/create.comment.automation.tool';
+import { ListCommentAutomationsTool } from '@gitroom/nestjs-libraries/chat/tools/list.comment.automations.tool';
+import { SetCommentAutomationStatusTool } from '@gitroom/nestjs-libraries/chat/tools/set.comment.automation.status.tool';
 import { GroupListTool } from '@gitroom/nestjs-libraries/chat/tools/group.list.tool';
 import { UploadFromUrlTool } from '@gitroom/nestjs-libraries/chat/tools/upload.from.url.tool';
 import { MediaListTool } from '@gitroom/nestjs-libraries/chat/tools/media.list.tool';
@@ -37,6 +43,12 @@ export const toolList = [
   ClippingStatusTool,
   ClippingWidgetTicketTool,
   GenerateImageTool,
+  KnowledgeQueryTool,
+  WebSearchTool,
+  ExtractUrlsTool,
+  CreateCommentAutomationTool,
+  ListCommentAutomationsTool,
+  SetCommentAutomationStatusTool,
   UploadFromUrlTool,
   MediaListTool,
   UploadWidgetTool,

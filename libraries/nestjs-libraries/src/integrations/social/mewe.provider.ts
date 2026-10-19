@@ -5,20 +5,26 @@ import {
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import dayjs from 'dayjs';
 import { Integration } from '@prisma/client';
 import { MeweDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/mewe.dto';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
+import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 export class MeweProvider extends SocialAbstract implements SocialProvider {
   identifier = 'mewe';
+
   name = 'MeWe';
+
   isBetweenSteps = false;
+
   scopes = [] as string[];
+
   editor = 'normal' as const;
+
   dto = MeweDto;
 
   private get meweHost() {
@@ -107,7 +113,7 @@ export class MeweProvider extends SocialAbstract implements SocialProvider {
 
     try {
       // Exchange loginRequestToken for apiToken
-      const tokenResponse = await fetch(
+      const tokenResponse = await ssrfSafeFetch(
         `${this.meweHost}/api/dev/token?loginRequestToken=${loginRequestToken}`,
         {
           method: 'GET',
@@ -136,10 +142,13 @@ export class MeweProvider extends SocialAbstract implements SocialProvider {
       const expiresAt = tokenData.expiresAt;
 
       // Fetch user profile
-      const profileResponse = await fetch(`${this.meweHost}/api/dev/me`, {
-        method: 'GET',
-        headers: this.authHeaders(apiToken),
-      });
+      const profileResponse = await ssrfSafeFetch(
+        `${this.meweHost}/api/dev/me`,
+        {
+          method: 'GET',
+          headers: this.authHeaders(apiToken),
+        }
+      );
 
       if (!profileResponse.ok) {
         return 'Failed to fetch MeWe profile.';
@@ -283,7 +292,10 @@ export class MeweProvider extends SocialAbstract implements SocialProvider {
 
     const postId = makeId(12);
 
-    const releaseURL = postType === 'timeline' ? `https://mewe.com/${integration.profile}/posts` : `https://mewe.com/group/${firstPost.settings.group}`;
+    const releaseURL =
+      postType === 'timeline'
+        ? `https://mewe.com/${integration.profile}/posts`
+        : `https://mewe.com/group/${firstPost.settings.group}`;
 
     return [
       {

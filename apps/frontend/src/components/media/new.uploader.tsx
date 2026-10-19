@@ -155,7 +155,10 @@ export function useUppyUploader(props: {
               uppy2.log(error.message, 'error');
               uppy2.info(error.message, 'error', 5000);
               toast.show(
-                `Image file is too large. Maximum size allowed is 30MB.`
+                t(
+                  'image_too_large',
+                  'Image file is too large. Maximum size allowed is 30MB.'
+                )
               );
               uppy2.removeFile(file.id); // Remove file from queue
               return reject(error);
@@ -168,7 +171,10 @@ export function useUppyUploader(props: {
               uppy2.log(error.message, 'error');
               uppy2.info(error.message, 'error', 5000);
               toast.show(
-                `Video file is too large. Maximum size allowed is 1GB.`
+                t(
+                  'video_too_large',
+                  'Video file is too large. Maximum size allowed is 1GB.'
+                )
               );
               uppy2.removeFile(file.id); // Remove file from queue
               return reject(error);
@@ -268,7 +274,11 @@ export function useUppyUploader(props: {
       if (useTransloadit) {
         // @ts-ignore
         const allRes = result.transloadit[0].results;
-        const toSave = uniqBy<{ name: string; originalName: string; order: number }>(
+        const toSave = uniqBy<{
+          name: string;
+          originalName: string;
+          order: number;
+        }>(
           // @ts-ignore
           Object.values(allRes).flatMap((p: any[]) => {
             return p.flatMap((item) => ({

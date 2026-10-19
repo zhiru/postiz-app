@@ -1,12 +1,11 @@
 import {
   AuthTokenDetails,
-  PendingCheckResponse,
   PostDetails,
   PostResponse,
   SocialProvider,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
-import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import {
   BadBody,
   RefreshToken,
@@ -24,16 +23,19 @@ import {
 import dayjs from 'dayjs';
 import { Integration } from '@prisma/client';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
-import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
-import {
-  getSsrfSafeAxios,
-  getSsrfSafeDispatcher,
-} from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import sharp from 'sharp';
 import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
 import { timer } from '@gitroom/helpers/utils/timer';
+import {
+  getSsrfSafeAxios,
+  ssrfSafeFetch,
+  getSsrfSafeDispatcher,
+} from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
+import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 async function reduceImageBySize(url: string, maxSizeKB = 976) {
@@ -71,10 +73,90 @@ async function reduceImageBySize(url: string, maxSizeKB = 976) {
   }
 }
 
-// Streams the video bytes to the Bluesky video service and returns the job
-// status - it does NOT wait for the processing. The blob only exists once the
-// job completes; a BlobRef can't survive JSON serialization through the
-// workflow history, so callers re-read it from getVideoJobStatus when needed.
+async function uploadVideo(
+  agent: AtpAgent,
+  videoPath: string
+): Promise<AppBskyEmbedVideo.Main> {
+  const { data: serviceAuth } = await agent.com.atproto.server.getServiceAuth({
+    aud: `did:web:${agent.dispatchUrl.host}`,
+    lxm: 'com.atproto.repo.uploadBlob',
+    exp: Date.now() / 1000 + 60 * 30, // 30 minutes
+  });
+
+  async function downloadVideo(
+    url: string
+  ): Promise<{ video: Buffer; size: number }> {
+    const response = await ssrfSafeFetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch video: ${response.statusText}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    const video = Buffer.from(arrayBuffer);
+    const size = video.length;
+    return { video, size };
+  }
+
+  const video = await downloadVideo(videoPath);
+
+  console.log('Downloaded video', videoPath, video.size);
+
+  const uploadUrl = new URL(
+    'https://video.bsky.app/xrpc/app.bsky.video.uploadVideo'
+  );
+  uploadUrl.searchParams.append('did', agent.session!.did);
+  uploadUrl.searchParams.append('name', videoPath.split('/').pop()!);
+
+  const uploadResponse = await ssrfSafeFetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${serviceAuth.token}`,
+      'Content-Type': 'video/mp4',
+      'Content-Length': video.size.toString(),
+    },
+    body: video.video,
+  });
+
+  const jobStatus = (await uploadResponse.json()) as AppBskyVideoDefs.JobStatus;
+  console.log('JobId:', jobStatus.jobId);
+  let blob: BlobRef | undefined = jobStatus.blob;
+  const videoAgent = new AtpAgent({
+    service: 'https://video.bsky.app',
+    fetch: ssrfSafeFetch,
+  });
+
+  while (!blob) {
+    const { data: status } = await videoAgent.app.bsky.video.getJobStatus({
+      jobId: jobStatus.jobId,
+    });
+    console.log(
+      'Status:',
+      status.jobStatus.state,
+      status.jobStatus.progress || ''
+    );
+    if (status.jobStatus.blob) {
+      blob = status.jobStatus.blob;
+    }
+
+    if (status.jobStatus.state === 'JOB_STATE_FAILED') {
+      throw new BadBody(
+        'bluesky',
+        JSON.stringify({}),
+        {} as any,
+        'Could not upload video, job failed'
+      );
+    }
+
+    await timer(30000);
+  }
+
+  console.log('posting video...');
+
+  return {
+    $type: 'app.bsky.embed.video',
+    video: blob,
+  } satisfies AppBskyEmbedVideo.Main;
+}
+
 async function startVideoUpload(
   agent: AtpAgent,
   videoPath: string
@@ -151,8 +233,6 @@ async function startVideoUpload(
   return jobStatus;
 }
 
-// Single read of the processing job - the endpoint is public (no login), so
-// status checks never spend Bluesky's strict createSession rate limits.
 async function getVideoJobStatus(
   jobId: string
 ): Promise<AppBskyVideoDefs.JobStatus> {
@@ -163,56 +243,6 @@ async function getVideoJobStatus(
   return status.jobStatus;
 }
 
-// Blocking upload+wait, used by the paths that still resolve everything inside
-// one activity (comments, and post() for pre-v1.0.6 workflows).
-async function uploadVideo(
-  agent: AtpAgent,
-  videoPath: string
-): Promise<AppBskyEmbedVideo.Main> {
-  const jobStatus = await startVideoUpload(agent, videoPath);
-  let blob: BlobRef | undefined = jobStatus.blob;
-
-  let attempts = 0;
-  const maxAttempts = 18; // ~9 minutes at 30s interval
-  while (!blob) {
-    if (attempts++ >= maxAttempts) {
-      throw new BadBody(
-        'bluesky',
-        JSON.stringify({}),
-        {} as any,
-        'Video upload timed out, job did not complete'
-      );
-    }
-
-    const status = await getVideoJobStatus(jobStatus.jobId);
-    console.log('Status:', status.state, status.progress || '');
-    if (status.blob) {
-      blob = status.blob;
-    }
-
-    if (status.state === 'JOB_STATE_FAILED') {
-      throw new BadBody(
-        'bluesky',
-        JSON.stringify({}),
-        {} as any,
-        'Could not upload video, job failed'
-      );
-    }
-
-    await timer(30000);
-  }
-
-  console.log('posting video...');
-
-  return {
-    $type: 'app.bsky.embed.video',
-    video: blob,
-  } satisfies AppBskyEmbedVideo.Main;
-}
-
-// Travels through the workflow history between postPending, checkPostStatus
-// and finalizePost - keep it small JSON: the video job id and the post
-// content, never a BlobRef (it does not survive JSON serialization).
 type BlueskyPendingData = {
   jobId: string; // empty for image-only posts (no asynchronous processing)
   message: string;
@@ -233,35 +263,23 @@ type BlueskyPendingData = {
   'Bluesky can have maximum 1 video or 4 pictures in one post, it can also be without attachments'
 )
 export class BlueskyProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 6; // Bluesky limits are per account and per IP
+  override maxConcurrentJob = 2;
+
   identifier = 'bluesky';
+
   name = 'Bluesky';
+
   toolTip =
     'We don’t currently support two-factor authentication. If it’s enabled on Bluesky, you’ll need to disable it.';
+
   isBetweenSteps = false;
+
   scopes = ['write:statuses', 'profile', 'write:media'];
+
   editor = 'normal' as const;
+
   maxLength() {
     return 300;
-  }
-
-  override async checkValidity(
-    posts: Array<ValidityMedia[]>
-  ): Promise<string | true> {
-    if (
-      posts?.some(
-        (p) =>
-          p?.some((a) => (a?.path?.indexOf?.('mp4') ?? -1) > -1) &&
-          (p?.length ?? 0) > 1
-      )
-    ) {
-      return 'You can only upload one video per post.';
-    }
-
-    if (posts?.some((p) => (p?.length ?? 0) > 4)) {
-      return 'There can be maximum 4 pictures in a post.';
-    }
-    return true;
   }
 
   async customFields() {
@@ -316,20 +334,10 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
   }) {
     const body = JSON.parse(Buffer.from(params.code, 'base64').toString());
 
-    // Bluesky talks to a user-supplied service URL via BskyAgent (not our
-    // `this.fetch`), so the undici SSRF dispatcher can't intercept it. Validate
-    // the URL here — the connection chokepoint — so an internal/private address
-    // can never be saved as an integration. Opt-out matches the dispatcher env.
-    if (
-      process.env.DISABLE_SSRF_PROTECTION !== 'true' &&
-      !(await isSafePublicHttpsUrl(body.service))
-    ) {
-      return 'Invalid service URL: must be a public HTTPS address';
-    }
-
     try {
       const agent = new BskyAgent({
         service: body.service,
+        fetch: ssrfSafeFetch,
       });
 
       const {
@@ -364,6 +372,7 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
     );
     const agent = new BskyAgent({
       service: body.service,
+      fetch: ssrfSafeFetch,
     });
 
     try {
@@ -371,22 +380,8 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
         identifier: body.identifier,
         password: body.password,
       });
-    } catch (err: any) {
-      // Only a definite 4xx (bad password, account taken down) means the
-      // credentials are broken. A 5xx or network error is Bluesky being
-      // unavailable: let it propagate as a transient failure instead of
-      // marking the channel as disconnected.
-      const status = err?.status;
-      if (
-        typeof status === 'number' &&
-        status >= 400 &&
-        status < 500 &&
-        status !== 429
-      ) {
-        throw new RefreshToken('bluesky', JSON.stringify(err), {} as BodyInit);
-      }
-
-      throw err;
+    } catch (err) {
+      throw new RefreshToken('bluesky', JSON.stringify(err), {} as BodyInit);
     }
 
     return agent;
@@ -442,6 +437,340 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
     }
 
     return { embed, images };
+  }
+
+  async post(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const [response] = await this.postPending(
+      id,
+      accessToken,
+      postDetails,
+      integration
+    );
+
+    let pendingData = response.pendingData;
+    const started = Date.now();
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method: failing here is safe (the post is only created once the
+      // video is processed), timing the activity out is not - a retried
+      // activity would upload and publish again.
+      if (Date.now() - started > 8 * 60 * 1000) {
+        throw new BadBody(
+          'bluesky',
+          JSON.stringify({}),
+          {} as any,
+          'Video upload timed out, job did not complete'
+        );
+      }
+
+      const check = await this.checkPostStatus(
+        accessToken,
+        pendingData,
+        integration
+      );
+
+      if (check.status === 'pending') {
+        pendingData = check.pendingData;
+        await timer(20000);
+        continue;
+      }
+
+      const result =
+        check.status === 'ready'
+          ? await this.finalizePost(accessToken, check.pendingData, integration)
+          : check;
+
+      if (result.status === 'completed') {
+        return [
+          {
+            id: response.id,
+            postId: result.postId,
+            status: 'completed',
+            releaseURL: result.releaseURL,
+          },
+        ];
+      }
+
+      pendingData = result.pendingData;
+
+      // An armed pending just loops into the witnessing check; a de-armed one
+      // is a transient preparation failure (login, image upload) - back off
+      // before retrying instead of hammering the login endpoint.
+      if (!(result.pendingData as BlueskyPendingData)?.attempting) {
+        await timer(20000);
+      }
+    }
+  }
+
+  async comment(
+    id: string,
+    postId: string,
+    lastCommentId: string | undefined,
+    accessToken: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const agent = await this.getAgent(integration);
+    const [commentPost] = postDetails;
+
+    const { embed } = await this.uploadMediaForPost(agent, commentPost);
+
+    const rt = new RichText({
+      text: commentPost.message,
+    });
+
+    await rt.detectFacets(agent);
+
+    // Get the parent post info to get its CID
+    const parentUri = lastCommentId || postId;
+
+    // Fetch the parent post to get its CID
+    const parentThread = await agent.getPostThread({
+      uri: parentUri,
+      depth: 0,
+    });
+
+    const parentPost =
+      'post' in parentThread.data.thread
+        ? parentThread.data.thread.post
+        : undefined;
+    if (!parentPost?.cid) {
+      throw new BadBody(
+        this.identifier,
+        '{}',
+        '{}',
+        'The parent post is unavailable'
+      );
+    }
+    const parentCid = parentPost.cid;
+    const record = parentPost.record as {
+      reply?: { root?: { uri?: string; cid?: string } };
+    };
+    const rootUri = record.reply?.root?.uri || postId;
+    const rootCid = record.reply?.root?.cid || parentCid;
+
+    setHeartbeatDetails('bluesky: create post');
+    // @ts-ignore
+    const { cid, uri, commit } = await agent.post({
+      text: rt.text,
+      facets: rt.facets,
+      createdAt: new Date().toISOString(),
+      ...(Object.keys(embed).length > 0 ? { embed } : {}),
+      reply: {
+        root: {
+          uri: rootUri,
+          cid: rootCid,
+        },
+        parent: {
+          uri: parentUri,
+          cid: parentCid,
+        },
+      },
+    });
+
+    return [
+      {
+        id: commentPost.id,
+        postId: uri,
+        status: 'completed',
+        releaseURL: `https://bsky.app/profile/${id}/post/${uri
+          .split('/')
+          .pop()}`,
+      },
+    ];
+  }
+
+  @Plug({
+    identifier: 'bluesky-autoRepostPost',
+    title: 'Auto Repost Posts',
+    description:
+      'When a post reached a certain number of likes, repost it to increase engagement (1 week old posts)',
+    runEveryMilliseconds: 21600000,
+    totalRuns: 3,
+    fields: [
+      {
+        name: 'likesAmount',
+        type: 'number',
+        placeholder: 'Amount of likes',
+        description: 'The amount of likes to trigger the repost',
+        validation: /^\d+$/,
+      },
+    ],
+  })
+  async autoRepostPost(
+    integration: Integration,
+    id: string,
+    fields: { likesAmount: string }
+  ) {
+    const body = JSON.parse(
+      AuthService.fixedDecryption(integration.customInstanceDetails!)
+    );
+    const agent = new BskyAgent({
+      service: body.service,
+    });
+
+    await agent.login({
+      identifier: body.identifier,
+      password: body.password,
+    });
+
+    const getThread = await agent.getPostThread({
+      uri: id,
+      depth: 0,
+    });
+
+    // @ts-ignore
+    if (getThread.data.thread.post?.likeCount >= +fields.likesAmount) {
+      await timer(2000);
+      await agent.repost(
+        // @ts-ignore
+        getThread.data.thread.post?.uri,
+        // @ts-ignore
+        getThread.data.thread.post?.cid
+      );
+      return true;
+    }
+
+    return true;
+  }
+
+  @Plug({
+    identifier: 'bluesky-autoPlugPost',
+    title: 'Auto plug post',
+    description:
+      'When a post reached a certain number of likes, add another post to it so you followers get a notification about your promotion',
+    runEveryMilliseconds: 21600000,
+    totalRuns: 3,
+    fields: [
+      {
+        name: 'likesAmount',
+        type: 'number',
+        placeholder: 'Amount of likes',
+        description: 'The amount of likes to trigger the repost',
+        validation: /^\d+$/,
+      },
+      {
+        name: 'post',
+        type: 'richtext',
+        placeholder: 'Post to plug',
+        description: 'Message content to plug',
+        validation: /^[\s\S]{3,}$/g,
+      },
+    ],
+  })
+  async autoPlugPost(
+    integration: Integration,
+    id: string,
+    fields: { likesAmount: string; post: string }
+  ) {
+    const body = JSON.parse(
+      AuthService.fixedDecryption(integration.customInstanceDetails!)
+    );
+    const agent = new BskyAgent({
+      service: body.service,
+    });
+
+    await agent.login({
+      identifier: body.identifier,
+      password: body.password,
+    });
+
+    const getThread = await agent.getPostThread({
+      uri: id,
+      depth: 0,
+    });
+
+    // @ts-ignore
+    if (getThread.data.thread.post?.likeCount >= +fields.likesAmount) {
+      await timer(2000);
+      const rt = new RichText({
+        text: stripHtmlValidation('normal', fields.post, true),
+      });
+
+      await agent.post({
+        text: rt.text,
+        facets: rt.facets,
+        createdAt: new Date().toISOString(),
+        reply: {
+          root: {
+            // @ts-ignore
+            uri: getThread.data.thread.post?.uri,
+            // @ts-ignore
+            cid: getThread.data.thread.post?.cid,
+          },
+          parent: {
+            // @ts-ignore
+            uri: getThread.data.thread.post?.uri,
+            // @ts-ignore
+            cid: getThread.data.thread.post?.cid,
+          },
+        },
+      });
+      return true;
+    }
+
+    return true;
+  }
+
+  override async mention(
+    token: string,
+    d: { query: string },
+    id: string,
+    integration: Integration
+  ) {
+    const body = JSON.parse(
+      AuthService.fixedDecryption(integration.customInstanceDetails!)
+    );
+
+    const agent = new BskyAgent({
+      service: body.service,
+      fetch: ssrfSafeFetch,
+    });
+
+    await agent.login({
+      identifier: body.identifier,
+      password: body.password,
+    });
+
+    const list = await agent.searchActors({
+      q: d.query,
+    });
+
+    return list.data.actors.map((p) => ({
+      label: p.displayName,
+      id: p.handle,
+      image: p.avatar,
+    }));
+  }
+
+  mentionFormat(idOrHandle: string, name: string) {
+    return `@${idOrHandle}`;
+  }
+
+  override async checkValidity(
+    posts: Array<ValidityMedia[]>
+  ): Promise<string | true> {
+    if (
+      posts?.some(
+        (p) =>
+          p?.some((a) => (a?.path?.indexOf?.('mp4') ?? -1) > -1) &&
+          (p?.length ?? 0) > 1
+      )
+    ) {
+      return 'You can only upload one video per post.';
+    }
+
+    if (posts?.some((p) => (p?.length ?? 0) > 4)) {
+      return 'There can be maximum 4 pictures in a post.';
+    }
+    return true;
   }
 
   async postPending(
@@ -691,310 +1020,5 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
         .split('/')
         .pop()}`,
     };
-  }
-
-  // Old blocking behavior, kept for workflow versions before v1.0.6 that still
-  // run and don't know how to resolve a `pending` response - they wait for the
-  // processing and create the post inside the activity like before.
-  async post(
-    id: string,
-    accessToken: string,
-    postDetails: PostDetails[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    const [response] = await this.postPending(
-      id,
-      accessToken,
-      postDetails,
-      integration
-    );
-
-    let pendingData = response.pendingData;
-    const started = Date.now();
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      // Cap below the 10-minute activity timeout of the old workflows using
-      // this method: failing here is safe (the post is only created once the
-      // video is processed), timing the activity out is not - a retried
-      // activity would upload and publish again.
-      if (Date.now() - started > 8 * 60 * 1000) {
-        throw new BadBody(
-          'bluesky',
-          JSON.stringify({}),
-          {} as any,
-          'Video upload timed out, job did not complete'
-        );
-      }
-
-      const check = await this.checkPostStatus(
-        accessToken,
-        pendingData,
-        integration
-      );
-
-      if (check.status === 'pending') {
-        pendingData = check.pendingData;
-        await timer(20000);
-        continue;
-      }
-
-      const result =
-        check.status === 'ready'
-          ? await this.finalizePost(accessToken, check.pendingData, integration)
-          : check;
-
-      if (result.status === 'completed') {
-        return [
-          {
-            id: response.id,
-            postId: result.postId,
-            status: 'completed',
-            releaseURL: result.releaseURL,
-          },
-        ];
-      }
-
-      pendingData = result.pendingData;
-
-      // An armed pending just loops into the witnessing check; a de-armed one
-      // is a transient preparation failure (login, image upload) - back off
-      // before retrying instead of hammering the login endpoint.
-      if (!(result.pendingData as BlueskyPendingData)?.attempting) {
-        await timer(20000);
-      }
-    }
-  }
-
-  async comment(
-    id: string,
-    postId: string,
-    lastCommentId: string | undefined,
-    accessToken: string,
-    postDetails: PostDetails[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    const agent = await this.getAgent(integration);
-    const [commentPost] = postDetails;
-
-    const { embed } = await this.uploadMediaForPost(agent, commentPost);
-
-    const rt = new RichText({
-      text: commentPost.message,
-    });
-
-    await rt.detectFacets(agent);
-
-    // Get the parent post info to get its CID
-    const parentUri = lastCommentId || postId;
-
-    // Fetch the parent post to get its CID
-    const parentThread = await agent.getPostThread({
-      uri: parentUri,
-      depth: 0,
-    });
-
-    // @ts-ignore
-    const parentCid = parentThread.data.thread.post?.cid;
-    // @ts-ignore
-    const rootUri = parentThread.data.thread.post?.record?.reply?.root?.uri || postId;
-    // @ts-ignore
-    const rootCid = parentThread.data.thread.post?.record?.reply?.root?.cid || parentCid;
-
-    setHeartbeatDetails('bluesky: create post');
-    // @ts-ignore
-    const { cid, uri, commit } = await agent.post({
-      text: rt.text,
-      facets: rt.facets,
-      createdAt: new Date().toISOString(),
-      ...(Object.keys(embed).length > 0 ? { embed } : {}),
-      reply: {
-        root: {
-          uri: rootUri,
-          cid: rootCid,
-        },
-        parent: {
-          uri: parentUri,
-          cid: parentCid,
-        },
-      },
-    });
-
-    return [
-      {
-        id: commentPost.id,
-        postId: uri,
-        status: 'completed',
-        releaseURL: `https://bsky.app/profile/${id}/post/${uri
-          .split('/')
-          .pop()}`,
-      },
-    ];
-  }
-
-  @Plug({
-    identifier: 'bluesky-autoRepostPost',
-    title: 'Auto Repost Posts',
-    description:
-      'When a post reached a certain number of likes, repost it to increase engagement (1 week old posts)',
-    runEveryMilliseconds: 21600000,
-    totalRuns: 3,
-    fields: [
-      {
-        name: 'likesAmount',
-        type: 'number',
-        placeholder: 'Amount of likes',
-        description: 'The amount of likes to trigger the repost',
-        validation: /^\d+$/,
-      },
-    ],
-  })
-  async autoRepostPost(
-    integration: Integration,
-    id: string,
-    fields: { likesAmount: string }
-  ) {
-    const body = JSON.parse(
-      AuthService.fixedDecryption(integration.customInstanceDetails!)
-    );
-    const agent = new BskyAgent({
-      service: body.service,
-    });
-
-    await agent.login({
-      identifier: body.identifier,
-      password: body.password,
-    });
-
-    const getThread = await agent.getPostThread({
-      uri: id,
-      depth: 0,
-    });
-
-    // @ts-ignore
-    if (getThread.data.thread.post?.likeCount >= +fields.likesAmount) {
-      await timer(2000);
-      await agent.repost(
-        // @ts-ignore
-        getThread.data.thread.post?.uri,
-        // @ts-ignore
-        getThread.data.thread.post?.cid
-      );
-      return true;
-    }
-
-    return true;
-  }
-
-  @Plug({
-    identifier: 'bluesky-autoPlugPost',
-    title: 'Auto plug post',
-    description:
-      'When a post reached a certain number of likes, add another post to it so you followers get a notification about your promotion',
-    runEveryMilliseconds: 21600000,
-    totalRuns: 3,
-    fields: [
-      {
-        name: 'likesAmount',
-        type: 'number',
-        placeholder: 'Amount of likes',
-        description: 'The amount of likes to trigger the repost',
-        validation: /^\d+$/,
-      },
-      {
-        name: 'post',
-        type: 'richtext',
-        placeholder: 'Post to plug',
-        description: 'Message content to plug',
-        validation: /^[\s\S]{3,}$/g,
-      },
-    ],
-  })
-  async autoPlugPost(
-    integration: Integration,
-    id: string,
-    fields: { likesAmount: string; post: string }
-  ) {
-    const body = JSON.parse(
-      AuthService.fixedDecryption(integration.customInstanceDetails!)
-    );
-    const agent = new BskyAgent({
-      service: body.service,
-    });
-
-    await agent.login({
-      identifier: body.identifier,
-      password: body.password,
-    });
-
-    const getThread = await agent.getPostThread({
-      uri: id,
-      depth: 0,
-    });
-
-    // @ts-ignore
-    if (getThread.data.thread.post?.likeCount >= +fields.likesAmount) {
-      await timer(2000);
-      const rt = new RichText({
-        text: stripHtmlValidation('normal', fields.post, true),
-      });
-
-      await agent.post({
-        text: rt.text,
-        facets: rt.facets,
-        createdAt: new Date().toISOString(),
-        reply: {
-          root: {
-            // @ts-ignore
-            uri: getThread.data.thread.post?.uri,
-            // @ts-ignore
-            cid: getThread.data.thread.post?.cid,
-          },
-          parent: {
-            // @ts-ignore
-            uri: getThread.data.thread.post?.uri,
-            // @ts-ignore
-            cid: getThread.data.thread.post?.cid,
-          },
-        },
-      });
-      return true;
-    }
-
-    return true;
-  }
-
-  override async mention(
-    token: string,
-    d: { query: string },
-    id: string,
-    integration: Integration
-  ) {
-    const body = JSON.parse(
-      AuthService.fixedDecryption(integration.customInstanceDetails!)
-    );
-
-    const agent = new BskyAgent({
-      service: body.service,
-    });
-
-    await agent.login({
-      identifier: body.identifier,
-      password: body.password,
-    });
-
-    const list = await agent.searchActors({
-      q: d.query,
-    });
-
-    return list.data.actors.map((p) => ({
-      label: p.displayName,
-      id: p.handle,
-      image: p.avatar,
-    }));
-  }
-
-  mentionFormat(idOrHandle: string, name: string) {
-    return `@${idOrHandle}`;
   }
 }

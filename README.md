@@ -1,55 +1,20 @@
 <p align="center">
-  <a href="https://postiz.com/" target="_blank">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/765e9d72-3ee7-4a56-9d59-a2c9befe2311">
-    <img alt="Postiz Logo" src="https://github.com/user-attachments/assets/f0d30d70-dddb-4142-8876-e9aa6ed1cb99" width="280"/>
-  </picture>
+  <img alt="Robô MultiPost Logo" src="apps/frontend/public/logo-text.svg" width="280"/>
+</p>
+
+<h2 align="center">Robô MultiPost</h2>
+<p align="center">Agendador de redes sociais self-hosted para a comunidade Automação Sem Limites</p>
+
+<p align="center">
+  <a href="https://opensource.org/license/agpl-v3">
+    <img src="https://img.shields.io/badge/License-AGPL%203.0-blue.svg" alt="License">
+  </a>
+  <a href="https://github.com/gitroomhq/postiz-app">
+    <img src="https://img.shields.io/badge/Fork%20do-Postiz-orange.svg" alt="Fork do Postiz">
   </a>
 </p>
 
-<p align="center">
-<a href="https://opensource.org/license/agpl-v3">
-  <img src="https://img.shields.io/badge/License-AGPL%203.0-blue.svg" alt="License">
-</a>
-</p>
-
 <div align="center">
-  <strong>
-    <a href="https://postiz.com">Postiz</a> is a social media management platform for scheduling, automating, and analyzing your content.
-    
-  Use Postiz Cloud for a fully managed experience, or deploy the open-source edition on your own infrastructure.
-  </strong>
-</div>
-
-<p align="center">
-  <br />
-  <a href="https://docs.postiz.com" rel="dofollow"><strong>Explore the docs »</strong></a>
-  <br />
-
-  <br />
-  <a href="https://youtube.com/@postizofficial" rel="dofollow"><strong>Watch the YouTube Tutorials»</strong></a>
-  <br />
-</p>
-
-<p align="center">
-  <a href="https://platform.postiz.com">Register</a>
-  ·
-  <a href="https://discord.postiz.com">Join Our Discord (devs only)</a>
-  ·
-  <a href="https://docs.postiz.com/public-api">Public API</a><br />
-</p>
-<p align="center">
-  <a href="https://www.npmjs.com/package/@postiz/node">NodeJS SDK</a>
-  ·
-  <a href="https://www.npmjs.com/package/n8n-nodes-postiz">N8N custom node</a>
-  ·
-  <a href="https://apps.make.com/postiz">Make.com integration</a>
-</p>
-
-<br />
-
-<p align="center"><strong>Schedule posts to:</strong></p>
-<div class="flex" align="center">
   <img alt="Instagram" src="https://postiz.com/svgs/socials/Instagram.svg" width="32">
   <img alt="Youtube" src="https://postiz.com/svgs/socials/Youtube.svg" width="32">
   <img alt="Dribbble" src="https://postiz.com/svgs/socials/Dribbble.svg" width="32">
@@ -66,133 +31,135 @@
   <img alt="Bluesky" src="https://postiz.com/svgs/socials/Bluesky.svg" width="32">
 </div>
 
-<p align="center"><strong>With your favorite AI agent:</strong></p>
-<div class="flex" align="center">
-  <a href="https://postiz.com/chatgpt" title="ChatGPT"><img alt="ChatGPT" src=".github/agents/chatgpt.svg" width="32"></a>
-  <a href="https://postiz.com/claude" title="Claude"><img alt="Claude" src=".github/agents/claude.svg" width="32"></a>
-  <a href="https://postiz.com/claude-code" title="Claude Code"><img alt="Claude Code" src=".github/agents/claude-code.svg" width="32"></a>
-  <a href="https://postiz.com/codex" title="Codex"><img alt="Codex" src=".github/agents/codex.svg" width="32"></a>
-  <a href="https://postiz.com/cursor" title="Cursor"><img alt="Cursor" src=".github/agents/cursor.svg" width="32"></a>
-  <a href="https://postiz.com/openclaw" title="OpenClaw"><img alt="OpenClaw" src=".github/agents/openclaw.svg" width="32"></a>
-  <a href="https://postiz.com/hermes" title="Hermes Agent"><img alt="Hermes Agent" src=".github/agents/hermes-agent.svg" width="32"></a>
-  <a href="https://postiz.com/grok-bot" title="Grok Bot"><img alt="Grok Bot" src=".github/agents/grok-bot.svg" width="32"></a>
-  <a href="https://postiz.com/grok-build" title="Grok Build"><img alt="Grok Build" src=".github/agents/grok-build.svg" width="32"></a>
-  <a href="https://postiz.com/muse" title="Muse"><img alt="Muse" src=".github/agents/muse.svg" width="32"></a>
-  <a href="https://postiz.com/perplexity-computer" title="Perplexity Computer"><img alt="Perplexity Computer" src=".github/agents/perplexity-computer.svg" width="32"></a>
-  <a href="https://postiz.com/nanoclaw" title="nanoclaw"><img alt="nanoclaw" src=".github/agents/nanoclaw.svg" width="32"></a>
-  <a href="https://postiz.com/paperclip" title="Paperclip"><img alt="Paperclip" src=".github/agents/paperclip.svg" width="32"></a>
-  <a href="https://postiz.com/mcp" title="MCP Server"><img alt="MCP Server" src=".github/agents/mcp-server.svg" width="32"></a>
-  <a href="https://postiz.com/agent" title="AI Agents CLI"><img alt="AI Agents CLI" src=".github/agents/ai-agents-cli.svg" width="32"></a>
-</div>
+---
 
-<br />
+## O que é
 
-## 🔌 See the leading Postiz features
+O Robô MultiPost é um agendador de redes sociais self-hosted com suporte a **33+ canais**. Baseado no [Postiz](https://github.com/gitroomhq/postiz-app) (open-source, AGPL-3.0), foi adaptado para rodar em VPS com Docker, focado no público brasileiro da comunidade Automação Sem Limites.
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=BdsCVvEYgHU" target="_blank">
-    <img alt="Postiz" src="https://github.com/user-attachments/assets/8b9b7939-da1a-4be5-95be-42c6fce772de" />
-  </a>
-</p>
+Principais recursos:
+- Agendamento de posts via calendário para múltiplas redes
+- Analytics integrado por canal
+- Biblioteca de mídia centralizada
+- Colaboração em equipe
+- Integração com IA para geração de conteúdo
+- API pública e webhooks — compatível com n8n
 
-## ✨ Features
+## Redes suportadas
 
-| ![Image 1](https://github.com/user-attachments/assets/a27ee220-beb7-4c7e-8c1b-2c44301f82ef) | ![Image 2](https://github.com/user-attachments/assets/eb5f5f15-ed90-47fc-811c-03ccba6fa8a2) |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| ![Image 3](https://github.com/user-attachments/assets/d51786ee-ddd8-4ef8-8138-5192e9cfe7c3) | ![Image 4](https://github.com/user-attachments/assets/91f83c89-22f6-43d6-b7aa-d2d3378289fb) |
+Instagram, Facebook, X (Twitter), LinkedIn, TikTok, YouTube, Pinterest, Threads, Reddit, Discord, Slack, Mastodon, Bluesky, Dribbble e mais.
 
-### Our Sponsors
+## Pré-requisitos
 
-| Sponsor |                                  Logo                                   | Description     |
-|---------|:-----------------------------------------------------------------------:|-----------------|
-| [Hostinger](https://www.hostinger.com/vps/docker/postiz?ref=postiz) | <img src=".github/sponsors/hostinger.png" alt="Hostinger" width="500"/> | Hostinger is on a mission to make online success possible for anyone – from developers to aspiring bloggers and business owners |
-| [Virlo](https://dev.virlo.ai/?ref=postiz) | <img src="https://github.com/user-attachments/assets/25182598-5344-45fc-b9cd-e4cfa16aabfd" alt="Virlo" width="500"/> | Virlo is the #1 social media trend spotting and all-in-one GTM tool for teams leveraging short-form video |
-| [ChatbotX](https://chatbotx.io/?ref=postiz) | <img src="https://github.com/user-attachments/assets/0aa6b058-9a64-46d3-bc26-337abc51737d" alt="ChatbotX" width="500"/> | The ManyChat alternative that you can self-host, white-label, and resell to your clients. Bring your own OpenClaw, Hermes, or Claude agents! |
-| [RapidProxy](https://www.rapidproxy.io/?ref=postiz) | <img width="700" height="412" alt="WP-PROXY-THUMBNAIL-41" src="https://github.com/user-attachments/assets/6cf5b2c9-2687-4181-8964-2e7b90eace4f" /> | RapidProxy provides 90M+ residential IPs for social media, browser automation, and AI workflows, with smart rotation and stable sessions. From $0.55/GB; use RAPID10 for 10% off.
+| Requisito | Mínimo | Recomendado |
+|---|---|---|
+| RAM da VPS | 2 GB | 4 GB |
+| Docker + Docker Compose | v2+ | Última versão estável |
+| Domínio apontando para a VPS | Opcional | Recomendado (para HTTPS) |
 
+## Instalação rápida (Docker Compose)
 
-# Intro
+O Robô MultiPost precisa de **5 serviços** rodando simultaneamente:
 
-- Schedule all your social media posts (many AI features)
-- Measure your work with analytics.
-- Collaborate with other team members to exchange or buy posts.
-- Invite your team members to collaborate, comment, and schedule posts.
-- Perfect for automation (API) with platforms like N8N, Make.com, Zapier, etc.
+1. **App** — backend (NestJS) + frontend (Next.js) em um único container
+2. **PostgreSQL 17** — banco de dados principal
+3. **Redis 7** — cache e filas
+4. **Temporal** — orquestrador de workflows (crítico para o agendamento funcionar)
+5. **Nginx** — reverse proxy (embutido no container da app)
+
+### Passo a passo
+
+```bash
+# 1. Baixar o arquivo de configuração
+curl -o docker-compose.yml https://raw.githubusercontent.com/maiconramos/robo-multipost/main/docker-compose.yaml
+
+# 2. Baixar o arquivo de variáveis de ambiente
+curl -o .env.example https://raw.githubusercontent.com/maiconramos/robo-multipost/main/.env.example
+
+# 3. Criar seu arquivo de variáveis de ambiente
+cp .env.example .env
+
+# 4. Editar o .env com suas configurações (ver tabela abaixo)
+nano .env
+
+# 5. Subir todos os serviços
+docker compose up -d
+```
+
+> **Nota:** O Temporal leva alguns segundos a mais para iniciar completamente. Se a app apresentar erros de conexão nos primeiros segundos, aguarde e ela se reconectará automaticamente.
+
+## Variáveis de ambiente obrigatórias
+
+Edite o arquivo `.env` (ou as variáveis no `docker-compose.yml`) com pelo menos as seguintes configurações:
+
+| Variável | Descrição | Exemplo |
+|---|---|---|
+| `MAIN_URL` | URL pública da aplicação | `https://seu-dominio.com` |
+| `FRONTEND_URL` | URL do frontend | `https://seu-dominio.com` |
+| `NEXT_PUBLIC_BACKEND_URL` | URL pública da API | `https://seu-dominio.com/api` |
+| `DATABASE_URL` | Conexão PostgreSQL | `postgresql://postiz-user:postiz-password@postiz-postgres:5432/postiz-db-local` |
+| `REDIS_URL` | Conexão Redis | `redis://postiz-redis:6379` |
+| `JWT_SECRET` | Chave JWT (string longa aleatória) | Use `openssl rand -base64 32` |
+| `IS_GENERAL` | Modo self-hosted | `true` |
+| `STORAGE_PROVIDER` | Provider de storage | `local` |
+
+> **Dica:** Consulte o arquivo `.env.example` para ver a lista completa de variáveis disponíveis, incluindo configurações de redes sociais, IA e integrações.
+
+## Como atualizar
+
+```bash
+# Atualizar para a versão mais recente
+docker compose pull
+docker compose up -d
+```
+
+Para atualizar para uma versão específica, edite o `docker-compose.yml` e altere a tag da imagem antes de rodar os comandos acima.
+
+## Multi-Tenancy (Organizacoes e Perfis)
+
+O Robo MultiPost suporta multi-tenancy em 3 niveis: **Usuario > Organizacao > Perfil**. Isso permite desde uso individual ate agencias gerenciando multiplos clientes com equipes e permissoes isoladas.
+
+Para o guia completo com exemplos de casos de uso, consulte a [documentacao de Multi-Tenancy](docs/architecture/multi-tenancy.md).
+
+## Automacoes Instagram (estilo ManyChat)
+
+Crie fluxos visuais para responder automaticamente a comentarios em postagens do Instagram: enviar respostas, DMs, aplicar condicoes por palavra-chave e delays duraveis via Temporal.
+
+Para o guia completo de configuracao (App Meta, webhook, credenciais por perfil) consulte a [documentacao de Automacoes Instagram](docs/automacoes-instagram.md).
+
+## Integração com n8n
+
+O Robô MultiPost possui API pública disponível em `/api/`. Você pode usar essa API para integrar com o n8n e automatizar seus fluxos de publicação.
+
+- Suporte a webhooks para eventos de publicação
+- Compatível com o node do n8n para Postiz (`n8n-nodes-postiz`)
+- O limite padrão da API é de 30 requisições por hora (configurável via variável `API_LIMIT`)
 
 ## Tech Stack
 
-- Pnpm workspaces (Monorepo)
-- NextJS (React)
-- NestJS
-- Prisma (Default to PostgreSQL)
-- Temporal
-- Resend (email notifications)
+- **Monorepo:** pnpm workspaces
+- **Frontend:** Next.js 14 + React 18 + Tailwind CSS
+- **Backend:** NestJS (TypeScript)
+- **Banco de dados:** PostgreSQL 17 (via Prisma ORM)
+- **Cache/Filas:** Redis 7
+- **Orquestração:** Temporal.io
+- **IA:** Mastra framework + MCP
 
-## Quick Start
+## Desenvolvimento local
 
-To have the project up and running, please follow the [Quick Start Guide](https://docs.postiz.com/quickstart)
+Para instruções detalhadas de setup local (desenvolvimento e produção), consulte o arquivo [validacao-dev.md](docs/development/validacao-dev.md) na raiz do repositório.
 
-## Sponsor Postiz
+## Créditos
 
-We now offer a few options to sponsor Postiz:
-- Just a donation: You like what we are building, and want to buy us some coffee so we can build faster.
-- Main repository: Get your logo with a backlink from the main Postiz repository. Postiz has over 7M downloads and 20k views per month.
+Este projeto é um fork do [Postiz](https://github.com/gitroomhq/postiz-app), desenvolvido pela equipe do GitRoom HQ, licenciado sob AGPL-3.0.
 
-Link: https://opencollective.com/postiz
+O código original foi modificado para atender as necessidades da comunidade Automação Sem Limites. Todas as modificações também são licenciadas sob AGPL-3.0.
 
- <br />
-  <br />
+## Licença
 
-## Postiz Cloud vs. Open-source
+[AGPL-3.0](LICENSE)
 
-Choose [Postiz Cloud](https://postiz.com/) for a fully managed experience, or deploy Postiz Open-source on your own infrastructure. Both provide the same core Postiz product and features.
 
-We do not "gate" features or limit the license.
+## Integração Aireset
 
-The main difference is the infrastructure you need to own, approval from social media providers, and deployment that might be hard at times (let your LLM deploy it)
-
-| Area | Postiz Cloud | Postiz Open-source (self-hosted) |
-|---|---|---|
-| **Cost** | Subscription per plan, 7-day free trial | Free forever (AGPL-3.0); you pay only for your own infra |
-| **Setup time** | Sign up and connect channels in minutes | Deploy with Docker / Coolify / Railway / any VPS; you configure Postgres, Redis, storage and env vars |
-| **Hosting & data** | Hosted by Postiz; data stored in our infrastructure | Runs on your own server; data never leaves your environment |
-| **Social platform apps** | Pre-approved apps for every channel, ready to use | You create your own developer apps on each platform and go through their approval (Meta, YouTube, TikTok can take weeks) |
-| **Channels** | Limited by plan tier | Unlimited, every supported provider |
-| **Posts per month** | Limited by plan tier | Unlimited |
-| **Team members** | Limited by plan tier | Unlimited |
-| **Scheduling, calendar views, cross-posting, repeated posts, post comments & delays, sets, signatures** | Included | Included |
-| **Internal & Global Plugs, RSS auto-post, customer groups** | Included per plan | Included |
-| **Analytics** | Included per plan | Included (requires your own app credentials with analytics scopes) |
-| **AI Copilot, AI images, AI videos** | Included with monthly quotas per plan; keys managed by Postiz | Available if you bring your own OpenAI (and other provider) API keys; no quota, you pay the provider |
-| **AI video clipping** | Included with monthly clipping minutes per plan | Requires your own provider keys and extra configuration |
-| **Smart Agent** | Included per plan | Available with your own LLM key |
-| **Public API & webhooks** | Included per plan | Included |
-| **Agentic surfaces (MCP, CLI, Claude / ChatGPT / Codex / OpenClaw / Cursor connectors)** | Included, hosted MCP endpoint | Included, you point the MCP / CLI at your own instance |
-| **Custom integrations** | Included per plan | Included; you can also modify the code and add providers |
-| **Updates & maintenance** | Automatic, zero downtime for you | You pull new images and run migrations yourself |
-| **Uptime, backups, security patches** | Managed by Postiz | Your responsibility |
-| **Support** | Priority support via Discord / email per plan | Community support on Discord and GitHub |
-| **Source access & customization** | No (SaaS) | Full source code, fork and modify freely under AGPL |
-| **Compliance / data residency** | Postiz-controlled regions | Any region or air-gapped environment you choose |
-
-<br />
-<br />
-  
-## Postiz Compliance
-
-- This GitHub repository contains the open-source, self-hosted edition of Postiz. Postiz is also available as Postiz Cloud, a fully managed service at postiz.com.
-- Postiz hosted service uses official, platform-approved OAuth flows.
-- Postiz does not automate or scrape content from social media platforms.
-- Postiz does not collect, store, or proxy API keys or access tokens from users.
-- Postiz never asks users to paste API keys into our hosted product.
-- Postiz users always authenticate directly with the social platform (e.g., X, Discord, etc.), ensuring platform compliance and data privacy.
-
-## License
-
-This repository's source code is available under the [AGPL-3.0 license](LICENSE).
-
-<br /><br />
-
-<p align="center">
-  <img src="https://github.com/snyk-labs/secure-developer-sample-repo/raw/main/badge_full.svg" alt="Secure Developer Badge Full" width="150">
-</p>
+Esta versão incorpora as melhorias do fork zhiru/postiz-app, incluindo sincronização do histórico do Instagram, relatórios e comentários. Consulte `docs/robo-multipost-integration.md` antes de migrar uma instância existente.

@@ -8,22 +8,15 @@ import { useShallow } from 'zustand/react/shallow';
 import { useExistingData } from '@gitroom/frontend/components/launches/helpers/use.existing.data';
 import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 import { Check } from '@gitroom/frontend/components/launches/tags.component';
+import { PlatformIconBadge } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
 
 const PlatformBadge: FC<{ integration: Integrations }> = ({ integration }) => {
-  return integration.identifier === 'youtube' ? (
-    <img
-      src="/icons/platforms/youtube.svg"
-      className="absolute z-10 bottom-0 -end-[5px] min-w-[16px]"
-      width={16}
-    />
-  ) : (
-    <SafeImage
-      src={`/icons/platforms/${integration.identifier}.png`}
-      className="rounded-[4px] absolute z-10 bottom-0 -end-[5px] min-w-[16px] min-h-[16px]"
-      alt={integration.identifier}
-      width={16}
-      height={16}
+  return (
+    <PlatformIconBadge
+      identifier={integration.identifier}
+      size={16}
+      className="absolute z-10 bottom-0 -end-[5px] min-w-[16px] min-h-[16px] rounded-[4px]"
     />
   );
 };

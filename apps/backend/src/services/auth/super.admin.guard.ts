@@ -19,15 +19,16 @@ export class SuperAdminGuard implements CanActivate {
     const {
       org,
       isOAuthApp,
+      publicApiProfileId,
       authOrgId,
-    }: { org: Organization; isOAuthApp?: boolean; authOrgId?: string } =
+    }: { org: Organization; isOAuthApp?: boolean; publicApiProfileId?: string; authOrgId?: string } =
       request;
 
     const orgId = authOrgId || org?.id;
 
     if (
       !orgId ||
-      isOAuthApp ||
+      isOAuthApp || publicApiProfileId ||
       !(await this._organizationService.canUseSuperAdminApi(orgId))
     ) {
       throw new HttpException({ msg: 'Unauthorized' }, 403);

@@ -8,6 +8,7 @@ import dayjs from 'dayjs';
 import { useClickAway } from '@uidotdev/usehooks';
 import ReactLoading from '@gitroom/frontend/components/layout/loading';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { sanitizePostContent } from '@gitroom/helpers/utils/sanitize.post.content';
 function replaceLinks(text: string) {
   const urlRegex =
     /(\bhttps?:\/\/[-A-Z0-9+&@#/%?=~_|!:,.;]*[-A-Z0-9+&@#/%=~_|])/gi;
@@ -20,13 +21,21 @@ export const ShowNotification: FC<{
   notification: {
     createdAt: string;
     content: string;
+    contentKey?: string | null;
+    contentParams?: Record<string, string | number> | null;
   };
   lastReadNotification: string;
 }> = (props) => {
   const { notification } = props;
+  const t = useT();
   const [newNotification] = useState(
     new Date(notification.createdAt) > new Date(props.lastReadNotification)
   );
+  // Notificacoes novas carregam contentKey+params: traduz no idioma de quem ve
+  // (locale do cliente). content fica como fallback para linhas legadas.
+  const message = notification.contentKey
+    ? t(notification.contentKey, notification.contentParams || {})
+    : notification.content;
   const createdAt = dayjs(notification.createdAt);
   const isWithin24h = dayjs().diff(createdAt, 'hour') < 24;
   const fullDate = createdAt.format('MMM D, YYYY h:mm A');
@@ -40,7 +49,7 @@ export const ShowNotification: FC<{
       <div
         className="break-words"
         dangerouslySetInnerHTML={{
-          __html: replaceLinks(notification.content),
+          __html: sanitizePostContent(replaceLinks(message)),
         }}
       />
       <div
@@ -65,9 +74,7 @@ export const NotificationOpenComponent = () => {
       id="notification-popup"
       className="opacity-0 animate-normalFadeDown mt-[10px] absolute w-[420px] max-w-[calc(100vw-24px)] min-h-[200px] top-[100%] end-0 bg-third text-textColor rounded-[16px] flex flex-col border border-tableBorder z-[600]"
     >
-      <div
-        className={`p-[16px] border-b border-tableBorder font-bold`}
-      >
+      <div className={`p-[16px] border-b border-tableBorder font-bold`}>
         {t('notifications', 'Notifications')}
       </div>
 
@@ -88,6 +95,8 @@ export const NotificationOpenComponent = () => {
               notification: {
                 createdAt: string;
                 content: string;
+                contentKey?: string | null;
+                contentParams?: Record<string, string | number> | null;
               },
               index: number
             ) => (

@@ -10,7 +10,7 @@ import { PostsSyncService } from './posts-sync.service';
 import { Test } from '@nestjs/testing';
 
 describe('post synchronization service', () => {
-  const integration = {
+  const integration: any = {
     id: 'channel',
     organizationId: 'org',
     providerIdentifier: 'supported-provider',
@@ -92,9 +92,14 @@ describe('post synchronization service', () => {
       'private-token',
       'resume'
     );
-    expect(posts.importPlatformPost).toHaveBeenCalledWith('org', 'channel', {
-      id: 'remote',
-    });
+    expect(posts.importPlatformPost).toHaveBeenCalledWith(
+      'org',
+      'channel',
+      {
+        id: 'remote',
+      },
+      undefined
+    );
     expect(repository.update).toHaveBeenCalledWith('org', 'channel', {
       postsSyncCursor: 'next',
     });

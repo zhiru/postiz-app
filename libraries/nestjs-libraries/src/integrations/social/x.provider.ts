@@ -1,22 +1,20 @@
-import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { TweetV2, TwitterApi } from 'twitter-api-v2';
-import { createHmac, randomBytes } from 'crypto';
-import { parseFragment } from 'parse5';
 import {
   AnalyticsData,
   AuthTokenDetails,
-  PendingCheckResponse,
+  ClientInformation,
   PostDetails,
   PostResponse,
   SocialProvider,
+  ReportMetricsMap,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { lookup } from 'mime-types';
 import sharp from 'sharp';
-import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
 import {
+  SocialAbstract,
   BadBody,
   RefreshToken,
-  SocialAbstract,
   stripQuery,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
@@ -26,14 +24,16 @@ import { PostPlug } from '@gitroom/helpers/decorators/post.plug';
 import dayjs from 'dayjs';
 import { uniqBy } from 'lodash';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
-import { stripLinks as removeLinks } from '@gitroom/helpers/utils/strip.links';
 import { XDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/x.dto';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { AuthService } from '@gitroom/helpers/auth/auth.service';
+import { createHmac, randomBytes } from 'crypto';
+import { parseFragment } from 'parse5';
+import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
+import { stripLinks as removeLinks } from '@gitroom/helpers/utils/strip.links';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { isAllowedUploadPath } from '@gitroom/helpers/utils/valid.url.path';
 
-// Travels through the workflow history between postPending, checkPostStatus
-// and finalizePost - keep it small JSON (media ids and the tweet content).
 type XPendingData = {
   message: string;
   settings: {
@@ -67,130 +67,36 @@ type XPendingData = {
 };
 
 @Rules(
-  `X can have maximum 4 pictures, or maximum one video, it can also be without attachments, it can also be published as a long-form article (draft or published) when post_type is set to article, in an article pictures go inside the content as <img src="..."> where they should appear (the src must be a picture from the media library, upload it with uploadFromUrlTool first) ${
-    process.env.STRIP_LINKS_FROM_X_POSTS
-      ? 'do not add links, they will be stripped from the post'
-      : ''
-  }`
+  'X can have maximum 4 pictures, or maximum one video, it can also be without attachments'
 )
 export class XProvider extends SocialAbstract implements SocialProvider {
   identifier = 'x';
-  reportMetrics: ReportMetricsMap = {
-    reach: ['IMPRESSION'],
-    engagement: ['LIKE', 'REPLY', 'RETWEET', 'QUOTE', 'BOOKMARK'],
-  };
+
   name = 'X';
+
   isBetweenSteps = false;
+
   scopes = [] as string[];
-  stripLinks = () => !!process.env.STRIP_LINKS_FROM_X_POSTS;
-  // X rate limits are per user (300 posts / 3 hours), not per app, so the cap
-  // only needs to keep bursts polite. With the pending flow the slot is held
-  // for actual API work only (processing waits live in workflow timers), so a
-  // single slot is no longer required - it would serialize every customer's
-  // status checks behind uploads.
-  override maxConcurrentJob = 10;
+
+  override maxConcurrentJob = 1;
+
   toolTip =
     'You will be logged in into your current account, if you would like a different account, change it first on X';
 
-  // The provider receives the rich HTML so articles keep their formatting;
-  // regular tweets are stripped to plain text inside the provider.
   editor = 'html' as const;
+
   dto = XDto;
 
-  maxLength(additionalSettings?: any, settings?: any) {
-    // Articles are long-form content, the tweet character limit doesn't apply.
-    if (settings?.post_type === 'article') {
-      return 100000;
-    }
-
-    // Accepts either the parsed additionalSettings array (from validation) or a
-    // plain boolean (legacy callers). "Verified" => premium => higher limit.
-    const isTwitterPremium = Array.isArray(additionalSettings)
-      ? !!additionalSettings.find((p: any) => p?.title === 'Verified')?.value
-      : !!additionalSettings;
-    return isTwitterPremium ? 4000 : 280;
-  }
-
-  // Article bodies hold pictures, tweets only take attachments.
-  inlineImages(settings?: any) {
-    return settings?.post_type === 'article';
-  }
-
-  // With `editor = 'html'` the activity hands the provider HTML (needed for
-  // articles); everything that becomes a tweet has to be flattened back to the
-  // plain text X expects - same output the old 'normal' editor produced.
-  private toTweetText(message: string) {
-    return stripHtmlValidation(
-      'normal',
-      message,
-      true,
-      false,
-      !/<\/?[a-z][\s\S]*>/i.test(message)
-    );
-  }
-
-  override async checkValidity(
-    [firstPost, ...comments]: Array<{ path: string }[]>,
-    settings: any
-  ): Promise<string | true> {
-    if (settings?.post_type !== 'article') {
-      return true;
-    }
-
-    if (
-      [...(firstPost || []), ...comments.flat()].some((m) =>
-        hasExtension(m.path, 'mp4')
-      )
-    ) {
-      return 'X articles only support images';
-    }
-
-    // Replies can only be attached to the seed post a published article
-    // creates - a draft has no post to reply to.
-    if (settings?.article_status !== 'published' && comments.length) {
-      return 'A draft article cannot have thread replies, remove them or publish the article';
-    }
-
-    return true;
+  maxLength(isTwitterPremium: boolean) {
+    return isTwitterPremium ? 4000 : 200;
   }
 
   override handleErrors(body: string):
     | {
-        type: 'refresh-token' | 'bad-body' | 'retry';
+        type: 'refresh-token' | 'bad-body';
         value: string;
       }
     | undefined {
-    if (body.includes('You are not permitted to perform this action')) {
-      return {
-        type: 'bad-body',
-        value:
-          'There is a problem posting, please edit your post and check character count and media attachments',
-      };
-    }
-    if (body.includes('Service Unavailable')) {
-      return {
-        type: 'retry',
-        value: 'X is currently unavailable, please try again later',
-      };
-    }
-    if (body.includes('Too Many Requests')) {
-      return {
-        type: 'retry',
-        value: 'X rate limit reached, please try again later',
-      };
-    }
-    if (body.includes('maximum of one cashtag')) {
-      return {
-        type: 'bad-body',
-        value: 'There can be maximum of one cashtag ($SYMBOL) per post',
-      };
-    }
-    if (body.includes('maximum of 4 items')) {
-      return {
-        type: 'bad-body',
-        value: 'There must be a maximum of 4 items per post',
-      };
-    }
     if (body.includes('Unsupported Authentication')) {
       return {
         type: 'refresh-token',
@@ -198,11 +104,15 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       };
     }
 
-    if (body.includes('You are not allowed to create a Tweet')) {
+    if (
+      body.includes('CreditsDepleted') ||
+      body.includes('/2/problems/credits')
+    ) {
       return {
         type: 'bad-body',
-        value: 'You are not allowed to create a post with duplicate content',
-      }
+        value:
+          'X: creditos da API esgotados. Verifique o tier do seu app em developer.x.com (o tier Free tem cota mensal muito limitada para criacao de tweets).',
+      };
     }
 
     if (body.includes('usage-capped')) {
@@ -211,26 +121,11 @@ export class XProvider extends SocialAbstract implements SocialProvider {
         value: 'Posting failed - capped reached. Please try again later',
       };
     }
-
-    if (body.includes('user-suspended')) {
-      return {
-        type: 'bad-body',
-        value:
-          'Your X account has been suspended, please reconnect with another account',
-      };
-    }
     if (body.includes('duplicate-rules')) {
       return {
         type: 'bad-body',
         value:
           'You have already posted this post, please wait before posting again',
-      };
-    }
-    if (body.includes('Your account is not permitted to access this feature')) {
-      return {
-        type: 'bad-body',
-        value:
-          'X blocked your request',
       };
     }
     if (body.includes('The Tweet contains an invalid URL.')) {
@@ -251,57 +146,79 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       };
     }
     if (
-      body.includes(
-        'This user is not allowed to post a video longer than 10 minutes'
-      )
+      body.includes('Tweet text is too long') ||
+      body.includes('Tweet needs to be a bit shorter') ||
+      body.includes('exceeds the maximum number of characters')
     ) {
       return {
         type: 'bad-body',
         value:
-          'The video you are trying to post is longer than 10 minutes, which is not allowed for this account',
+          'O texto do tweet excedeu o limite de caracteres do X. Reduza o conteudo (limite de 280 chars no contador weighted, com — e … contando como 2) e tente novamente.',
       };
     }
-    if (body.includes('Your account is temporarily locked')) {
+    if (
+      body.includes('paid_partnership') &&
+      (body.includes('not allowed') ||
+        body.includes('not authorized') ||
+        body.includes('Forbidden'))
+    ) {
       return {
         type: 'bad-body',
         value:
-          'Your X account is temporarily locked, log in to x.com to unlock it and then try again',
-      };
-    }
-    if (body.includes('Crypto addresses are prohibited')) {
-      return {
-        type: 'bad-body',
-        value:
-          'X does not allow crypto addresses in posts for the first 7 days after connecting the account',
-      };
-    }
-    if (body.includes('Your media IDs are invalid')) {
-      return {
-        type: 'bad-body',
-        value:
-          'X rejected the attached media, please re-upload the media and try again',
-      };
-    }
-    if (body.includes('not authorized to create or publish articles')) {
-      return {
-        type: 'bad-body',
-        value: 'Publishing articles on X requires an X Premium subscription',
-      };
-    }
-    if (body.includes('Please include either text or media in your Tweet')) {
-      return {
-        type: 'bad-body',
-        value:
-          'One of the posts in this thread has no text or media, please add some text or remove it',
-      };
-    }
-    if (body.includes('"title":"Unauthorized"')) {
-      return {
-        type: 'refresh-token',
-        value: 'X rejected the connected account, please reconnect your account',
+          'X: sua conta nao tem permissao para marcar paid_partnership (parceria paga). Desmarque essa opcao no post e tente novamente.',
       };
     }
     return undefined;
+  }
+
+  buildTweetPayload(input: {
+    text: string;
+    media_ids: string[];
+    settings: {
+      who_can_reply_post?:
+        | 'everyone'
+        | 'following'
+        | 'mentionedUsers'
+        | 'subscribers'
+        | 'verified';
+      community?: string;
+      made_with_ai?: boolean;
+      paid_partnership?: boolean;
+    };
+    replyToId?: string;
+  }) {
+    const { text, media_ids, settings, replyToId } = input;
+    const payload: any = { text };
+
+    if (
+      settings.who_can_reply_post &&
+      settings.who_can_reply_post !== 'everyone'
+    ) {
+      payload.reply_settings = settings.who_can_reply_post;
+    }
+
+    if (settings.community) {
+      payload.share_with_followers = true;
+      payload.community_id = settings.community.split('/').pop() || '';
+    }
+
+    if (media_ids.length) {
+      payload.media = { media_ids };
+    }
+
+    if (this.assetBoolean(settings.made_with_ai)) {
+      payload.made_with_ai = true;
+    }
+
+    if (this.assetBoolean(settings.paid_partnership)) {
+      payload.paid_partnership = true;
+    }
+
+    if (replyToId) {
+      payload.reply = { in_reply_to_tweet_id: replyToId };
+    }
+
+    return payload;
   }
 
   @Plug({
@@ -450,11 +367,16 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async generateAuthUrl() {
-    const client = new TwitterApi({
-      appKey: process.env.X_API_KEY!,
-      appSecret: process.env.X_API_SECRET!,
-    });
+  async generateAuthUrl(clientInformation?: ClientInformation) {
+    const appKey = clientInformation?.client_id || process.env.X_API_KEY;
+    const appSecret =
+      clientInformation?.client_secret || process.env.X_API_SECRET;
+    if (!appKey || !appSecret) {
+      throw new Error(
+        'Credenciais do X ausentes: configure em Credenciais de Apps do perfil ou nas env vars X_API_KEY/X_API_SECRET.'
+      );
+    }
+    const client = new TwitterApi({ appKey, appSecret });
     const { url, oauth_token, oauth_token_secret } =
       await client.generateAuthLink(
         (process.env.X_URL || process.env.FRONTEND_URL) +
@@ -472,13 +394,23 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async authenticate(params: { code: string; codeVerifier: string }) {
+  async authenticate(
+    params: { code: string; codeVerifier: string; refresh?: string },
+    clientInformation?: ClientInformation
+  ) {
     const { code, codeVerifier } = params;
     const [oauth_token, oauth_token_secret] = codeVerifier.split(':');
 
+    const appKey = clientInformation?.client_id || process.env.X_API_KEY;
+    const appSecret =
+      clientInformation?.client_secret || process.env.X_API_SECRET;
+    if (!appKey || !appSecret) {
+      throw new Error('Credenciais do X ausentes ao finalizar OAuth.');
+    }
+
     const startingClient = new TwitterApi({
-      appKey: process.env.X_API_KEY!,
-      appSecret: process.env.X_API_SECRET!,
+      appKey,
+      appSecret,
       accessToken: oauth_token,
       accessSecret: oauth_token_secret,
     });
@@ -518,22 +450,507 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  private async getClient(accessToken: string) {
+  private resolveAppKeys(integration?: Integration): {
+    appKey: string;
+    appSecret: string;
+  } {
+    if (integration?.customInstanceDetails) {
+      try {
+        const decrypted = AuthService.fixedDecryption(
+          integration.customInstanceDetails
+        );
+        const parsed =
+          typeof decrypted === 'string' ? JSON.parse(decrypted) : decrypted;
+        if (parsed?.client_id && parsed?.client_secret) {
+          return {
+            appKey: parsed.client_id,
+            appSecret: parsed.client_secret,
+          };
+        }
+      } catch (err) {
+        console.error(
+          '[x.provider] falha ao decodificar customInstanceDetails:',
+          err
+        );
+      }
+    }
+
+    const appKey = process.env.X_API_KEY;
+    const appSecret = process.env.X_API_SECRET;
+    if (!appKey || !appSecret) {
+      throw new Error(
+        'Credenciais do X ausentes: configure as Consumer Keys do X no perfil (Credenciais de Apps) ou defina X_API_KEY/X_API_SECRET nas env vars.'
+      );
+    }
+    return { appKey, appSecret };
+  }
+
+  private async getClient(accessToken: string, integration?: Integration) {
     const [accessTokenSplit, accessSecretSplit] = accessToken.split(':');
+    const { appKey, appSecret } = this.resolveAppKeys(integration);
     return new TwitterApi({
-      appKey: process.env.X_API_KEY!,
-      appSecret: process.env.X_API_SECRET!,
+      appKey,
+      appSecret,
       accessToken: accessTokenSplit,
       accessSecret: accessSecretSplit,
     });
+  }
+
+  private async uploadMedia(
+    client: TwitterApi,
+    postDetails: PostDetails<any>[]
+  ) {
+    const { media, processingIds } = await this.uploadMediaEntries(
+      client,
+      postDetails
+    );
+
+    for (const mediaId of processingIds) {
+      await this.waitForMediaProcessing(client, mediaId);
+    }
+
+    return media;
+  }
+
+  async post(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails<{
+      active_thread_finisher: boolean;
+      thread_finisher: string;
+      community?: string;
+      who_can_reply_post:
+        | 'everyone'
+        | 'following'
+        | 'mentionedUsers'
+        | 'subscribers'
+        | 'verified';
+      made_with_ai?: boolean;
+      paid_partnership?: boolean;
+    }>[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const [response] = await this.postPending(
+      id,
+      accessToken,
+      postDetails,
+      integration
+    );
+
+    let pendingData = response.pendingData;
+    const started = Date.now();
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method: failing here is safe (the tweet is only created once the
+      // media is ready), timing the activity out is not - a retried activity
+      // would upload and publish again.
+      if (Date.now() - started > 8 * 60 * 1000) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          Buffer.from('{}'),
+          'X took too long to process the media, please try again'
+        );
+      }
+
+      const check = await this.checkPostStatus(
+        accessToken,
+        pendingData,
+        integration
+      );
+
+      if (check.status === 'pending') {
+        pendingData = check.pendingData;
+        await timer(20000);
+        continue;
+      }
+
+      const result =
+        check.status === 'ready'
+          ? await this.finalizePost(accessToken, check.pendingData, integration)
+          : check;
+
+      if (result.status === 'completed') {
+        return [
+          {
+            postId: result.postId,
+            id: response.id,
+            releaseURL: result.releaseURL,
+            status: 'posted',
+          },
+        ];
+      }
+
+      // finalize only armed the handshake (nothing to wait for), loop straight
+      // into the witnessing check
+      pendingData = result.pendingData;
+    }
+  }
+
+  async comment(
+    id: string,
+    postId: string,
+    lastCommentId: string | undefined,
+    accessToken: string,
+    postDetails: PostDetails<{
+      active_thread_finisher: boolean;
+      thread_finisher: string;
+      made_with_ai?: boolean;
+      paid_partnership?: boolean;
+    }>[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const [accessTokenSplit, accessSecretSplit] = accessToken.split(':');
+    const client = await this.getClient(accessToken, integration);
+    const [commentPost] = postDetails;
+
+    // upload media for the comment
+    const uploadAll = await this.uploadMedia(client, [commentPost]);
+
+    const media_ids = (uploadAll[commentPost.id] || []).filter((f) => f);
+
+    const replyToId = lastCommentId || postId;
+
+    // Comments are always tweets - flatten the editor HTML to plain text.
+    const commentText = this.toTweetText(commentPost.message);
+
+    const tweetUrl = 'https://api.x.com/2/tweets';
+    const tweetBody = {
+      text: this.stripLinks() ? removeLinks(commentText) : commentText,
+      ...(media_ids.length ? { media: { media_ids } } : {}),
+      reply: { in_reply_to_tweet_id: replyToId },
+      ...(this.assetBoolean(commentPost?.settings?.made_with_ai)
+        ? { made_with_ai: true }
+        : {}),
+      ...(this.assetBoolean(commentPost?.settings?.paid_partnership)
+        ? { paid_partnership: true }
+        : {}),
+    };
+
+    const tweetResponse = await this.fetch(tweetUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: this.signOAuth1(
+          'POST',
+          tweetUrl,
+          accessTokenSplit,
+          accessSecretSplit,
+          integration
+        ),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(tweetBody),
+    });
+    const { data } = (await tweetResponse.json()) as {
+      data: { id: string };
+    };
+
+    return [
+      {
+        postId: data.id,
+        id: commentPost.id,
+        releaseURL: `https://twitter.com/${integration.profile}/status/${data.id}`,
+        status: 'posted',
+      },
+    ];
+  }
+
+  private loadAllTweets = async (
+    client: TwitterApi,
+    id: string,
+    until: string,
+    since: string,
+    token = ''
+  ): Promise<TweetV2[]> => {
+    const tweets = await client.v2.userTimeline(id, {
+      'tweet.fields': ['id'],
+      'user.fields': [],
+      'poll.fields': [],
+      'place.fields': [],
+      'media.fields': [],
+      exclude: ['replies', 'retweets'],
+      start_time: since,
+      end_time: until,
+      max_results: 100,
+      ...(token ? { pagination_token: token } : {}),
+    });
+
+    const list = tweets.data.data || [];
+
+    return [
+      ...list,
+      ...(list.length === 100 && tweets.meta.next_token
+        ? await this.loadAllTweets(
+            client,
+            id,
+            until,
+            since,
+            tweets.meta.next_token
+          )
+        : []),
+    ];
+  };
+
+  async analytics(
+    id: string,
+    accessToken: string,
+    date: number,
+    integration?: Integration
+  ): Promise<AnalyticsData[]> {
+    if (process.env.DISABLE_X_ANALYTICS) {
+      return [];
+    }
+
+    const until = dayjs().endOf('day');
+    const since = dayjs().subtract(date > 100 ? 100 : date, 'day');
+
+    const client = await this.getClient(accessToken, integration);
+
+    try {
+      const tweets = uniqBy(
+        await this.loadAllTweets(
+          client,
+          id,
+          until.format('YYYY-MM-DDTHH:mm:ssZ'),
+          since.format('YYYY-MM-DDTHH:mm:ssZ')
+        ),
+        (p) => p.id
+      );
+
+      if (tweets.length === 0) {
+        return [];
+      }
+
+      const data = await client.v2.tweets(
+        tweets.map((p) => p.id),
+        {
+          'tweet.fields': ['public_metrics'],
+        }
+      );
+
+      const metrics = data.data.reduce(
+        (all, current) => {
+          all.impression_count =
+            (all.impression_count || 0) +
+            +current.public_metrics.impression_count;
+          all.bookmark_count =
+            (all.bookmark_count || 0) + +current.public_metrics.bookmark_count;
+          all.like_count =
+            (all.like_count || 0) + +current.public_metrics.like_count;
+          all.quote_count =
+            (all.quote_count || 0) + +current.public_metrics.quote_count;
+          all.reply_count =
+            (all.reply_count || 0) + +current.public_metrics.reply_count;
+          all.retweet_count =
+            (all.retweet_count || 0) + +current.public_metrics.retweet_count;
+
+          return all;
+        },
+        {
+          impression_count: 0,
+          bookmark_count: 0,
+          like_count: 0,
+          quote_count: 0,
+          reply_count: 0,
+          retweet_count: 0,
+        }
+      );
+
+      return Object.entries(metrics).map(([key, value]) => ({
+        label: key.replace('_count', '').replace('_', ' ').toUpperCase(),
+        percentageChange: 5,
+        data: [
+          {
+            total: String(0),
+            date: since.format('YYYY-MM-DD'),
+          },
+          {
+            total: String(value),
+            date: until.format('YYYY-MM-DD'),
+          },
+        ],
+      }));
+    } catch (err) {
+      console.log(err);
+    }
+    return [];
+  }
+
+  async postAnalytics(
+    integrationId: string,
+    accessToken: string,
+    postId: string,
+    date: number,
+    integration?: Integration
+  ): Promise<AnalyticsData[]> {
+    if (process.env.DISABLE_X_ANALYTICS) {
+      return [];
+    }
+
+    const today = dayjs().format('YYYY-MM-DD');
+
+    const client = await this.getClient(accessToken, integration);
+
+    try {
+      // Fetch the specific tweet with public metrics
+      const tweet = await client.v2.singleTweet(postId, {
+        'tweet.fields': ['public_metrics', 'created_at'],
+      });
+
+      if (!tweet?.data?.public_metrics) {
+        return [];
+      }
+
+      const metrics = tweet.data.public_metrics;
+
+      const result: AnalyticsData[] = [];
+
+      if (metrics.impression_count !== undefined) {
+        result.push({
+          label: 'Impressions',
+          percentageChange: 0,
+          data: [{ total: String(metrics.impression_count), date: today }],
+        });
+      }
+
+      if (metrics.like_count !== undefined) {
+        result.push({
+          label: 'Likes',
+          percentageChange: 0,
+          data: [{ total: String(metrics.like_count), date: today }],
+        });
+      }
+
+      if (metrics.retweet_count !== undefined) {
+        result.push({
+          label: 'Retweets',
+          percentageChange: 0,
+          data: [{ total: String(metrics.retweet_count), date: today }],
+        });
+      }
+
+      if (metrics.reply_count !== undefined) {
+        result.push({
+          label: 'Replies',
+          percentageChange: 0,
+          data: [{ total: String(metrics.reply_count), date: today }],
+        });
+      }
+
+      if (metrics.quote_count !== undefined) {
+        result.push({
+          label: 'Quotes',
+          percentageChange: 0,
+          data: [{ total: String(metrics.quote_count), date: today }],
+        });
+      }
+
+      if (metrics.bookmark_count !== undefined) {
+        result.push({
+          label: 'Bookmarks',
+          percentageChange: 0,
+          data: [{ total: String(metrics.bookmark_count), date: today }],
+        });
+      }
+
+      return result;
+    } catch (err) {
+      console.log('Error fetching X post analytics:', err);
+    }
+
+    return [];
+  }
+
+  override async mention(
+    token: string,
+    d: { query: string },
+    id: string,
+    integration: Integration
+  ) {
+    const client = await this.getClient(token, integration);
+
+    try {
+      const data = await client.v2.userByUsername(d.query, {
+        'user.fields': ['username', 'name', 'profile_image_url'],
+      });
+
+      if (!data?.data?.username) {
+        return [];
+      }
+
+      return [
+        {
+          id: data.data.username,
+          image: data.data.profile_image_url,
+          label: data.data.name,
+        },
+      ];
+    } catch (err) {
+      console.log(err);
+    }
+    return [];
+  }
+
+  mentionFormat(idOrHandle: string, name: string) {
+    return `@${idOrHandle}`;
+  }
+
+  reportMetrics: ReportMetricsMap = {
+    reach: ['IMPRESSION'],
+    engagement: ['LIKE', 'REPLY', 'RETWEET', 'QUOTE', 'BOOKMARK'],
+  };
+
+  stripLinks = () => !!process.env.STRIP_LINKS_FROM_X_POSTS;
+
+  inlineImages(settings?: any) {
+    return settings?.post_type === 'article';
+  }
+
+  private toTweetText(message: string) {
+    return stripHtmlValidation(
+      'normal',
+      message,
+      true,
+      false,
+      !/<\/?[a-z][\s\S]*>/i.test(message)
+    );
+  }
+
+  override async checkValidity(
+    [firstPost, ...comments]: Array<{ path: string }[]>,
+    settings: any
+  ): Promise<string | true> {
+    if (settings?.post_type !== 'article') {
+      return true;
+    }
+
+    if (
+      [...(firstPost || []), ...comments.flat()].some((m) =>
+        hasExtension(m.path, 'mp4')
+      )
+    ) {
+      return 'X articles only support images';
+    }
+
+    // Replies can only be attached to the seed post a published article
+    // creates - a draft has no post to reply to.
+    if (settings?.article_status !== 'published' && comments.length) {
+      return 'A draft article cannot have thread replies, remove them or publish the article';
+    }
+
+    return true;
   }
 
   private signOAuth1(
     method: string,
     url: string,
     accessToken: string,
-    accessSecret: string
+    accessSecret: string,
+    integration?: Integration
   ): string {
+    const { appKey, appSecret } = this.resolveAppKeys(integration);
     const pct = (s: string) =>
       encodeURIComponent(s)
         .replace(/!/g, '%21')
@@ -543,7 +960,7 @@ export class XProvider extends SocialAbstract implements SocialProvider {
         .replace(/\)/g, '%29');
 
     const params: Record<string, string> = {
-      oauth_consumer_key: process.env.X_API_KEY!,
+      oauth_consumer_key: appKey,
       oauth_nonce: randomBytes(16).toString('hex'),
       oauth_signature_method: 'HMAC-SHA1',
       oauth_timestamp: String(Math.floor(Date.now() / 1000)),
@@ -562,7 +979,7 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       pct(paramString),
     ].join('&');
 
-    const signingKey = `${pct(process.env.X_API_SECRET!)}&${pct(accessSecret)}`;
+    const signingKey = `${pct(appSecret)}&${pct(accessSecret)}`;
     params.oauth_signature = createHmac('sha1', signingKey)
       .update(baseString)
       .digest('base64');
@@ -576,11 +993,6 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     );
   }
 
-  // X's v2 chunked upload requires a Buffer per APPEND segment, so we read one
-  // ranged chunk at a time (mediaChunk) instead of buffering the whole video.
-  // 1MB is the exact chunk size client.v2.uploadMedia used in production, so
-  // it is proven against X's APPEND limits; larger chunks are documented but
-  // unproven here.
   private static readonly X_UPLOAD_CHUNK_SIZE = 1024 * 1024;
 
   private async uploadVideoInChunks(client: TwitterApi, path: string) {
@@ -652,9 +1064,6 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  // Single STATUS read for a media_id, no loops and no timers - the polling
-  // loop lives in the post workflow (checkPostStatus) or, for the legacy
-  // paths, in waitForMediaProcessing.
   private async mediaProcessingStatus(client: TwitterApi, mediaId: string) {
     setHeartbeatDetails(`x: media status media=${mediaId}`);
     const status = await client.v2.get<{
@@ -670,8 +1079,6 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     return status.data.processing_info;
   }
 
-  // Blocking processing wait, used by the paths that still resolve everything
-  // inside one activity (comments, and post() for pre-v1.0.6 workflows).
   private async waitForMediaProcessing(client: TwitterApi, mediaId: string) {
     // X drives the pace via check_after_secs; cap on accumulated wait time
     // (long videos can legitimately process for many minutes) instead of an
@@ -699,11 +1106,6 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     }
   }
 
-  // With ten X activities running concurrently (maxConcurrentJob), a user
-  // publishing several posts at the same minute can 429 on the upload
-  // endpoints; twitter-api-v2 errors never pass through this.fetch's backoff,
-  // so retry them here instead of hard-failing the post. Nothing is published
-  // at upload time, so a retried upload can never duplicate a post.
   private async uploadWithRateLimitRetry<T>(
     func: () => Promise<T>,
     totalRetries = 0
@@ -792,24 +1194,6 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     return { media, processingIds };
   }
 
-  // Legacy blocking upload (comments, and pre-v1.0.6 workflows through
-  // post()): waits for the processing inside the activity like before.
-  private async uploadMedia(
-    client: TwitterApi,
-    postDetails: PostDetails<any>[]
-  ) {
-    const { media, processingIds } = await this.uploadMediaEntries(
-      client,
-      postDetails
-    );
-
-    for (const mediaId of processingIds) {
-      await this.waitForMediaProcessing(client, mediaId);
-    }
-
-    return media;
-  }
-
   async postPending(
     id: string,
     accessToken: string,
@@ -832,7 +1216,7 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     }>[],
     integration: Integration
   ): Promise<PostResponse[]> {
-    const client = await this.getClient(accessToken);
+    const client = await this.getClient(accessToken, integration);
     const [firstPost] = postDetails;
     const isArticle = firstPost?.settings?.post_type === 'article';
 
@@ -929,13 +1313,17 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       );
     }
 
-    const client = await this.getClient(accessToken);
+    const client = await this.getClient(accessToken, integration);
 
     // Check every media still transcoding; keep the ones not succeeded yet.
     const stillProcessing: string[] = [];
     for (const mediaId of pendingData.processingIds || []) {
       let processing:
-        | { state: string; check_after_secs?: number; error?: { message?: string } }
+        | {
+            state: string;
+            check_after_secs?: number;
+            error?: { message?: string };
+          }
         | undefined;
       try {
         processing = await this.mediaProcessingStatus(client, mediaId);
@@ -1005,9 +1393,6 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  // Pictures of the article body at any depth. Only http(s) files from where
-  // uploads are allowed are kept: anything else would be read from the disk or
-  // fetched from an arbitrary site when it's uploaded to X.
   private articleImages(node: any): string[] {
     if (node.nodeName === 'img') {
       const src =
@@ -1020,14 +1405,6 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     );
   }
 
-  // Converts the editor HTML (already sanitized by stripHtmlValidation's
-  // 'html' mode - only p, h1-h3, ul, li, strong, u, a and img survive) into
-  // the content_state the X Articles API expects. Pictures in the body become
-  // atomic image blocks where they are, the post media is appended at the end
-  // (the cover travels separately).
-  // X's schema is a snake_case Draft.js dialect with additionalProperties
-  // disallowed: blocks only accept key/text/type/data/entity_ranges/
-  // inline_style_ranges (no depth).
   private articleContentState(
     html: string,
     embeddedMediaIds: string[],
@@ -1198,7 +1575,8 @@ export class XProvider extends SocialAbstract implements SocialProvider {
           'POST',
           draftUrl,
           accessTokenSplit,
-          accessSecretSplit
+          accessSecretSplit,
+          integration
         ),
         'Content-Type': 'application/json',
       },
@@ -1259,7 +1637,8 @@ export class XProvider extends SocialAbstract implements SocialProvider {
           'POST',
           publishUrl,
           accessTokenSplit,
-          accessSecretSplit
+          accessSecretSplit,
+          integration
         ),
         'Content-Type': 'application/json',
       },
@@ -1335,8 +1714,12 @@ export class XProvider extends SocialAbstract implements SocialProvider {
         ? removeLinks(pendingData.message)
         : pendingData.message,
       ...(mediaIds.length ? { media: { media_ids: mediaIds } } : {}),
-      made_with_ai: this.assetBoolean(settings.made_with_ai),
-      paid_partnership: this.assetBoolean(settings.paid_partnership),
+      ...(this.assetBoolean(settings.made_with_ai)
+        ? { made_with_ai: true }
+        : {}),
+      ...(this.assetBoolean(settings.paid_partnership)
+        ? { paid_partnership: true }
+        : {}),
     };
 
     const tweetResponse = await this.fetch(tweetUrl, {
@@ -1346,7 +1729,8 @@ export class XProvider extends SocialAbstract implements SocialProvider {
           'POST',
           tweetUrl,
           accessTokenSplit,
-          accessSecretSplit
+          accessSecretSplit,
+          integration
         ),
         'Content-Type': 'application/json',
       },
@@ -1361,404 +1745,5 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       postId: data.id,
       releaseURL: `https://twitter.com/${integration.profile}/status/${data.id}`,
     };
-  }
-
-  // Old blocking behavior, kept for workflow versions before v1.0.6 that still
-  // run and don't know how to resolve a `pending` response - they wait for the
-  // transcoding and create the tweet inside the activity like before.
-  async post(
-    id: string,
-    accessToken: string,
-    postDetails: PostDetails<{
-      active_thread_finisher: boolean;
-      thread_finisher: string;
-      community?: string;
-      who_can_reply_post:
-        | 'everyone'
-        | 'following'
-        | 'mentionedUsers'
-        | 'subscribers'
-        | 'verified';
-      made_with_ai?: boolean;
-      paid_partnership?: boolean;
-    }>[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    const [response] = await this.postPending(
-      id,
-      accessToken,
-      postDetails,
-      integration
-    );
-
-    let pendingData = response.pendingData;
-    const started = Date.now();
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      // Cap below the 10-minute activity timeout of the old workflows using
-      // this method: failing here is safe (the tweet is only created once the
-      // media is ready), timing the activity out is not - a retried activity
-      // would upload and publish again.
-      if (Date.now() - started > 8 * 60 * 1000) {
-        throw new BadBody(
-          this.identifier,
-          '{}',
-          Buffer.from('{}'),
-          'X took too long to process the media, please try again'
-        );
-      }
-
-      const check = await this.checkPostStatus(
-        accessToken,
-        pendingData,
-        integration
-      );
-
-      if (check.status === 'pending') {
-        pendingData = check.pendingData;
-        await timer(20000);
-        continue;
-      }
-
-      const result =
-        check.status === 'ready'
-          ? await this.finalizePost(accessToken, check.pendingData, integration)
-          : check;
-
-      if (result.status === 'completed') {
-        return [
-          {
-            postId: result.postId,
-            id: response.id,
-            releaseURL: result.releaseURL,
-            status: 'posted',
-          },
-        ];
-      }
-
-      // finalize only armed the handshake (nothing to wait for), loop straight
-      // into the witnessing check
-      pendingData = result.pendingData;
-    }
-  }
-
-  async comment(
-    id: string,
-    postId: string,
-    lastCommentId: string | undefined,
-    accessToken: string,
-    postDetails: PostDetails<{
-      active_thread_finisher: boolean;
-      thread_finisher: string;
-      made_with_ai?: boolean;
-      paid_partnership?: boolean;
-    }>[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    const [accessTokenSplit, accessSecretSplit] = accessToken.split(':');
-    const client = await this.getClient(accessToken);
-    const [commentPost] = postDetails;
-
-    // upload media for the comment
-    const uploadAll = await this.uploadMedia(client, [commentPost]);
-
-    const media_ids = (uploadAll[commentPost.id] || []).filter((f) => f);
-
-    const replyToId = lastCommentId || postId;
-
-    // Comments are always tweets - flatten the editor HTML to plain text.
-    const commentText = this.toTweetText(commentPost.message);
-
-    const tweetUrl = 'https://api.x.com/2/tweets';
-    const tweetBody = {
-      text: this.stripLinks() ? removeLinks(commentText) : commentText,
-      ...(media_ids.length ? { media: { media_ids } } : {}),
-      reply: { in_reply_to_tweet_id: replyToId },
-      made_with_ai: this.assetBoolean(commentPost?.settings?.made_with_ai),
-      paid_partnership: this.assetBoolean(
-        commentPost?.settings?.paid_partnership
-      ),
-    };
-
-    const tweetResponse = await this.fetch(tweetUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: this.signOAuth1(
-          'POST',
-          tweetUrl,
-          accessTokenSplit,
-          accessSecretSplit
-        ),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(tweetBody),
-    });
-    const { data } = (await tweetResponse.json()) as {
-      data: { id: string };
-    };
-
-    return [
-      {
-        postId: data.id,
-        id: commentPost.id,
-        releaseURL: `https://twitter.com/${integration.profile}/status/${data.id}`,
-        status: 'posted',
-      },
-    ];
-  }
-
-  private loadAllTweets = async (
-    client: TwitterApi,
-    id: string,
-    until: string,
-    since: string,
-    token = ''
-  ): Promise<TweetV2[]> => {
-    const tweets = await client.v2.userTimeline(id, {
-      'tweet.fields': ['id'],
-      'user.fields': [],
-      'poll.fields': [],
-      'place.fields': [],
-      'media.fields': [],
-      exclude: ['replies', 'retweets'],
-      start_time: since,
-      end_time: until,
-      max_results: 100,
-      ...(token ? { pagination_token: token } : {}),
-    });
-
-    const list = tweets.data.data || [];
-
-    return [
-      ...list,
-      ...(list.length === 100 && tweets.meta.next_token
-        ? await this.loadAllTweets(
-            client,
-            id,
-            until,
-            since,
-            tweets.meta.next_token
-          )
-        : []),
-    ];
-  };
-
-  async analytics(
-    id: string,
-    accessToken: string,
-    date: number
-  ): Promise<AnalyticsData[]> {
-    if (process.env.DISABLE_X_ANALYTICS) {
-      return [];
-    }
-
-    const until = dayjs().endOf('day');
-    const since = dayjs().subtract(date > 100 ? 100 : date, 'day');
-
-    const [accessTokenSplit, accessSecretSplit] = accessToken.split(':');
-    const client = new TwitterApi({
-      appKey: process.env.X_API_KEY!,
-      appSecret: process.env.X_API_SECRET!,
-      accessToken: accessTokenSplit,
-      accessSecret: accessSecretSplit,
-    });
-
-    try {
-      const tweets = uniqBy(
-        await this.loadAllTweets(
-          client,
-          id,
-          until.format('YYYY-MM-DDTHH:mm:ssZ'),
-          since.format('YYYY-MM-DDTHH:mm:ssZ')
-        ),
-        (p) => p.id
-      );
-
-      if (tweets.length === 0) {
-        return [];
-      }
-
-      const data = await client.v2.tweets(
-        tweets.map((p) => p.id),
-        {
-          'tweet.fields': ['public_metrics'],
-        }
-      );
-
-      const metrics = data.data.reduce(
-        (all, current) => {
-          all.impression_count =
-            (all.impression_count || 0) +
-            +current.public_metrics.impression_count;
-          all.bookmark_count =
-            (all.bookmark_count || 0) + +current.public_metrics.bookmark_count;
-          all.like_count =
-            (all.like_count || 0) + +current.public_metrics.like_count;
-          all.quote_count =
-            (all.quote_count || 0) + +current.public_metrics.quote_count;
-          all.reply_count =
-            (all.reply_count || 0) + +current.public_metrics.reply_count;
-          all.retweet_count =
-            (all.retweet_count || 0) + +current.public_metrics.retweet_count;
-
-          return all;
-        },
-        {
-          impression_count: 0,
-          bookmark_count: 0,
-          like_count: 0,
-          quote_count: 0,
-          reply_count: 0,
-          retweet_count: 0,
-        }
-      );
-
-      return Object.entries(metrics).map(([key, value]) => ({
-        label: key.replace('_count', '').replace('_', ' ').toUpperCase(),
-        // No trend here: the series below is a synthetic [0, total] ramp, and a
-        // real previous period would mean a second pass of the rate limited
-        // loadAllTweets pagination. 0 makes the frontend render no indicator.
-        percentageChange: 0,
-        data: [
-          {
-            total: String(0),
-            date: since.format('YYYY-MM-DD'),
-          },
-          {
-            total: String(value),
-            date: until.format('YYYY-MM-DD'),
-          },
-        ],
-      }));
-    } catch (err) {
-      console.log(err);
-    }
-    return [];
-  }
-
-  async postAnalytics(
-    integrationId: string,
-    accessToken: string,
-    postId: string,
-    date: number
-  ): Promise<AnalyticsData[]> {
-    if (process.env.DISABLE_X_ANALYTICS) {
-      return [];
-    }
-
-    const today = dayjs().format('YYYY-MM-DD');
-
-    const [accessTokenSplit, accessSecretSplit] = accessToken.split(':');
-    const client = new TwitterApi({
-      appKey: process.env.X_API_KEY!,
-      appSecret: process.env.X_API_SECRET!,
-      accessToken: accessTokenSplit,
-      accessSecret: accessSecretSplit,
-    });
-
-    try {
-      // Fetch the specific tweet with public metrics
-      const tweet = await client.v2.singleTweet(postId, {
-        'tweet.fields': ['public_metrics', 'created_at'],
-      });
-
-      if (!tweet?.data?.public_metrics) {
-        return [];
-      }
-
-      const metrics = tweet.data.public_metrics;
-
-      const result: AnalyticsData[] = [];
-
-      if (metrics.impression_count !== undefined) {
-        result.push({
-          label: 'Impressions',
-          percentageChange: 0,
-          data: [{ total: String(metrics.impression_count), date: today }],
-        });
-      }
-
-      if (metrics.like_count !== undefined) {
-        result.push({
-          label: 'Likes',
-          percentageChange: 0,
-          data: [{ total: String(metrics.like_count), date: today }],
-        });
-      }
-
-      if (metrics.retweet_count !== undefined) {
-        result.push({
-          label: 'Retweets',
-          percentageChange: 0,
-          data: [{ total: String(metrics.retweet_count), date: today }],
-        });
-      }
-
-      if (metrics.reply_count !== undefined) {
-        result.push({
-          label: 'Replies',
-          percentageChange: 0,
-          data: [{ total: String(metrics.reply_count), date: today }],
-        });
-      }
-
-      if (metrics.quote_count !== undefined) {
-        result.push({
-          label: 'Quotes',
-          percentageChange: 0,
-          data: [{ total: String(metrics.quote_count), date: today }],
-        });
-      }
-
-      if (metrics.bookmark_count !== undefined) {
-        result.push({
-          label: 'Bookmarks',
-          percentageChange: 0,
-          data: [{ total: String(metrics.bookmark_count), date: today }],
-        });
-      }
-
-      return result;
-    } catch (err) {
-      console.log('Error fetching X post analytics:', err);
-    }
-
-    return [];
-  }
-
-  override async mention(token: string, d: { query: string }) {
-    const [accessTokenSplit, accessSecretSplit] = token.split(':');
-    const client = new TwitterApi({
-      appKey: process.env.X_API_KEY!,
-      appSecret: process.env.X_API_SECRET!,
-      accessToken: accessTokenSplit,
-      accessSecret: accessSecretSplit,
-    });
-
-    try {
-      const data = await client.v2.userByUsername(d.query, {
-        'user.fields': ['username', 'name', 'profile_image_url'],
-      });
-
-      if (!data?.data?.username) {
-        return [];
-      }
-
-      return [
-        {
-          id: data.data.username,
-          image: data.data.profile_image_url,
-          label: data.data.name,
-        },
-      ];
-    } catch (err) {
-      console.log(err);
-    }
-    return [];
-  }
-
-  mentionFormat(idOrHandle: string, name: string) {
-    return `@${idOrHandle}`;
   }
 }

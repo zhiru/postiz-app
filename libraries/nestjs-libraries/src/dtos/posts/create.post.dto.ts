@@ -112,8 +112,6 @@ export class CreatePostDto {
   @IsNumber()
   inter?: number;
 
-  // explicit opt-in to publish an already-PUBLISHED post again; without it a
-  // schedule/now save targeting a published post is rejected
   @IsOptional()
   @IsBoolean()
   republish?: boolean;

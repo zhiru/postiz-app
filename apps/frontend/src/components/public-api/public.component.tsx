@@ -11,6 +11,8 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useDecisionModal } from '@gitroom/frontend/components/layout/new-modal';
 import { McpClientIcon } from '@gitroom/frontend/components/public-api/mcp.client.icons';
 import clsx from 'clsx';
+import { useCurrentProfile } from '@gitroom/frontend/hooks/use-current-profile.hook';
+import { DeveloperComponent } from '@gitroom/frontend/components/developer/developer.component';
 
 // Remote clients can't set headers, they get a URL to paste (hint = where)
 export const remoteMcpClients = {
@@ -340,7 +342,10 @@ const McpSection = ({
     revealed || auth === 'oauth' || chatOnly
       ? config
       : config.replace(
-          new RegExp(user.publicApi.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
+          new RegExp(
+            user.publicApi.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+            'g'
+          ),
           '*'.repeat(user.publicApi.length)
         );
 
@@ -366,7 +371,20 @@ const McpSection = ({
                 href={mcpConnectorUrls.Claude}
                 target="_blank"
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
                 {t('add_to_claude', 'Add to Claude')}
               </a>
               <a
@@ -374,7 +392,20 @@ const McpSection = ({
                 href={mcpConnectorUrls.ChatGPT}
                 target="_blank"
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
                 {t('add_to_chatgpt', 'Add to ChatGPT')}
               </a>
             </>
@@ -384,7 +415,20 @@ const McpSection = ({
             href="https://docs.postiz.com/mcp/introduction"
             target="_blank"
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
             {t('read_the_docs', 'Docs')}
           </a>
         </div>
@@ -411,7 +455,10 @@ const McpSection = ({
                   {m === 'official'
                     ? t('official_connector', 'Official connector')
                     : m === 'oauth'
-                    ? t('sign_in_no_api_key', 'Sign in with Postiz (no API key)')
+                    ? t(
+                        'sign_in_no_api_key',
+                        'Sign in with Postiz (no API key)'
+                      )
                     : t('api_key', 'API Key')}
                 </button>
               ))}
@@ -454,117 +501,157 @@ const McpSection = ({
           </div>
         ) : (
           <>
-        <div className="flex flex-col gap-[6px]">
-          <div className="text-[13px] font-[600] text-customColor18">
-            {t('mcp_client', 'Client')}
-          </div>
-          <div className="flex flex-wrap gap-[6px]">
-            {[
-              ...Object.keys(remoteMcpClients),
-              ...mcpClients,
-              ...Object.keys(chatOnlyMcpClients),
-            ].map((client) => (
-              <button
-                key={client}
-                type="button"
-                className={clsx(
-                  'cursor-pointer px-[14px] h-[36px] text-[13px] font-[500] rounded-[8px] transition-colors flex items-center gap-[8px]',
-                  activeClient === client
-                    ? 'bg-[#612BD3] text-white'
-                    : 'bg-btnSimple text-customColor18 hover:bg-boxHover hover:text-textColor'
+            <div className="flex flex-col gap-[6px]">
+              <div className="text-[13px] font-[600] text-customColor18">
+                {t('mcp_client', 'Client')}
+              </div>
+              <div className="flex flex-wrap gap-[6px]">
+                {[
+                  ...Object.keys(remoteMcpClients),
+                  ...mcpClients,
+                  ...Object.keys(chatOnlyMcpClients),
+                ].map((client) => (
+                  <button
+                    key={client}
+                    type="button"
+                    className={clsx(
+                      'cursor-pointer px-[14px] h-[36px] text-[13px] font-[500] rounded-[8px] transition-colors flex items-center gap-[8px]',
+                      activeClient === client
+                        ? 'bg-[#612BD3] text-white'
+                        : 'bg-btnSimple text-customColor18 hover:bg-boxHover hover:text-textColor'
+                    )}
+                    onClick={() => setActiveClient(client as AnyMcpClient)}
+                  >
+                    <McpClientIcon client={client} />
+                    {client}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col gap-[8px]">
+              <div className="text-[12px] text-customColor18 font-[500]">
+                {hint}
+                {auth === 'oauth' &&
+                  !chatOnly &&
+                  ` ${t(
+                    'oauth_sign_in_hint',
+                    'Your agent will open a browser window to sign in to Postiz.'
+                  )}`}
+              </div>
+              <pre className="bg-newBgColorInner border border-newBorder rounded-[8px] p-[16px] text-[13px] whitespace-pre-wrap break-all overflow-x-auto leading-[1.6]">
+                {maskedConfig}
+              </pre>
+              <div className="flex flex-wrap gap-[8px]">
+                {auth === 'apikey' && !chatOnly && (
+                  <button
+                    type="button"
+                    onClick={() => setRevealed(!revealed)}
+                    className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      {revealed ? (
+                        <>
+                          <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
+                          <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </>
+                      ) : (
+                        <>
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </>
+                      )}
+                    </svg>
+                    {revealed ? t('hide', 'Hide') : t('reveal', 'Reveal')}
+                  </button>
                 )}
-                onClick={() =>
-                  setActiveClient(client as AnyMcpClient)
-                }
-              >
-                <McpClientIcon client={client} />
-                {client}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex flex-col gap-[8px]">
-          <div className="text-[12px] text-customColor18 font-[500]">
-            {hint}
-            {auth === 'oauth' &&
-              !chatOnly &&
-              ` ${t(
-                'oauth_sign_in_hint',
-                'Your agent will open a browser window to sign in to Postiz.'
-              )}`}
-          </div>
-          <pre className="bg-newBgColorInner border border-newBorder rounded-[8px] p-[16px] text-[13px] whitespace-pre-wrap break-all overflow-x-auto leading-[1.6]">
-            {maskedConfig}
-          </pre>
-          <div className="flex flex-wrap gap-[8px]">
-            {auth === 'apikey' && !chatOnly && (
-              <button
-                type="button"
-                onClick={() => setRevealed(!revealed)}
-                className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  {revealed ? (
-                    <>
-                      <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
-                      <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
-                      <line x1="1" y1="1" x2="23" y2="23" />
-                    </>
-                  ) : (
-                    <>
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </>
-                  )}
-                </svg>
-                {revealed ? t('hide', 'Hide') : t('reveal', 'Reveal')}
-              </button>
-            )}
-            <CopyButton text={config} label={t('copy', 'Copy')} />
-            {!isRemoteMcpClient(activeClient) && !chatOnly && (
-              <CopyButton text={baseUrl} label={t('copy_url', 'Copy URL')} />
-            )}
-            {activeClient === 'Claude' && officialConnectors && (
-              <a
-                className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
-                href={mcpConnectorUrls.Claude}
-                target="_blank"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-                {t('add_to_claude', 'Add to Claude')}
-              </a>
-            )}
-            {activeClient === 'ChatGPT' && officialConnectors && (
-              <a
-                className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
-                href={mcpConnectorUrls.ChatGPT}
-                target="_blank"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-                {t('add_to_chatgpt', 'Add to ChatGPT')}
-              </a>
-            )}
-            {activeClient === 'Grok Bot' && officialConnectors && (
-              <a
-                className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
-                href={mcpConnectorUrls['Grok Bot']}
-                target="_blank"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-                {t('add_to_grok_bot', 'Add to Grok Bot')}
-              </a>
-            )}
-          </div>
-        </div>
+                <CopyButton text={config} label={t('copy', 'Copy')} />
+                {!isRemoteMcpClient(activeClient) && !chatOnly && (
+                  <CopyButton
+                    text={baseUrl}
+                    label={t('copy_url', 'Copy URL')}
+                  />
+                )}
+                {activeClient === 'Claude' && officialConnectors && (
+                  <a
+                    className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+                    href={mcpConnectorUrls.Claude}
+                    target="_blank"
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    {t('add_to_claude', 'Add to Claude')}
+                  </a>
+                )}
+                {activeClient === 'ChatGPT' && officialConnectors && (
+                  <a
+                    className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+                    href={mcpConnectorUrls.ChatGPT}
+                    target="_blank"
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    {t('add_to_chatgpt', 'Add to ChatGPT')}
+                  </a>
+                )}
+                {activeClient === 'Grok Bot' && officialConnectors && (
+                  <a
+                    className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+                    href={mcpConnectorUrls['Grok Bot']}
+                    target="_blank"
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    {t('add_to_grok_bot', 'Add to Grok Bot')}
+                  </a>
+                )}
+              </div>
+            </div>
           </>
         )}
       </div>
@@ -646,7 +733,20 @@ const CliSection = ({ apiKey }: { apiKey: string }) => {
             href="https://docs.postiz.com/cli/introduction"
             target="_blank"
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
             {t('read_the_docs', 'Docs')}
           </a>
         </div>
@@ -724,17 +824,339 @@ const CliSection = ({ apiKey }: { apiKey: string }) => {
   );
 };
 
+const ExternalLinkIcon = () => (
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+    <polyline points="15 3 21 3 21 9" />
+    <line x1="10" y1="14" x2="21" y2="3" />
+  </svg>
+);
+
+const DocsLinkButton = ({
+  href,
+  label,
+  tooltip,
+}: {
+  href: string;
+  label: string;
+  tooltip?: string;
+}) => (
+  <a
+    className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    {...(tooltip
+      ? { 'data-tooltip-id': 'tooltip', 'data-tooltip-content': tooltip }
+      : {})}
+  >
+    <ExternalLinkIcon />
+    {label}
+  </a>
+);
+
+const RevealEyeIcon = ({ revealed }: { revealed: boolean }) => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    {revealed ? (
+      <>
+        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
+        <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
+        <line x1="1" y1="1" x2="23" y2="23" />
+      </>
+    ) : (
+      <>
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+        <circle cx="12" cy="12" r="3" />
+      </>
+    )}
+  </svg>
+);
+
+const RotateIcon = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M21.5 2v6h-6" />
+    <path d="M21.34 15.57a10 10 0 11-.57-8.38L21.5 8" />
+  </svg>
+);
+
+const ApiKeyCard = ({
+  title,
+  description,
+  apiKey,
+  reveal,
+  onReveal,
+  onRotate,
+  extraActions,
+  docsUrl,
+}: {
+  title: string;
+  description: string;
+  apiKey: string;
+  reveal: boolean;
+  onReveal: () => void;
+  onRotate: () => void;
+  extraActions?: React.ReactNode;
+  docsUrl?: string;
+}) => {
+  const t = useT();
+  return (
+    <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">
+      <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px]">
+        <div>
+          <div className="text-[15px] font-[600]">{title}</div>
+          <div className="text-[13px] text-customColor18 mt-[2px]">
+            {description}
+          </div>
+        </div>
+        {docsUrl && (
+          <div className="flex gap-[6px] shrink-0 pt-[2px]">
+            <DocsLinkButton
+              href={docsUrl}
+              label={t('read_the_docs', 'Docs')}
+              tooltip={t(
+                'api_reference_tooltip',
+                'Documentação da API (Swagger)'
+              )}
+            />
+          </div>
+        )}
+      </div>
+      <div className="p-[20px] flex flex-col gap-[16px]">
+        <div className="bg-newBgColorInner border border-newBorder rounded-[8px] px-[16px] h-[44px] flex items-center overflow-hidden">
+          <code className="text-[14px] flex-1 truncate">
+            {reveal ? (
+              apiKey
+            ) : (
+              <span className="flex items-center">
+                <span className="blur-sm select-none">
+                  {apiKey.slice(0, -5)}
+                </span>
+                <span>{apiKey.slice(-5)}</span>
+              </span>
+            )}
+          </code>
+        </div>
+        <div className="flex gap-[8px]">
+          <button
+            type="button"
+            onClick={onReveal}
+            className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+          >
+            <RevealEyeIcon revealed={reveal} />
+            {reveal ? t('hide', 'Hide') : t('reveal', 'Reveal')}
+          </button>
+          <CopyButton text={apiKey} label={t('copy', 'Copy')} />
+          <button
+            type="button"
+            onClick={onRotate}
+            className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+          >
+            <RotateIcon />
+            {t('rotate_key', 'Rotate Key')}
+          </button>
+          {extraActions}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ProfileApiKeySection = ({ profileId }: { profileId: string }) => {
+  const user = useUser();
+  const fetch = useFetch();
+  const toaster = useToaster();
+  const decision = useDecisionModal();
+  const { mutate } = useSWRConfig();
+  const { backendUrl } = useVariables();
+  const t = useT();
+  const [reveal, setReveal] = useState(false);
+
+  const docsUrl = `${backendUrl}/docs`;
+
+  const generateKey = useCallback(async () => {
+    await fetch(`/profiles/${profileId}/api-key/rotate`, { method: 'POST' });
+    await mutate('/user/self');
+    toaster.show(
+      t('profile_api_key_generated', 'Profile API Key generated'),
+      'success'
+    );
+  }, [fetch, mutate, profileId, t, toaster]);
+
+  const rotateKey = useCallback(async () => {
+    const approved = await decision.open({
+      title: t('rotate_profile_api_key', 'Rotate Profile API Key?'),
+      description: t(
+        'rotate_profile_api_key_description',
+        'The old key will stop working immediately.'
+      ),
+      approveLabel: t('rotate', 'Rotate'),
+      cancelLabel: t('cancel', 'Cancel'),
+    });
+    if (!approved) return;
+    await fetch(`/profiles/${profileId}/api-key/rotate`, { method: 'POST' });
+    await mutate('/user/self');
+    setReveal(false);
+    toaster.show(
+      t('profile_api_key_rotated', 'Profile API Key rotated'),
+      'success'
+    );
+  }, [decision, fetch, mutate, profileId, t, toaster]);
+
+  if (!user) return null;
+
+  if (!user.profileApiKey) {
+    return (
+      <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">
+        <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px]">
+          <div>
+            <div className="text-[15px] font-[600]">
+              {t('profile_api_key', 'Profile API Key')}
+            </div>
+            <div className="text-[13px] text-customColor18 mt-[2px]">
+              {t(
+                'profile_api_key_description',
+                'Scoped access to this profile only.'
+              )}
+            </div>
+          </div>
+          <div className="flex gap-[6px] shrink-0 pt-[2px]">
+            <DocsLinkButton
+              href={docsUrl}
+              label={t('read_the_docs', 'Docs')}
+              tooltip={t(
+                'api_reference_tooltip',
+                'Documentação da API (Swagger)'
+              )}
+            />
+          </div>
+        </div>
+        <div className="p-[20px]">
+          <button
+            type="button"
+            onClick={generateKey}
+            className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+          >
+            {t('generate_profile_api_key', 'Generate Key')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <ApiKeyCard
+      title={t('profile_api_key', 'Profile API Key')}
+      description={t(
+        'profile_api_key_description',
+        'Scoped access to this profile only.'
+      )}
+      apiKey={user.profileApiKey}
+      reveal={reveal}
+      onReveal={() => setReveal(!reveal)}
+      onRotate={rotateKey}
+      docsUrl={docsUrl}
+    />
+  );
+};
+
+const AgentSkillSection = ({ backendUrl }: { backendUrl: string }) => {
+  const t = useT();
+  const skillUrl = `${backendUrl}/public/agent-skill`;
+  return (
+    <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">
+      <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px]">
+        <div>
+          <div className="text-[15px] font-[600]">
+            {t('agent_skill', 'Skill para Agentes de IA')}
+          </div>
+          <div className="text-[13px] text-customColor18 mt-[2px]">
+            {t(
+              'agent_skill_description',
+              'Guia completo (MCP + CLI + API) para o agente. Passe este link + sua Chave de API ao agente (Hermes, OpenClaw, Claude, etc.).'
+            )}
+          </div>
+        </div>
+        <div className="flex gap-[6px] shrink-0 pt-[2px]">
+          <a
+            className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+            href={skillUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+            {t('open', 'Abrir')}
+          </a>
+        </div>
+      </div>
+      <div className="p-[20px] flex flex-col gap-[16px]">
+        <div className="bg-newBgColorInner border border-newBorder rounded-[8px] px-[16px] h-[44px] flex items-center overflow-hidden">
+          <code className="text-[14px] flex-1 truncate">{skillUrl}</code>
+        </div>
+        <div className="flex gap-[8px]">
+          <CopyButton
+            text={skillUrl}
+            label={t('copy_skill_link', 'Copiar link da skill')}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const PublicApiContent = () => {
   const user = useUser();
+  const { profile } = useCurrentProfile();
   const { backendUrl, frontEndUrl, mcpUrl } = useVariables();
   const toaster = useToaster();
   const fetch = useFetch();
   const decision = useDecisionModal();
   const { mutate } = useSWRConfig();
-  const [reveal, setReveal] = useState(false);
   const t = useT();
+  const [revealOrg, setRevealOrg] = useState(false);
 
-  const rotateKey = useCallback(async () => {
+  const isDefault = profile?.isDefault ?? true;
+
+  const rotateOrgKey = useCallback(async () => {
     const approved = await decision.open({
       title: t('rotate_api_key', 'Rotate API Key?'),
       description: t(
@@ -747,7 +1169,7 @@ const PublicApiContent = () => {
     if (!approved) return;
     await fetch('/user/api-key/rotate', { method: 'POST' });
     await mutate('/user/self');
-    setReveal(false);
+    setRevealOrg(false);
     toaster.show(
       t('api_key_rotated', 'API Key rotated successfully'),
       'success'
@@ -759,6 +1181,39 @@ const PublicApiContent = () => {
   }
 
   const mcpBase = mcpUrl || backendUrl;
+  const docsUrl = `${backendUrl}/docs`;
+  const activeKey = isDefault
+    ? user.publicApi
+    : user.profileApiKey ?? user.publicApi;
+
+  const wizardButton = (
+    <button
+      type="button"
+      data-tooltip-id="tooltip"
+      data-tooltip-content={t(
+        'payload_wizard_description',
+        'Building a POST request to /posts can be complex. Use the wizard to schedule a post with the UI, then copy the generated payload.'
+      )}
+      onClick={() => window.open(`${frontEndUrl}/modal/dark/all`, '_blank')}
+      className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+        <polyline points="15 3 21 3 21 9" />
+        <line x1="10" y1="14" x2="21" y2="3" />
+      </svg>
+      {t('open_wizard', 'Open Wizard')}
+    </button>
+  );
 
   return (
     <div className="flex flex-col gap-[40px]">
@@ -783,151 +1238,59 @@ const PublicApiContent = () => {
           'and you will receive a pos_ prefixed token that works with the API, MCP, and CLI — just like an API Key.'
         )}
       </div>
-      <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">
-        <div className="bg-newBgColorInner px-[20px] mobile:px-[14px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px] mobile:flex-col">
-          <div>
-            <div className="text-[15px] font-[600]">
-              {t('api_key', 'API Key')}
-            </div>
-            <div className="text-[13px] text-customColor18 mt-[2px]">
-              {t(
-                'use_postiz_api_to_integrate_with_your_tools',
-                'Use Postiz API to integrate with your tools.'
-              )}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-[6px] shrink-0 pt-[2px]">
-            <a
-              className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
-              href="https://docs.postiz.com/public-api"
-              target="_blank"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-            {t('read_the_docs', 'Docs')}
-            </a>
-            <a
-              className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
-              href="https://www.npmjs.com/package/n8n-nodes-postiz"
-              target="_blank"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-              {t('n8n_node', 'N8N Node')}
-            </a>
-          </div>
-        </div>
-        <div className="p-[20px] mobile:p-[14px] flex flex-col gap-[16px]">
-          <div className="bg-newBgColorInner border border-newBorder rounded-[8px] px-[16px] h-[44px] flex items-center overflow-hidden">
-            <code className="text-[14px] flex-1 truncate">
-              {reveal ? (
-                user.publicApi
-              ) : (
-                <span className="flex items-center">
-                  <span className="blur-sm select-none">
-                    {user.publicApi.slice(0, -5)}
-                  </span>
-                  <span>{user.publicApi.slice(-5)}</span>
-                </span>
-              )}
-            </code>
-          </div>
-          <div className="flex flex-wrap gap-[8px]">
-            <button
-              type="button"
-              onClick={() => setReveal(!reveal)}
-              className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                {reveal ? (
-                  <>
-                    <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
-                    <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
-                    <line x1="1" y1="1" x2="23" y2="23" />
-                  </>
-                ) : (
-                  <>
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </>
-                )}
-              </svg>
-              {reveal ? t('hide', 'Hide') : t('reveal', 'Reveal')}
-            </button>
-            <CopyButton text={user.publicApi} label={t('copy', 'Copy')} />
-            <button
-              type="button"
-              onClick={rotateKey}
-              className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M21.5 2v6h-6" />
-                <path d="M21.34 15.57a10 10 0 11-.57-8.38L21.5 8" />
-              </svg>
-              {t('rotate_key', 'Rotate Key')}
-            </button>
-            <button
-              type="button"
-              data-tooltip-id="tooltip"
-              data-tooltip-content={t(
-                'payload_wizard_description',
-                'Building a POST request to /posts can be complex. Use the wizard to schedule a post with the UI, then copy the generated payload.'
-              )}
-              onClick={() =>
-                window.open(`${frontEndUrl}/modal/dark/all`, '_blank')
-              }
-              className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-                <polyline points="15 3 21 3 21 9" />
-                <line x1="10" y1="14" x2="21" y2="3" />
-              </svg>
-              {t('open_wizard', 'Open Wizard')}
-            </button>
-          </div>
-        </div>
-      </div>
 
-      <CliSection apiKey={user.publicApi} />
+      {isDefault && (
+        <ApiKeyCard
+          title={t('org_api_key', 'Organization API Key')}
+          description={t(
+            'org_api_key_description',
+            'Full access to all profiles.'
+          )}
+          apiKey={user.publicApi}
+          reveal={revealOrg}
+          onReveal={() => setRevealOrg(!revealOrg)}
+          onRotate={rotateOrgKey}
+          extraActions={wizardButton}
+          docsUrl={docsUrl}
+        />
+      )}
 
-      <McpSection user={user} mcpBase={mcpBase} />
+      {user.profileId && <ProfileApiKeySection profileId={user.profileId} />}
+
+      <AgentSkillSection backendUrl={backendUrl} />
+      <CliSection apiKey={activeKey} />
+      <McpSection user={{ ...user, publicApi: activeKey }} mcpBase={mcpBase} />
     </div>
   );
 };
 
 export const PublicComponent = () => {
   const t = useT();
+  const [subTab, setSubTab] = useState<'api' | 'developer'>('api');
 
   return (
     <div className="flex flex-col gap-[20px]">
-      <h3 className="text-[20px]">{t('agents', 'Agents')}</h3>
-      <PublicApiContent />
+      <div className="flex gap-[6px]">
+        {(['api', 'developer'] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            className={clsx(
+              'cursor-pointer px-[20px] h-[44px] text-[15px] font-[600] rounded-[8px] transition-colors',
+              subTab === tab
+                ? 'bg-[#612BD3] text-white'
+                : 'bg-btnSimple text-customColor18 hover:bg-boxHover hover:text-textColor'
+            )}
+            onClick={() => setSubTab(tab)}
+          >
+            {tab === 'api'
+              ? t('access', 'Acesso')
+              : t('integrations_tab', 'Integrações')}
+          </button>
+        ))}
+      </div>
+      {subTab === 'api' && <PublicApiContent />}
+      {subTab === 'developer' && <DeveloperComponent />}
     </div>
   );
 };

@@ -1,3 +1,4 @@
+jest.mock('@gitroom/nestjs-libraries/database/prisma/social-comments/social.comments.service', () => ({ SocialCommentsService: class {} }));
 // Run: npx tsx --test apps/backend/src/api/routes/social.comments.controller.spec.ts
 //
 // POST /social-comments/auto-reply used to have no @CheckPolicies, so any
@@ -6,14 +7,12 @@
 // it behind the same admin policy settings.controller.ts uses for org
 // settings. This pins the metadata PoliciesGuard reads, and that the
 // read-only/human-reply endpoints stay ungated.
-import test from 'node:test';
-import assert from 'node:assert/strict';
 import { CHECK_POLICIES_KEY } from '@gitroom/backend/services/auth/permissions/permissions.ability';
 import {
   AuthorizationActions,
   Sections,
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
-import { SocialCommentsController } from './social.comments.controller.ts';
+import { SocialCommentsController } from './social.comments.controller';
 
 const policiesOf = (methodName: keyof SocialCommentsController) =>
   Reflect.getMetadata(
@@ -21,18 +20,25 @@ const policiesOf = (methodName: keyof SocialCommentsController) =>
     SocialCommentsController.prototype[methodName]
   );
 
-test('setAutoReply requires the admin policy', () => {
-  assert.deepEqual(policiesOf('setAutoReply'), [
+it('setAutoReply requires the admin policy', () => {
+  expect(policiesOf('setAutoReply')).toEqual([
     [AuthorizationActions.Create, Sections.ADMIN],
   ]);
 });
 
-test('reading comments and auto-reply status stays open to any org member', () => {
-  assert.equal(policiesOf('getComments'), undefined);
-  assert.equal(policiesOf('getAutoReply'), undefined);
-  assert.equal(policiesOf('getComment'), undefined);
+it('reading comments and auto-reply status stays open to any org member', () => {
+  expect(policiesOf('getComments')).toBeUndefined();
+  expect(policiesOf('getAutoReply')).toBeUndefined();
+  expect(policiesOf('getComment')).toBeUndefined();
 });
 
-test('a human-typed reply stays open to any org member', () => {
-  assert.equal(policiesOf('reply'), undefined);
+it('a human-typed reply stays open to any org member', () => {
+  expect(policiesOf('reply')).toBeUndefined();
+});
+
+it('propaga perfil autenticado ao responder, sem aceitar escopo do payload', async () => {
+  const service = { reply: jest.fn().mockResolvedValue({ status: 'REPLIED' }) };
+  const controller = new SocialCommentsController(service as any);
+  await controller.reply({ id: 'org-1' } as any, { id: 'profile-1' } as any, 'comment-1', { message: 'Obrigado' });
+  expect(service.reply).toHaveBeenCalledWith('org-1', 'comment-1', 'Obrigado', 'human', 'profile-1');
 });

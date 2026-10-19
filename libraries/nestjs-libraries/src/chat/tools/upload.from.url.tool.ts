@@ -1,3 +1,4 @@
+import { readRequestContext } from '@gitroom/nestjs-libraries/chat/tools/tool.context.helper';
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -46,12 +47,13 @@ so the attachment passes the upload-domain validation. Returns the hosted media 
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
+        const profileId = readRequestContext(context).get('profileId') as string | undefined;
         try {
           const org = JSON.parse(
-            (context?.requestContext as any)?.get('organization') as string
+            readRequestContext(context).get('organization') as string
           );
 
-          return await this._mediaService.uploadFromUrl(org.id, inputData.url);
+          return await this._mediaService.uploadFromUrl(org.id, inputData.url, profileId);
         } catch (err) {
           // undici's fetch rejects with a generic TypeError('fetch failed')
           // and hides the real reason (DNS, TLS, SSRF block, ...) in

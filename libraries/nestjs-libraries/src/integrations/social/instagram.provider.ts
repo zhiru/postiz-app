@@ -1,34 +1,77 @@
-import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { CommentAutomationDeliveryError } from './social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
-  PendingCheckResponse,
+  ClientInformation,
   PostDetails,
   PostResponse,
-  SocialCommentDetails,
   SocialProvider,
+  ReportMetricsMap,
+  PendingCheckResponse,
+  SocialCommentDetails,
   PublishedPostsPage,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { timer } from '@gitroom/helpers/utils/timer';
 import dayjs from 'dayjs';
 import {
+  RefreshToken,
+  SocialAbstract,
   BadBody,
   Disconnect,
-  SocialAbstract,
   ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { InstagramDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/instagram.dto';
 import { Integration } from '@prisma/client';
+import {
+  META_FACEBOOK_GRAPH_URL,
+  META_FACEBOOK_OAUTH_URL,
+  metaGraphUrl,
+} from '@gitroom/nestjs-libraries/integrations/social/meta-graph.constants';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
-import { graphFetch, graphPaginate } from '@gitroom/nestjs-libraries/integrations/social/meta.graph';
+import { InstagramDmButton } from '@gitroom/nestjs-libraries/integrations/social/instagram-dm-button.type';
+import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import {
+  graphFetch,
+  graphPaginate,
+} from '@gitroom/nestjs-libraries/integrations/social/meta.graph';
 import { META_GRAPH_API_VERSION } from '@gitroom/nestjs-libraries/integrations/social/facebook.provider';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
-// Shared with instagram.standalone.provider, which delegates to this provider
-// instead of extending it.
+async function fetchWithTimeout(
+  url: string,
+  timeoutMs = 15000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await ssrfSafeFetch(url, {
+      signal: controller.signal,
+      redirect: 'error',
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function buildButton(button: InstagramDmButton) {
+  if (button.kind === 'postback') {
+    return {
+      type: 'postback',
+      title: button.title.slice(0, 20),
+      payload: button.payload,
+    };
+  }
+  return {
+    type: 'web_url',
+    url: button.url,
+    title: button.title.slice(0, 20),
+  };
+}
+
 export const instagramReportMetrics: ReportMetricsMap = {
   followersGained: ['Follower Count'],
   reach: ['Reach'],
@@ -43,103 +86,15 @@ export class InstagramProvider
   implements SocialProvider
 {
   identifier = 'instagram';
-  canImportPublishedPost(settings: Record<string, unknown>) {
-    return settings.post_type !== 'story';
-  }
-  reportMetrics: ReportMetricsMap = instagramReportMetrics;
-  async listPublishedPosts(
-    id: string,
-    token: string,
-    cursor?: string,
-    host = 'graph.facebook.com'
-  ): Promise<PublishedPostsPage> {
-    const [pageToken, userToken] = token.split('___');
-    const fields =
-      'id,caption,timestamp,permalink,media_type,media_url,thumbnail_url,children{id,media_type,media_url,thumbnail_url}';
-    const params = new URLSearchParams({
-      fields,
-      limit: '50',
-      access_token: userToken || pageToken,
-      ...(cursor ? { after: cursor } : {}),
-    });
-    const data = await (
-      await this.fetch(
-        `https://${host}/${META_GRAPH_API_VERSION}/${id}/media?${params}`,
-        { signal: AbortSignal.timeout(60000) }
-      )
-    ).json();
-    if (!Array.isArray(data.data)) {
-      throw new Error('The provider did not return a valid media page');
-    }
-    const posts = [];
-    for (const item of data.data) {
-      let media =
-        item.media_type === 'CAROUSEL_ALBUM' ? item.children?.data : [item];
-      // Expanded edges can themselves be paginated; never silently truncate an album.
-      if (
-        item.media_type === 'CAROUSEL_ALBUM' &&
-        (!media || item.children?.paging?.next)
-      ) {
-        media = [];
-        let after: string | undefined;
-        do {
-          const childParams = new URLSearchParams({
-            fields: 'id,media_type,media_url,thumbnail_url',
-            limit: '100',
-            access_token: userToken || pageToken,
-            ...(after ? { after } : {}),
-          });
-          const children = await (
-            await this.fetch(
-              `https://${host}/${META_GRAPH_API_VERSION}/${item.id}/children?${childParams}`,
-              { signal: AbortSignal.timeout(60000) }
-            )
-          ).json();
-          if (!Array.isArray(children.data))
-            throw new Error('Invalid carousel media page');
-          media.push(...children.data);
-          const next = children.paging?.next
-            ? children.paging?.cursors?.after
-            : undefined;
-          if (children.paging?.next && (!next || next === after))
-            throw new Error('Invalid carousel cursor');
-          after = next;
-        } while (after);
-      }
-      if (
-        !item.id ||
-        !item.timestamp ||
-        !item.permalink ||
-        !Number.isFinite(Date.parse(item.timestamp))
-      ) {
-        throw new Error(
-          'The provider returned a media item without its identity or publication date'
-        );
-      }
-      posts.push({
-        id: String(item.id),
-        content: item.caption || '',
-        publishedAt: item.timestamp,
-        url: item.permalink,
-        media: (media || [])
-          .filter((m: any) => m.media_url)
-          .map((m: any) => ({
-            id: String(m.id),
-            path: m.media_url,
-            ...(m.thumbnail_url ? { thumbnail: m.thumbnail_url } : {}),
-          })),
-      });
-    }
-    const nextCursor = data.paging?.next
-      ? data.paging?.cursors?.after
-      : undefined;
-    if (data.paging?.next && (!nextCursor || nextCursor === cursor))
-      throw new Error('Invalid media cursor');
-    return { posts, nextCursor };
-  }
+
   name = 'Instagram\n(Facebook Business)';
+
   isBetweenSteps = true;
+
+  noNativeRefresh = true;
+
   toolTip = 'Instagram must be business and connected to a Facebook page';
+
   scopes = [
     'instagram_basic',
     'pages_show_list',
@@ -148,50 +103,17 @@ export class InstagramProvider
     'instagram_content_publish',
     'instagram_manage_comments',
     'instagram_manage_insights',
+    'instagram_manage_messages',
   ];
+
   override maxConcurrentJob = 400;
+
   editor = 'normal' as const;
+
   dto = InstagramDto;
+
   maxLength() {
     return 2200;
-  }
-
-  override async checkValidity(
-    [firstPost]: Array<ValidityMedia[]>,
-    settings: any
-  ): Promise<string | true> {
-    if (!firstPost?.length) {
-      return 'Should have at least one media';
-    }
-    if (firstPost.length > 10) {
-      return 'Instagram carousel only supports up to 10 media attachments';
-    }
-    if (this.assetBoolean(settings?.is_trial_reel)) {
-      if ((firstPost?.length ?? 0) > 1) {
-        return 'Trial Reels can only have one video';
-      }
-      const hasVideo = firstPost?.some(
-        (f) => (f?.path?.indexOf?.('mp4') ?? -1) > -1
-      );
-      if (!hasVideo) {
-        return 'Trial Reels must be a video';
-      }
-    }
-    if (settings?.audio?.id) {
-      if (settings?.post_type === 'story') {
-        return 'Audio can only be added to Reels, not to Stories';
-      }
-      if ((firstPost?.length ?? 0) > 1) {
-        return 'Audio can only be added to a single video Reel';
-      }
-      const hasVideo = firstPost?.some(
-        (f) => (f?.path?.indexOf?.('mp4') ?? -1) > -1
-      );
-      if (!hasVideo) {
-        return 'Audio can only be added to a video Reel';
-      }
-    }
-    return true;
   }
 
   async refreshToken(refresh_token: string): Promise<AuthTokenDetails> {
@@ -211,7 +133,7 @@ export class InstagramProvider
     status: number
   ):
     | {
-        type: 'refresh-token' | 'bad-body' | 'retry' | 'disconnect';
+        type: 'refresh-token' | 'bad-body' | 'retry';
         value: string;
       }
     | undefined {
@@ -227,18 +149,8 @@ export class InstagramProvider
         value: "This account doesn't support Trial Reels",
       };
     }
-    if (body.indexOf('2207078') > -1) {
-      return {
-        type: 'bad-body' as const,
-        value:
-          'Instagram Trial Reel publish limit reached for this account, please try again later or publish the post as a regular Reel',
-      };
-    }
 
-    if (
-      body.indexOf('REVOKED_ACCESS_TOKEN') > -1 ||
-      body.indexOf('"error_subcode":33') > -1
-    ) {
+    if (body.indexOf('REVOKED_ACCESS_TOKEN') > -1) {
       return {
         type: 'refresh-token' as const,
         value:
@@ -296,14 +208,13 @@ export class InstagramProvider
     if (body.indexOf('2207053') > -1) {
       return {
         type: 'bad-body' as const,
-        value:
-          "Instagram failed to upload the video. If it exceeds Instagram's limits (300MB, 1920px width, 25Mbps bitrate), export a smaller version and try again",
+        value: 'Unknown upload error, please try again',
       };
     }
 
     if (body.indexOf('2207052') > -1) {
       return {
-        type: 'retry' as const,
+        type: 'bad-body' as const,
         value: 'Media fetch failed, please try again',
       };
     }
@@ -424,14 +335,6 @@ export class InstagramProvider
       };
     }
 
-    if (body.indexOf('(#200)') > -1) {
-      return {
-        type: 'bad-body' as const,
-        value:
-          'Facebook rejected the post due to missing permissions. Make sure your Facebook account has full content access to the Page linked to this Instagram account, then reconnect the channel.',
-      };
-    }
-
     if (body.indexOf('Not enough permissions to post') > -1) {
       return {
         type: 'bad-body' as const,
@@ -446,17 +349,16 @@ export class InstagramProvider
       };
     }
 
-    // Meta put the account behind a checkpoint: the token is still valid, so a
-    // refresh cannot help and every post fails until the user logs in on
-    // Instagram and re-connects the channel.
-    if (
-      body.indexOf('You cannot access the app till you log in to') > -1 ||
-      body.indexOf('Session key is malformed') > -1
-    ) {
+    const isInvalidMetaUserSession =
+      /(?:"code"\s*:\s*190|\b190\b)/.test(body) &&
+      /(?:"error_subcode"\s*:\s*(?:460|464)|\b190\s*\/\s*(?:460|464)\b)/.test(
+        body
+      );
+    if (isInvalidMetaUserSession) {
       return {
-        type: 'disconnect' as const,
+        type: 'refresh-token' as const,
         value:
-          'Instagram requires you to log in at instagram.com and follow its instructions before posting can resume. After that, please reconnect this channel.',
+          'The connected Facebook user session is no longer valid, please reconnect the account',
       };
     }
 
@@ -490,57 +392,10 @@ export class InstagramProvider
       };
     }
 
-    if (body.indexOf('1772107') > -1) {
-      return {
-        type: 'bad-body' as const,
-        value:
-          'Instagram did not add the comment, the post itself was published. Please try again with different comment text',
-      };
-    }
-
-    if (body.indexOf('2207082') > -1) {
-      return {
-        type: 'retry' as const,
-        value:
-          'Instagram could not process this video. If you attached audio to a video that has no sound track, set the original video volume to 0 and try again',
-      };
-    }
-
-    if (body.indexOf('2207085') > -1) {
-      return {
-        type: 'bad-body' as const,
-        value:
-          'Instagram could not process the video, please check the video format, duration and resolution and try again',
-      };
-    }
-
-    if (body.indexOf('2207077') > -1) {
-      return {
-        type: 'bad-body' as const,
-        value: 'Instagram Video download failed',
-      };
-    }
-
-    if (body.indexOf('too little or too many attachments') > -1) {
-      return {
-        type: 'bad-body' as const,
-        value:
-          'Instagram carousel should have between 2 and 10 media attachments',
-      };
-    }
-
     if (body.indexOf('2207027') > -1) {
       return {
         type: 'bad-body' as const,
         value: 'Unknown error, please try again later or contact support',
-      };
-    }
-
-    if (body.indexOf('2207018') > -1) {
-      return {
-        type: 'bad-body' as const,
-        value:
-          "One of the collaborators could not be tagged, please check the username is correct, the account is public, and that it allows collaborator invites",
       };
     }
 
@@ -557,9 +412,8 @@ export class InstagramProvider
   async reConnect(
     id: string,
     requiredId: string,
-    token: string
+    accessToken: string
   ): Promise<Omit<AuthTokenDetails, 'refreshToken' | 'expiresIn'>> {
-    const [accessToken, userToken] = token.split('___');
     const findPage = (await this.pages(accessToken)).find(
       (p) => p.id === requiredId
     );
@@ -578,12 +432,14 @@ export class InstagramProvider
     };
   }
 
-  async generateAuthUrl() {
+  async generateAuthUrl(clientInformation?: ClientInformation) {
+    const clientId =
+      clientInformation?.client_id || process.env.FACEBOOK_APP_ID;
     const state = makeSecureId(6);
     return {
       url:
-        `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth` +
-        `?client_id=${process.env.FACEBOOK_APP_ID}` +
+        `${META_FACEBOOK_OAUTH_URL}/dialog/oauth` +
+        `?client_id=${clientId}` +
         `&redirect_uri=${encodeURIComponent(
           `${process.env.FRONTEND_URL}/integrations/social/instagram`
         )}` +
@@ -594,40 +450,80 @@ export class InstagramProvider
     };
   }
 
-  async authenticate(params: {
-    code: string;
-    codeVerifier: string;
-    refresh: string;
-  }) {
+  async authenticate(
+    params: {
+      code: string;
+      codeVerifier: string;
+      refresh: string;
+    },
+    clientInformation?: ClientInformation
+  ) {
+    const clientId =
+      clientInformation?.client_id || process.env.FACEBOOK_APP_ID;
+    const clientSecret =
+      clientInformation?.client_secret || process.env.FACEBOOK_APP_SECRET;
+
+    // Log de quais credenciais estao sendo usadas (sem expor secret).
+    // Ajuda a diagnosticar falhas de token-exchange por client_id divergente
+    // entre Settings > Credentials (DB) e o App registrado no Meta.
+    console.log('[Instagram.authenticate] credentials source:', {
+      hasClientInfo: !!clientInformation,
+      clientIdPrefix: String(clientId || '').slice(0, 6) + '...',
+      hasSecret: !!clientSecret,
+      redirectUri: `${process.env.FRONTEND_URL}/integrations/social/instagram${
+        params.refresh ? `?refresh=${params.refresh}` : ''
+      }`,
+    });
+
     const getAccessToken = await (
-      await fetch(
-        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/oauth/access_token` +
-          `?client_id=${process.env.FACEBOOK_APP_ID}` +
+      await fetchWithTimeout(
+        `${META_FACEBOOK_GRAPH_URL}/oauth/access_token` +
+          `?client_id=${clientId}` +
           `&redirect_uri=${encodeURIComponent(
             `${process.env.FRONTEND_URL}/integrations/social/instagram${
               params.refresh ? `?refresh=${params.refresh}` : ''
             }`
           )}` +
-          `&client_secret=${process.env.FACEBOOK_APP_SECRET}` +
+          `&client_secret=${clientSecret}` +
           `&code=${params.code}`
       )
     ).json();
 
-    const { access_token, expires_in, ...all } = await (
-      await fetch(
-        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/oauth/access_token` +
+    // Loga a resposta crua do token-exchange. Se vier {error: {...}}, conseguimos
+    // ver o motivo exato (rate limit, code expirado, redirect_uri mismatch).
+    if (!getAccessToken.access_token) {
+      throw new Error('Meta token exchange failed');
+    }
+
+    const longLivedResponse = await (
+      await fetchWithTimeout(
+        `${META_FACEBOOK_GRAPH_URL}/oauth/access_token` +
           '?grant_type=fb_exchange_token' +
-          `&client_id=${process.env.FACEBOOK_APP_ID}` +
-          `&client_secret=${process.env.FACEBOOK_APP_SECRET}` +
+          `&client_id=${clientId}` +
+          `&client_secret=${clientSecret}` +
           `&fb_exchange_token=${getAccessToken.access_token}`
       )
     ).json();
 
-    const { data } = await (
-      await fetch(
-        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me/permissions?access_token=${access_token}`
+    if (!longLivedResponse.access_token) {
+      throw new Error('Meta long-lived token exchange failed');
+    }
+    const { access_token, expires_in, ...all } = longLivedResponse;
+
+    const permsResponse = await (
+      await fetchWithTimeout(
+        `${META_FACEBOOK_GRAPH_URL}/me/permissions?access_token=${access_token}`
       )
     ).json();
+
+    if (!permsResponse.data) {
+      throw new Error(
+        `Meta /me/permissions failed: ${JSON.stringify(
+          permsResponse.error || permsResponse
+        )}`
+      );
+    }
+    const { data } = permsResponse;
 
     const permissions = data
       .filter((d: any) => d.status === 'granted')
@@ -635,8 +531,8 @@ export class InstagramProvider
     this.checkScopes(this.scopes, permissions);
 
     const { id, name, picture } = await (
-      await fetch(
-        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me?fields=id,name,picture&access_token=${access_token}`
+      await fetchWithTimeout(
+        `${META_FACEBOOK_GRAPH_URL}/me?fields=id,name,picture&access_token=${access_token}`
       )
     ).json();
 
@@ -651,86 +547,137 @@ export class InstagramProvider
     };
   }
 
-  async pages(token: string) {
-    const [accessToken, userToken] = token.split('___');
+  async pages(accessToken: string) {
     const seenPageIds = new Set<string>();
     const allFacebookPages: any[] = [];
 
-    const addPages = (pages: any[]) => {
-      for (const page of pages) {
-        if (!seenPageIds.has(page.id)) {
-          seenPageIds.add(page.id);
-          allFacebookPages.push(page);
+    // Orcamento total de 90s para o pages() inteiro. Se ultrapassar, retornamos
+    // os resultados parciais ja coletados — evita 504 do Nginx em agencias com
+    // muitas pages via Business Manager.
+    const overallDeadline = Date.now() + 90000;
+    const budgetExceeded = () => Date.now() > overallDeadline;
+
+    const fetchPaginated = async (startUrl: string) => {
+      let nextUrl: string | undefined = startUrl;
+      while (nextUrl) {
+        if (budgetExceeded()) return;
+        const response = await (await fetchWithTimeout(nextUrl)).json();
+        if (response.data) {
+          for (const page of response.data) {
+            if (!seenPageIds.has(page.id)) {
+              seenPageIds.add(page.id);
+              allFacebookPages.push(page);
+            }
+          }
         }
+        nextUrl = response.paging?.next;
       }
     };
 
     // Fetch pages the user explicitly shared during the OAuth dialog
-    addPages(
-      await graphPaginate(
-        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me/accounts?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
-      )
-    );
-
-    // Also fetch pages via Business Manager API to discover pages
-    // not selected during the OAuth page selection step
     try {
-      const businesses = await graphPaginate(
-        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me/businesses?access_token=${accessToken}`
+      await fetchPaginated(
+        `${META_FACEBOOK_GRAPH_URL}/me/accounts?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
       );
+    } catch (err) {
+      console.warn(
+        '[Instagram.pages] /me/accounts failed:',
+        (err as Error)?.message
+      );
+    }
 
-      // ponytail: one request pair per business, all at once; cap if a user has hundreds
-      const lists = await Promise.all(
-        businesses.flatMap((business: any) =>
-          ['owned_pages', 'client_pages'].map(
-            (edge) =>
-              graphPaginate(
-                `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/${edge}?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
-              ).catch(() => [] as any[]) // Continue with other businesses
-          )
-        )
+    // Also fetch pages via Business Manager API to discover pages not selected
+    // during the OAuth page selection step. Atencao: o custo escala com o
+    // numero de BMs selecionados no Meta App — apps com muitos BMs podem
+    // estourar o rate limit (#4 "Application request limit reached"). Controle
+    // no painel do Meta App selecionando apenas os BMs necessarios. O budget
+    // de 90s + timeouts individuais garantem que nunca pendura indefinido.
+    if (!budgetExceeded()) {
+      try {
+        let bizUrl:
+          | string
+          | undefined = `${META_FACEBOOK_GRAPH_URL}/me/businesses?access_token=${accessToken}`;
+
+        while (bizUrl && !budgetExceeded()) {
+          const bizResponse = await (await fetchWithTimeout(bizUrl)).json();
+          if (bizResponse.data) {
+            for (const business of bizResponse.data) {
+              if (budgetExceeded()) break;
+              try {
+                await fetchPaginated(
+                  `${META_FACEBOOK_GRAPH_URL}/${business.id}/owned_pages?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
+                );
+              } catch {
+                // Continue with other businesses
+              }
+
+              if (budgetExceeded()) break;
+              try {
+                await fetchPaginated(
+                  `${META_FACEBOOK_GRAPH_URL}/${business.id}/client_pages?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
+                );
+              } catch {
+                // Continue with other businesses
+              }
+            }
+          }
+          bizUrl = bizResponse.paging?.next;
+        }
+      } catch {
+        // Business Manager API not available for all users
+      }
+    }
+
+    if (budgetExceeded()) {
+      console.warn(
+        `[Instagram.pages] budget de 90s estourado — retornando ${allFacebookPages.length} paginas coletadas ate agora`
       );
-      lists.forEach(addPages);
-    } catch {
-      // Business Manager API not available for all users
     }
 
     const onlyConnectedAccounts = await Promise.all(
       allFacebookPages
         .filter((f: any) => f.instagram_business_account)
         .map(async (p: any) => {
-          return {
-            pageId: p.id,
-            ...(await graphFetch(
-              `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${p.instagram_business_account.id}?fields=name,profile_picture_url&access_token=${accessToken}`
-            )),
-            id: p.instagram_business_account.id,
-          };
+          try {
+            return {
+              pageId: p.id,
+              ...(await (
+                await fetchWithTimeout(
+                  `${META_FACEBOOK_GRAPH_URL}/${p.instagram_business_account.id}?fields=name,profile_picture_url&access_token=${accessToken}`
+                )
+              ).json()),
+              id: p.instagram_business_account.id,
+            };
+          } catch (err) {
+            // Pagina individual com timeout: ignora ao inves de quebrar tudo
+            return null;
+          }
         })
     );
 
-    return onlyConnectedAccounts.map((p: any) => ({
-      pageId: p.pageId,
-      id: p.id,
-      name: p.name,
-      picture: { data: { url: p.profile_picture_url } },
-    }));
+    return onlyConnectedAccounts
+      .filter((p): p is NonNullable<typeof p> => p !== null)
+      .map((p: any) => ({
+        pageId: p.pageId,
+        id: p.id,
+        name: p.name,
+        picture: { data: { url: p.profile_picture_url } },
+      }));
   }
 
   async fetchPageInformation(
-    token: string,
+    accessToken: string,
     data: { pageId: string; id: string }
   ) {
-    const [accessToken, userToken] = token.split('___');
     const { access_token, ...all } = await (
       await fetch(
-        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${data.pageId}?fields=access_token,name,picture.type(large)&access_token=${accessToken}`
+        `${META_FACEBOOK_GRAPH_URL}/${data.pageId}?fields=access_token,name,picture.type(large)&access_token=${accessToken}`
       )
     ).json();
 
     const { id, name, profile_picture_url, username } = await (
       await fetch(
-        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${data.id}?fields=username,name,profile_picture_url&access_token=${accessToken}`
+        `${META_FACEBOOK_GRAPH_URL}/${data.id}?fields=username,name,profile_picture_url&access_token=${accessToken}`
       )
     ).json();
 
@@ -738,19 +685,879 @@ export class InstagramProvider
       id,
       name,
       picture: profile_picture_url,
-      access_token: access_token + '___' + accessToken,
+      access_token,
       username,
     };
   }
 
-  // Instagram rejects collaborator handles that carry a leading @ with
-  // error_subcode 2207018, and the tag input stores whatever the user typed.
+  async post(
+    id: string,
+    token: string,
+    postDetails: PostDetails<InstagramDto>[],
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<PostResponse[]> {
+    const [firstPost] = postDetails;
+    const [response] = await this.postPending(
+      id,
+      token,
+      postDetails,
+      integration,
+      type
+    );
+
+    let pendingData = response.pendingData;
+    const started = Date.now();
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method: failing here (non-retryable) is safe, timing the
+      // activity out is not - a retried activity would publish again.
+      if (Date.now() - started > 8 * 60 * 1000) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          '{}',
+          'Media processing timed out'
+        );
+      }
+
+      const check = await this.checkPostStatus(token, pendingData, integration);
+
+      if (check.status === 'pending') {
+        pendingData = check.pendingData;
+        await timer(30000);
+        continue;
+      }
+
+      const result =
+        check.status === 'ready'
+          ? await this.finalizePost(token, check.pendingData, integration)
+          : check;
+
+      if (result.status === 'completed') {
+        return [
+          {
+            id: firstPost.id,
+            postId: result.postId,
+            releaseURL: result.releaseURL,
+            status: 'success',
+          },
+        ];
+      }
+
+      pendingData = result.pendingData;
+      await timer(30000);
+    }
+  }
+
+  async comment(
+    id: string,
+    postId: string,
+    lastCommentId: string | undefined,
+    token: string,
+    postDetails: PostDetails<InstagramDto>[],
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<PostResponse[]> {
+    const [accessToken, userToken] = token.split('___');
+    const [commentPost] = postDetails;
+
+    const { id: commentId } = await (
+      await this.fetch(
+        `https://${type}/${META_GRAPH_API_VERSION}/${postId}/comments?message=${encodeURIComponent(
+          commentPost.message
+        )}&access_token=${accessToken}`,
+        {
+          method: 'POST',
+        }
+      )
+    ).json();
+
+    // Get the permalink from the parent post
+    const { permalink } = await (
+      await this.fetch(
+        `https://${type}/${META_GRAPH_API_VERSION}/${postId}?fields=permalink&access_token=${
+          userToken || accessToken
+        }`
+      )
+    ).json();
+
+    return [
+      {
+        id: commentPost.id,
+        postId: commentId,
+        releaseURL: permalink,
+        status: 'success',
+      },
+    ];
+  }
+
+  private setTitle(name: string) {
+    switch (name) {
+      case 'likes': {
+        return 'Likes';
+      }
+
+      case 'followers': {
+        return 'Followers';
+      }
+
+      case 'reach': {
+        return 'Reach';
+      }
+
+      case 'follower_count': {
+        return 'Follower Count';
+      }
+
+      case 'views': {
+        return 'Views';
+      }
+
+      case 'comments': {
+        return 'Comments';
+      }
+
+      case 'shares': {
+        return 'Shares';
+      }
+
+      case 'saves': {
+        return 'Saves';
+      }
+
+      case 'replies': {
+        return 'Replies';
+      }
+    }
+
+    return '';
+  }
+
+  async analytics(
+    id: string,
+    accessToken: string,
+    date: number,
+    integration?: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<AnalyticsData[]> {
+    const until = dayjs().endOf('day').unix();
+    const since = dayjs().subtract(date, 'day').unix();
+
+    const { data, ...all } = await (
+      await this.analyticsFetch(
+        `${metaGraphUrl(
+          type
+        )}/${id}/insights?metric=follower_count,reach&access_token=${accessToken}&period=day&since=${since}&until=${until}`
+      )
+    ).json();
+
+    const { data: data2, ...all2 } = await (
+      await this.analyticsFetch(
+        `${metaGraphUrl(
+          type
+        )}/${id}/insights?metric_type=total_value&metric=likes,views,comments,shares,saves,replies&access_token=${accessToken}&period=day&since=${since}&until=${until}`
+      )
+    ).json();
+    const analytics = [];
+
+    analytics.push(
+      ...(data?.map((d: any) => ({
+        label: this.setTitle(d.name),
+        percentageChange: 5,
+        data: d.values.map((v: any) => ({
+          total: v.value,
+          date: dayjs(v.end_time).format('YYYY-MM-DD'),
+        })),
+      })) || [])
+    );
+
+    analytics.push(
+      ...data2.map((d: any) => ({
+        label: this.setTitle(d.name),
+        percentageChange: 5,
+        data: [
+          {
+            total: d.total_value.value,
+            date: dayjs().format('YYYY-MM-DD'),
+          },
+        ],
+      }))
+    );
+
+    return analytics;
+  }
+
+  music(accessToken: string, data: { q: string }) {
+    return this.fetch(
+      `https://graph.facebook.com/${META_GRAPH_API_VERSION}/music/search?q=${encodeURIComponent(
+        data.q
+      )}&access_token=${accessToken}`
+    );
+  }
+
+  async postAnalytics(
+    integrationId: string,
+    accessToken: string,
+    postId: string,
+    date: number,
+    integration?: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<AnalyticsData[]> {
+    const today = dayjs().format('YYYY-MM-DD');
+
+    try {
+      // Fetch media insights from Instagram Graph API
+      const { data } = await (
+        await this.analyticsFetch(
+          `${metaGraphUrl(
+            type
+          )}/${postId}/insights?metric=views,reach,saved,likes,comments,shares&access_token=${accessToken}`
+        )
+      ).json();
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      const result: AnalyticsData[] = [];
+
+      for (const metric of data) {
+        const value = metric.values?.[0]?.value;
+        if (value === undefined) continue;
+
+        let label = '';
+
+        switch (metric.name) {
+          case 'views':
+            label = 'Views';
+            break;
+          case 'reach':
+            label = 'Reach';
+            break;
+          case 'engagement':
+            label = 'Engagement';
+            break;
+          case 'saved':
+            label = 'Saves';
+            break;
+          case 'likes':
+            label = 'Likes';
+            break;
+          case 'comments':
+            label = 'Comments';
+            break;
+          case 'shares':
+            label = 'Shares';
+            break;
+        }
+
+        if (label) {
+          result.push({
+            label,
+            percentageChange: 0,
+            data: [{ total: String(value), date: today }],
+          });
+        }
+      }
+
+      return result;
+    } catch (err) {
+      if (err instanceof RefreshToken) {
+        throw err;
+      }
+      console.error('Error fetching Instagram post analytics:', err);
+      return [];
+    }
+  }
+
+  async sendDM(
+    accessToken: string,
+    igScopedUserId: string,
+    message: string,
+    type = 'graph.facebook.com'
+  ): Promise<{ recipientId: string; messageId: string }> {
+    const url =
+      type === 'graph.instagram.com'
+        ? this.commentMutationUrl(type, 'me/messages')
+        : await this.resolvePageMessagesUrl(accessToken, type);
+    const result = await this.sendCommentMutation(
+      url,
+      accessToken,
+      {
+        recipient: { id: igScopedUserId },
+        message: { text: message },
+      },
+      'message_id'
+    );
+    return { recipientId: result.recipient_id, messageId: result.message_id };
+  }
+
+  private async resolvePageMessagesUrl(
+    accessToken: string,
+    type = 'graph.facebook.com'
+  ): Promise<string> {
+    try {
+      const response = await ssrfSafeFetch(
+        this.commentMutationUrl(type, 'me'),
+        {
+          headers: { Authorization: 'Bearer ' + accessToken.split('___')[0] },
+          signal: AbortSignal.timeout(25000),
+          redirect: 'error',
+        }
+      );
+      const body = await response.json();
+      if (
+        !response.ok ||
+        typeof body.id !== 'string' ||
+        !body.id ||
+        body.error
+      ) {
+        throw new CommentAutomationDeliveryError('rejected');
+      }
+      return this.commentMutationUrl(
+        type,
+        encodeURIComponent(body.id) + '/messages'
+      );
+    } catch {
+      // No mutation was attempted when resolving the account failed.
+      throw new CommentAutomationDeliveryError('rejected');
+    }
+  }
+
+  async sendPrivateReply(
+    accessToken: string,
+    igAccountId: string,
+    commentId: string,
+    message: string,
+    button?: InstagramDmButton,
+    type = 'graph.facebook.com'
+  ): Promise<{ recipientId: string; messageId: string }> {
+    const payload = button
+      ? {
+          attachment: {
+            type: 'template',
+            payload: {
+              template_type: 'button',
+              text: message.slice(0, 640),
+              buttons: [buildButton(button)],
+            },
+          },
+        }
+      : { text: message };
+    const result = await this.sendCommentMutation(
+      this.commentMutationUrl(
+        type,
+        encodeURIComponent(igAccountId) + '/messages'
+      ),
+      accessToken,
+      { recipient: { comment_id: commentId }, message: payload },
+      'message_id'
+    );
+    return { recipientId: result.recipient_id, messageId: result.message_id };
+  }
+
+  async replyToComment(
+    token: string,
+    commentId: string,
+    message: string,
+    integration: Integration | string,
+    type = 'graph.facebook.com'
+  ): Promise<{ id: string }> {
+    const host = typeof integration === 'string' ? integration : type;
+    const result = await this.sendCommentMutation(
+      this.commentMutationUrl(host, encodeURIComponent(commentId) + '/replies'),
+      token,
+      { message },
+      'id'
+    );
+    return { id: result.id };
+  }
+
+  async subscribeToWebhooks(
+    igAccountId: string,
+    pageAccessToken: string,
+    type = 'graph.facebook.com',
+    appId?: string
+  ): Promise<boolean> {
+    try {
+      if (!appId) throw new Error();
+      const token = pageAccessToken.split('___')[0];
+      // Page installation/messaging is separate from the app-level Instagram
+      // comments subscription, which is checked before flow activation.
+      const requiredFields =
+        type === 'graph.instagram.com'
+          ? ['comments', 'messages']
+          : ['messages'];
+      const current = await this.checkWebhookSubscription(
+        igAccountId,
+        token,
+        type,
+        appId
+      );
+      if (requiredFields.every((field) => current.fields.includes(field)))
+        return true;
+      const accountId =
+        type === 'graph.instagram.com'
+          ? igAccountId
+          : await this.getPageIdForIgAccount(token, igAccountId, type);
+      if (!accountId) throw new Error();
+      const params = new URLSearchParams({
+        // A shared app can serve Chatwoot too; never replace its existing fields.
+        subscribed_fields: [
+          ...new Set([...current.fields, ...requiredFields]),
+        ].join(','),
+        access_token: token,
+      });
+      const response = await ssrfSafeFetch(
+        `${metaGraphUrl(type)}/${encodeURIComponent(
+          accountId
+        )}/subscribed_apps?${params}`,
+        {
+          method: 'POST',
+          signal: AbortSignal.timeout(25000),
+          redirect: 'error',
+        }
+      );
+      if (!response.ok) throw new Error();
+      const body = await response.json();
+      if (body?.error || body?.success !== true) throw new Error();
+      return true;
+    } catch {
+      throw new Error('Could not subscribe to Instagram webhooks');
+    }
+  }
+
+  async checkWebhookSubscription(
+    igAccountId: string,
+    pageAccessToken: string,
+    type = 'graph.facebook.com',
+    appId?: string
+  ): Promise<{ subscribed: boolean; fields: string[] }> {
+    try {
+      if (!appId) throw new Error();
+      const token = pageAccessToken.split('___')[0];
+      const accountId =
+        type === 'graph.instagram.com'
+          ? igAccountId
+          : await this.getPageIdForIgAccount(token, igAccountId, type);
+      if (!accountId) throw new Error();
+      const params = new URLSearchParams({
+        fields: 'id,subscribed_fields',
+        access_token: token,
+      });
+      const response = await ssrfSafeFetch(
+        `${metaGraphUrl(type)}/${encodeURIComponent(
+          accountId
+        )}/subscribed_apps?${params}`,
+        { signal: AbortSignal.timeout(25000), redirect: 'error' }
+      );
+      if (!response.ok) throw new Error();
+      const body = await response.json();
+      if (
+        body?.error ||
+        !Array.isArray(body?.data) ||
+        body.data.some((app: any) => typeof app?.id !== 'string' || !app.id)
+      ) {
+        throw new Error();
+      }
+      const apps = body.data.filter((app: any) => app.id === appId);
+      // Never overwrite unknown fields if this app is on a later result page.
+      if (body.paging?.next && !apps.length) throw new Error();
+      if (
+        apps.some(
+          (app: any) =>
+            !Array.isArray(app.subscribed_fields) ||
+            app.subscribed_fields.some(
+              (field: any) => typeof field !== 'string' || !field
+            )
+        )
+      ) {
+        throw new Error();
+      }
+      const fields: string[] = apps.flatMap(
+        (app: any) => app.subscribed_fields
+      );
+      return { subscribed: apps.length > 0, fields };
+    } catch {
+      throw new Error('Could not check Instagram webhook subscription');
+    }
+  }
+
+  async getPageIdForIgAccount(
+    pageAccessToken: string,
+    igAccountId: string,
+    type = 'graph.facebook.com'
+  ): Promise<string | null> {
+    try {
+      // The page access token is scoped to a specific page.
+      // We can get the page ID by calling /me with the page token.
+      const response = await this.fetch(
+        `${metaGraphUrl(type)}/me?fields=id&access_token=${pageAccessToken}`
+      );
+      const body = await response.json();
+      if (body.id) {
+        return body.id;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async ensureWebhookSubscription(
+    pageAccessToken: string,
+    igAccountId: string,
+    type = 'graph.facebook.com',
+    appId?: string
+  ): Promise<boolean> {
+    // Facebook Login uses the linked Page; Instagram Login uses the IG account.
+    return this.subscribeToWebhooks(igAccountId, pageAccessToken, type, appId);
+  }
+
+  async getMediaMetadata(
+    mediaId: string,
+    accessToken: string,
+    type = 'graph.facebook.com'
+  ): Promise<{
+    id: string;
+    permalink?: string;
+    caption?: string;
+    thumbnailUrl?: string;
+    mediaType?: string;
+    isAd?: boolean;
+  }> {
+    // boost_eligibility_info so existe em "Instagram API with Facebook Login"
+    // (host graph.facebook.com). "Instagram API with Instagram Login"
+    // (host graph.instagram.com / standalone) NAO expoe esse campo —
+    // documentado em https://developers.facebook.com/docs/instagram-platform/reference/instagram-media
+    // Quando sabemos pelo host que nao vai funcionar, pulamos o campo direto.
+    // Caso o host nao seja reconhecido, o retry abaixo cobre como safety net.
+    const baseFields =
+      'id,caption,media_type,media_url,thumbnail_url,permalink';
+    const supportsBoostField = type.includes('graph.facebook.com');
+    const withBoost = `${baseFields},boost_eligibility_info`;
+    const initialFields = supportsBoostField ? withBoost : baseFields;
+
+    const tryFetch = async (fields: string) => {
+      const response = await fetch(
+        `${metaGraphUrl(
+          type
+        )}/${mediaId}?fields=${fields}&access_token=${accessToken}`
+      );
+      const body = await response.json();
+      return { response, body };
+    };
+
+    let { response, body } = await tryFetch(initialFields);
+    if (supportsBoostField && (!response.ok || body?.error)) {
+      const message: string = body?.error?.message ?? '';
+      const isNonexistingField =
+        /nonexisting field/i.test(message) &&
+        /boost_eligibility_info/i.test(message);
+      if (isNonexistingField) {
+        // Defensive: host eh facebook mas o app type nao suporta o campo.
+        ({ response, body } = await tryFetch(baseFields));
+      }
+    }
+
+    if (!response.ok || body?.error) {
+      throw new Error(
+        `IG getMediaMetadata failed (HTTP ${response.status}): ${
+          body?.error?.message ?? JSON.stringify(body).slice(0, 200)
+        }`
+      );
+    }
+
+    const eligibleToBoost = body?.boost_eligibility_info?.eligible_to_boost;
+    const isAd =
+      typeof eligibleToBoost === 'boolean' ? !eligibleToBoost : undefined;
+
+    return {
+      id: body.id,
+      permalink: body.permalink,
+      caption: body.caption,
+      thumbnailUrl: body.thumbnail_url ?? body.media_url,
+      mediaType: body.media_type,
+      isAd,
+    };
+  }
+
+  async getRecentMedia(
+    igAccountId: string,
+    accessToken: string,
+    type = 'graph.facebook.com',
+    limit = 25,
+    after?: string
+  ): Promise<{
+    posts: Array<{
+      id: string;
+      caption?: string;
+      mediaType: string;
+      mediaUrl?: string;
+      thumbnailUrl?: string;
+      permalink?: string;
+      timestamp?: string;
+    }>;
+    nextCursor: string | null;
+  }> {
+    try {
+      const [pageToken, userToken] = accessToken.split('___');
+      const params = new URLSearchParams({
+        fields:
+          'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp',
+        limit: String(limit),
+        access_token: userToken || pageToken,
+        ...(after ? { after } : {}),
+      });
+      const response = await ssrfSafeFetch(
+        `${metaGraphUrl(type)}/${encodeURIComponent(
+          igAccountId
+        )}/media?${params}`,
+        { signal: AbortSignal.timeout(25000), redirect: 'error' }
+      );
+      if (!response.ok) throw new Error();
+      const body = await response.json();
+      if (
+        body?.error ||
+        !Array.isArray(body?.data) ||
+        body.data.some(
+          (item: any) =>
+            !item ||
+            typeof item.id !== 'string' ||
+            !item.id ||
+            typeof item.media_type !== 'string' ||
+            !item.media_type
+        )
+      ) {
+        throw new Error();
+      }
+      const nextCursor = body.paging?.next ? body.paging?.cursors?.after : null;
+      if (
+        body.paging?.next &&
+        (typeof nextCursor !== 'string' || !nextCursor || nextCursor === after)
+      ) {
+        throw new Error();
+      }
+      return {
+        posts: body.data.map((m: any) => ({
+          id: m.id,
+          caption: m.caption,
+          mediaType: m.media_type,
+          mediaUrl: m.media_url,
+          thumbnailUrl: m.thumbnail_url,
+          permalink: m.permalink,
+          timestamp: m.timestamp,
+        })),
+        nextCursor,
+      };
+    } catch {
+      throw new Error('Could not retrieve Instagram media');
+    }
+  }
+
+  async getRecentStories(
+    igAccountId: string,
+    accessToken: string,
+    type = 'graph.facebook.com'
+  ): Promise<{
+    stories: Array<{
+      id: string;
+      caption?: string;
+      mediaType: string;
+      mediaUrl?: string;
+      thumbnailUrl?: string;
+      permalink?: string;
+      timestamp?: string;
+    }>;
+  }> {
+    // Instagram Graph API only exposes active stories (last 24h) via this edge.
+    try {
+      const [pageToken, userToken] = accessToken.split('___');
+      const params = new URLSearchParams({
+        fields:
+          'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp',
+        access_token: userToken || pageToken,
+      });
+      const response = await ssrfSafeFetch(
+        `${metaGraphUrl(type)}/${encodeURIComponent(
+          igAccountId
+        )}/stories?${params}`,
+        { signal: AbortSignal.timeout(25000), redirect: 'error' }
+      );
+      if (!response.ok) throw new Error();
+      const body = await response.json();
+      if (
+        body?.error ||
+        !Array.isArray(body?.data) ||
+        body.data.some(
+          (item: any) =>
+            !item ||
+            typeof item.id !== 'string' ||
+            !item.id ||
+            typeof item.media_type !== 'string' ||
+            !item.media_type
+        )
+      ) {
+        throw new Error();
+      }
+      return {
+        stories: body.data.map((m: any) => ({
+          id: m.id,
+          caption: m.caption,
+          mediaType: m.media_type,
+          mediaUrl: m.media_url,
+          thumbnailUrl: m.thumbnail_url,
+          permalink: m.permalink,
+          timestamp: m.timestamp,
+        })),
+      };
+    } catch {
+      throw new Error('Could not retrieve Instagram stories');
+    }
+  }
+
+  canImportPublishedPost(settings: Record<string, unknown>) {
+    return settings.post_type !== 'story';
+  }
+
+  reportMetrics: ReportMetricsMap = instagramReportMetrics;
+
+  async listPublishedPosts(
+    id: string,
+    token: string,
+    cursor?: string,
+    host = 'graph.facebook.com'
+  ): Promise<PublishedPostsPage> {
+    const [pageToken, userToken] = token.split('___');
+    const fields =
+      'id,caption,timestamp,permalink,media_type,media_url,thumbnail_url,children{id,media_type,media_url,thumbnail_url}';
+    const params = new URLSearchParams({
+      fields,
+      limit: '50',
+      access_token: userToken || pageToken,
+      ...(cursor ? { after: cursor } : {}),
+    });
+    const data = await (
+      await this.fetch(
+        `https://${host}/${META_GRAPH_API_VERSION}/${id}/media?${params}`,
+        { signal: AbortSignal.timeout(60000) }
+      )
+    ).json();
+    if (!Array.isArray(data.data)) {
+      throw new Error('The provider did not return a valid media page');
+    }
+    const posts = [];
+    for (const item of data.data) {
+      let media =
+        item.media_type === 'CAROUSEL_ALBUM' ? item.children?.data : [item];
+      // Expanded edges can themselves be paginated; never silently truncate an album.
+      if (
+        item.media_type === 'CAROUSEL_ALBUM' &&
+        (!media || item.children?.paging?.next)
+      ) {
+        media = [];
+        let after: string | undefined;
+        do {
+          const childParams = new URLSearchParams({
+            fields: 'id,media_type,media_url,thumbnail_url',
+            limit: '100',
+            access_token: userToken || pageToken,
+            ...(after ? { after } : {}),
+          });
+          const children = await (
+            await this.fetch(
+              `https://${host}/${META_GRAPH_API_VERSION}/${item.id}/children?${childParams}`,
+              { signal: AbortSignal.timeout(60000) }
+            )
+          ).json();
+          if (!Array.isArray(children.data))
+            throw new Error('Invalid carousel media page');
+          media.push(...children.data);
+          const next = children.paging?.next
+            ? children.paging?.cursors?.after
+            : undefined;
+          if (children.paging?.next && (!next || next === after))
+            throw new Error('Invalid carousel cursor');
+          after = next;
+        } while (after);
+      }
+      if (
+        !item.id ||
+        !item.timestamp ||
+        !item.permalink ||
+        !Number.isFinite(Date.parse(item.timestamp))
+      ) {
+        throw new Error(
+          'The provider returned a media item without its identity or publication date'
+        );
+      }
+      posts.push({
+        id: String(item.id),
+        content: item.caption || '',
+        publishedAt: item.timestamp,
+        url: item.permalink,
+        media: (media || [])
+          .filter((m: any) => m.media_url)
+          .map((m: any) => ({
+            id: String(m.id),
+            path: m.media_url,
+            ...(m.thumbnail_url ? { thumbnail: m.thumbnail_url } : {}),
+          })),
+      });
+    }
+    const nextCursor = data.paging?.next
+      ? data.paging?.cursors?.after
+      : undefined;
+    if (data.paging?.next && (!nextCursor || nextCursor === cursor))
+      throw new Error('Invalid media cursor');
+    return { posts, nextCursor };
+  }
+
+  override async checkValidity(
+    [firstPost]: Array<ValidityMedia[]>,
+    settings: any
+  ): Promise<string | true> {
+    if (!firstPost?.length) {
+      return 'Should have at least one media';
+    }
+    if (firstPost.length > 10) {
+      return 'Instagram carousel only supports up to 10 media attachments';
+    }
+    if (this.assetBoolean(settings?.is_trial_reel)) {
+      if ((firstPost?.length ?? 0) > 1) {
+        return 'Trial Reels can only have one video';
+      }
+      const hasVideo = firstPost?.some(
+        (f) => (f?.path?.indexOf?.('mp4') ?? -1) > -1
+      );
+      if (!hasVideo) {
+        return 'Trial Reels must be a video';
+      }
+    }
+    if (settings?.audio?.id) {
+      if (settings?.post_type === 'story') {
+        return 'Audio can only be added to Reels, not to Stories';
+      }
+      if ((firstPost?.length ?? 0) > 1) {
+        return 'Audio can only be added to a single video Reel';
+      }
+      const hasVideo = firstPost?.some(
+        (f) => (f?.path?.indexOf?.('mp4') ?? -1) > -1
+      );
+      if (!hasVideo) {
+        return 'Audio can only be added to a video Reel';
+      }
+    }
+    return true;
+  }
+
   private stripHandle(handle: string) {
     return handle.replace(/^@+/, '');
   }
 
-  // Single, read-only status check of a media container - the polling loops
-  // that used to live inside post() are now driven by the post workflow.
   private async igContainerStatus(
     containerId: string,
     checkToken: string,
@@ -767,7 +1574,8 @@ export class InstagramProvider
     ).json();
 
     if (status_code === 'ERROR' || status_code === 'EXPIRED') {
-      const handleError = this.handleErrors(status || '', 200);
+      const handleError: ReturnType<SocialAbstract['handleErrors']> =
+        this.handleErrors(status || '', 200);
       if (handleError?.type === 'disconnect') {
         throw new Disconnect(
           this.identifier,
@@ -789,8 +1597,6 @@ export class InstagramProvider
     return status_code;
   }
 
-  // The post is live, the permalink is only cosmetic: never fail (and risk
-  // re-publishing) a live post over it.
   private async igPermalink(
     mediaId: string,
     checkToken: string,
@@ -844,10 +1650,12 @@ export class InstagramProvider
           ? firstPost?.media?.length === 1
             ? isStory
               ? `video_url=${m.path}&media_type=STORIES`
-              : m?.thumbnail
+              : firstPost.settings.cover?.path || m?.thumbnail
               ? `video_url=${
                   m.path
-                }&media_type=REELS&cover_url=${encodeURIComponent(m.thumbnail)}`
+                }&media_type=REELS&cover_url=${encodeURIComponent(
+                  firstPost.settings.cover?.path || m.thumbnail
+                )}`
               : `video_url=${m.path}&media_type=REELS&thumb_offset=${
                   m?.thumbnailTimestamp || 0
                 }`
@@ -1120,70 +1928,6 @@ export class InstagramProvider
     };
   }
 
-  // Old blocking behavior, kept for workflow versions before v1.0.6 that don't
-  // know how to resolve a `pending` response.
-  async post(
-    id: string,
-    token: string,
-    postDetails: PostDetails<InstagramDto>[],
-    integration: Integration,
-    type = 'graph.facebook.com'
-  ): Promise<PostResponse[]> {
-    const [firstPost] = postDetails;
-    const [response] = await this.postPending(
-      id,
-      token,
-      postDetails,
-      integration,
-      type
-    );
-
-    let pendingData = response.pendingData;
-    const started = Date.now();
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      // Cap below the 10-minute activity timeout of the old workflows using
-      // this method: failing here (non-retryable) is safe, timing the
-      // activity out is not - a retried activity would publish again.
-      if (Date.now() - started > 8 * 60 * 1000) {
-        throw new BadBody(
-          this.identifier,
-          '{}',
-          '{}',
-          'Media processing timed out'
-        );
-      }
-
-      const check = await this.checkPostStatus(token, pendingData, integration);
-
-      if (check.status === 'pending') {
-        pendingData = check.pendingData;
-        await timer(30000);
-        continue;
-      }
-
-      const result =
-        check.status === 'ready'
-          ? await this.finalizePost(token, check.pendingData, integration)
-          : check;
-
-      if (result.status === 'completed') {
-        return [
-          {
-            id: firstPost.id,
-            postId: result.postId,
-            releaseURL: result.releaseURL,
-            status: 'success',
-          },
-        ];
-      }
-
-      pendingData = result.pendingData;
-      await timer(30000);
-    }
-  }
-
   async listComments(
     token: string,
     postId: string,
@@ -1206,137 +1950,6 @@ export class InstagramProvider
       authorId: comment.from?.id,
       publishedAt: comment.timestamp,
     }));
-  }
-
-  async replyToComment(
-    token: string,
-    commentId: string,
-    message: string,
-    integration: Integration,
-    type = 'graph.facebook.com'
-  ): Promise<{ id: string }> {
-    const [accessToken] = token.split('___');
-
-    const { id } = await (
-      await this.fetch(
-        `https://${type}/${META_GRAPH_API_VERSION}/${commentId}/replies?message=${encodeURIComponent(
-          message
-        )}&access_token=${accessToken}`,
-        {
-          method: 'POST',
-        }
-      )
-    ).json();
-
-    return { id };
-  }
-
-  async comment(
-    id: string,
-    postId: string,
-    lastCommentId: string | undefined,
-    token: string,
-    postDetails: PostDetails<InstagramDto>[],
-    integration: Integration,
-    type = 'graph.facebook.com'
-  ): Promise<PostResponse[]> {
-    const [accessToken, userToken] = token.split('___');
-    const [commentPost] = postDetails;
-
-    const { id: commentId } = await (
-      await this.fetch(
-        `https://${type}/${META_GRAPH_API_VERSION}/${postId}/comments?message=${encodeURIComponent(
-          commentPost.message
-        )}&access_token=${accessToken}`,
-        {
-          method: 'POST',
-        }
-      )
-    ).json();
-
-    // Get the permalink from the parent post
-    const { permalink } = await (
-      await this.fetch(
-        `https://${type}/${META_GRAPH_API_VERSION}/${postId}?fields=permalink&access_token=${
-          userToken || accessToken
-        }`
-      )
-    ).json();
-
-    return [
-      {
-        id: commentPost.id,
-        postId: commentId,
-        releaseURL: permalink,
-        status: 'success',
-      },
-    ];
-  }
-
-  private setTitle(name: string) {
-    switch (name) {
-      case 'likes': {
-        return 'Likes';
-      }
-
-      case 'followers': {
-        return 'Followers';
-      }
-
-      case 'reach': {
-        return 'Reach';
-      }
-
-      case 'follower_count': {
-        return 'Follower Count';
-      }
-
-      case 'views': {
-        return 'Views';
-      }
-
-      case 'comments': {
-        return 'Comments';
-      }
-
-      case 'shares': {
-        return 'Shares';
-      }
-
-      case 'saves': {
-        return 'Saves';
-      }
-
-      case 'replies': {
-        return 'Replies';
-      }
-    }
-
-    return '';
-  }
-
-  async analytics(
-    id: string,
-    token: string,
-    date: number,
-    type = 'graph.facebook.com'
-  ): Promise<AnalyticsData[]> {
-    const until = dayjs().startOf('day').unix();
-    const since = dayjs().subtract(date, 'day').unix();
-
-    return withTrend(
-      await this.accountInsights(id, token, type, since, until),
-      () =>
-        this.accountInsights(
-          id,
-          token,
-          type,
-          dayjs()
-            .subtract(date * 2, 'day')
-            .unix(),
-          since
-        )
-    );
   }
 
   private async accountInsights(
@@ -1388,16 +2001,6 @@ export class InstagramProvider
     return analytics;
   }
 
-  music(accessToken: string, data: { q: string }) {
-    return this.fetch(
-      `https://graph.facebook.com/${META_GRAPH_API_VERSION}/music/search?q=${encodeURIComponent(
-        data.q
-      )}&access_token=${accessToken}`
-    );
-  }
-
-  // https://developers.facebook.com/docs/instagram-platform/content-publishing/audio-api/
-  // empty search_query returns trending audio
   @Tool({
     description:
       'Search audio (music or original sounds) to attach to a Reel via the "audio" setting, an empty query returns trending audio',
@@ -1445,73 +2048,46 @@ export class InstagramProvider
     }));
   }
 
-  async postAnalytics(
-    integrationId: string,
+  private commentMutationUrl(host: string, path: string): string {
+    if (!['graph.facebook.com', 'graph.instagram.com'].includes(host)) {
+      throw new CommentAutomationDeliveryError('rejected');
+    }
+    return metaGraphUrl(host) + '/' + path;
+  }
+
+  private async sendCommentMutation(
+    url: string,
     token: string,
-    postId: string,
-    date: number,
-    type = 'graph.facebook.com'
-  ): Promise<AnalyticsData[]> {
-    const [accessToken, userToken] = token.split('___');
-    const today = dayjs().format('YYYY-MM-DD');
-
+    payload: Record<string, unknown>,
+    idField: 'id' | 'message_id'
+  ): Promise<Record<string, string>> {
     try {
-      // Fetch media insights from Instagram Graph API
-      const { data } = await (
-        await fetch(
-          `https://${type}/${META_GRAPH_API_VERSION}/${postId}/insights?metric=views,reach,saved,likes,comments,shares&access_token=${accessToken}`
-        )
-      ).json();
-
-      if (!data || data.length === 0) {
-        return [];
+      // Meta has no idempotency key: a timeout or malformed success must never be retried.
+      const response = await ssrfSafeFetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + token.split('___')[0],
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(25000),
+        redirect: 'error',
+      });
+      const body = await response.json().catch(() => undefined);
+      if (!response.ok || body?.error) {
+        throw new CommentAutomationDeliveryError(
+          response.status >= 400 && response.status < 500 && body?.error
+            ? 'rejected'
+            : 'unknown'
+        );
       }
-
-      const result: AnalyticsData[] = [];
-
-      for (const metric of data) {
-        const value = metric.values?.[0]?.value;
-        if (value === undefined) continue;
-
-        let label = '';
-
-        switch (metric.name) {
-          case 'views':
-            label = 'Views';
-            break;
-          case 'reach':
-            label = 'Reach';
-            break;
-          case 'engagement':
-            label = 'Engagement';
-            break;
-          case 'saved':
-            label = 'Saves';
-            break;
-          case 'likes':
-            label = 'Likes';
-            break;
-          case 'comments':
-            label = 'Comments';
-            break;
-          case 'shares':
-            label = 'Shares';
-            break;
-        }
-
-        if (label) {
-          result.push({
-            label,
-            percentageChange: 0,
-            data: [{ total: String(value), date: today }],
-          });
-        }
+      if (typeof body?.[idField] !== 'string' || !body[idField]) {
+        throw new CommentAutomationDeliveryError('unknown');
       }
-
-      return result;
-    } catch (err) {
-      console.error('Error fetching Instagram post analytics:', err);
-      return [];
+      return body;
+    } catch (error) {
+      if (error instanceof CommentAutomationDeliveryError) throw error;
+      throw new CommentAutomationDeliveryError('unknown');
     }
   }
 }

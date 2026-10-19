@@ -7,37 +7,68 @@ import {
 import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import dayjs from 'dayjs';
 import { Integration } from '@prisma/client';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { WordpressDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/wordpress.dto';
 import slugify from 'slugify';
-// import FormData from 'form-data';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
+import {
+  ssrfSafeFetch,
+  getSsrfSafeDispatcher,
+} from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
-import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { string } from 'yup';
 
 const WORDPRESS_USER_AGENT = 'Postiz/1.0 (+https://postiz.com)';
 
-@Rules(
-  'WordPress publishes the content as an article: pictures go inside the content as <img src="..."> where they should appear, the src must be a picture from the media library (upload it with uploadFromUrlTool first), attachments are not published, the cover picture is the main_image setting'
-)
 export class WordpressProvider
   extends SocialAbstract
   implements SocialProvider
 {
   identifier = 'wordpress';
+
   name = 'WordPress';
+
   isBetweenSteps = false;
+
   editor = 'html' as const;
+
   scopes = [] as string[];
-  override maxConcurrentJob = 8; // WordPress sites are the customer's own servers
+
+  override maxConcurrentJob = 5;
+
   dto = WordpressDto;
+
   maxLength() {
     return 100000;
   }
 
-  inlineImages() {
-    return true;
+  private decodeToken(token: string) {
+    const credentials = JSON.parse(Buffer.from(token, 'base64').toString()) as {
+      domain: string;
+      username: string;
+      password: string;
+    };
+    const domain = credentials.domain.trim().replace(/\/+$/, '');
+    const auth = Buffer.from(
+      `${credentials.username}:${credentials.password}`
+    ).toString('base64');
+
+    return { credentials, domain, auth };
+  }
+
+  private normalizeTermIds(values: unknown): number[] {
+    if (!Array.isArray(values)) {
+      return [];
+    }
+
+    return [
+      ...new Set(
+        values
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0)
+      ),
+    ];
   }
 
   async generateAuthUrl() {
@@ -60,6 +91,7 @@ export class WordpressProvider
       username: '',
     };
   }
+
   override handleErrors(
     body: string
   ):
@@ -93,7 +125,7 @@ export class WordpressProvider
         label: 'Password',
         validation: `/.+/`,
         type: 'password' as const,
-        hint: 'Application password, create in User->Profile',
+        hint: 'wordpress_application_password_hint',
       },
     ];
   }
@@ -103,62 +135,42 @@ export class WordpressProvider
     codeVerifier: string;
     refresh?: string;
   }) {
-    const body = JSON.parse(Buffer.from(params.code, 'base64').toString()) as {
-      domain: string;
-      username: string;
-      password: string;
-    };
+    const { credentials: body, domain, auth } = this.decodeToken(params.code);
 
-    // Normalize the domain - users often paste it with surrounding whitespace
-    // or a trailing slash, which would otherwise build `https://site.com//wp-json/...`.
-    const domain = body.domain.trim().replace(/\/+$/, '');
-
-    const auth = Buffer.from(`${body.username}:${body.password}`).toString(
-      'base64'
-    );
-
-    // Direct fetch (not `this.fetch`) so we can branch on the HTTP status and
-    // return a specific message instead of throwing a generic error.
     let response: Response;
     try {
-      response = await fetch(`${domain}/wp-json/wp/v2/users/me`, {
+      response = await ssrfSafeFetch(`${domain}/wp-json/wp/v2/users/me`, {
         headers: {
           Authorization: `Basic ${auth}`,
-          'User-Agent': WORDPRESS_USER_AGENT,
         },
-        // @ts-ignore - undici-only option; blocks SSRF to internal IPs
-        dispatcher: getSsrfSafeDispatcher(),
       });
-    } catch (err) {
-      // DNS failure, connection refused, TLS error, site unreachable, etc.
-      console.log(err);
+    } catch {
       return 'Could not reach your WordPress site. Check the Domain URL and that the site is publicly accessible.';
     }
 
-    // A security plugin (e.g. Wordfence), a WAF, or the server config commonly
-    // strips the Authorization header or locks down the REST API. We don't try
-    // to work around that - surface a distinct, actionable message instead.
     if (!response.ok) {
-      // Log what WordPress actually returned (REST errors carry a `code` and
-      // `message`) so failures can be diagnosed without guessing.
       const errorBody = await response.text().catch(() => '');
       let wpCode = '';
-      let wpMessage = '';
+
       try {
-        const parsed = JSON.parse(errorBody);
-        wpCode = parsed?.code || '';
-        wpMessage = parsed?.message || '';
-      } catch (err) {
-        // Non-JSON error body (e.g. an HTML page from a security plugin).
+        const parsed = JSON.parse(errorBody) as { code?: string };
+        wpCode = parsed.code || '';
+      } catch {
+        // HTML and other non-JSON error bodies are intentionally not logged.
       }
-      console.log(
-        `WordPress auth failed for ${domain} (HTTP ${response.status})`,
-        JSON.stringify({
-          code: wpCode,
-          message: wpMessage,
-          ...(wpCode ? {} : { body: errorBody.slice(0, 500) }),
-        })
-      );
+
+      let origin = 'invalid-domain';
+      try {
+        origin = new URL(domain).origin;
+      } catch {
+        // The connection screen validates the URL; keep API callers safe too.
+      }
+
+      console.warn('WordPress authentication failed', {
+        origin,
+        status: response.status,
+        code: wpCode,
+      });
 
       if (response.status === 401 || response.status === 403) {
         return 'WordPress rejected the login. A security plugin or server setting may be blocking the REST API or stripping the Authorization header, or the username / Application Password is incorrect.';
@@ -167,13 +179,16 @@ export class WordpressProvider
       return `WordPress returned an unexpected error (HTTP ${response.status}). Make sure the REST API is enabled and Application Passwords are available.`;
     }
 
-    // Even on a 200, a security plugin / maintenance page can return HTML
-    // instead of JSON, which would otherwise throw on `.json()`.
-    let data: any;
+    let data: {
+      id?: number | string;
+      name?: string;
+      avatar_urls?: Record<string, string>;
+      code?: string;
+    };
+
     try {
       data = await response.json();
-    } catch (err) {
-      console.log(err);
+    } catch {
       return 'WordPress did not return a valid response. The REST API may be disabled or blocked by a security plugin.';
     }
 
@@ -204,34 +219,6 @@ export class WordpressProvider
     };
   }
 
-  // Custom provider functions below are invoked from the backend HTTP endpoint
-  // (`/integrations/function`) - which is NOT a Temporal activity - so they must
-  // use a plain `fetch` (with the SSRF guard) rather than `this.fetch`, which
-  // calls `Context.current()` and throws outside an activity. This mirrors how
-  // `authenticate` issues its request.
-  private async wpGet(token: string, path: string) {
-    const body = JSON.parse(Buffer.from(token, 'base64').toString()) as {
-      domain: string;
-      username: string;
-      password: string;
-    };
-
-    const auth = Buffer.from(`${body.username}:${body.password}`).toString(
-      'base64'
-    );
-
-    const response = await fetch(`${body.domain}${path}`, {
-      headers: {
-        Authorization: `Basic ${auth}`,
-        'User-Agent': WORDPRESS_USER_AGENT,
-      },
-      // @ts-ignore - undici-only option; blocks SSRF to internal IPs
-      dispatcher: getSsrfSafeDispatcher(),
-    });
-
-    return response.json();
-  }
-
   @Tool({
     description: 'Get list of post types',
     dataSchema: [],
@@ -255,6 +242,29 @@ export class WordpressProvider
 
       return all;
     }, []);
+  }
+
+  private async wpGet(token: string, path: string) {
+    const body = JSON.parse(Buffer.from(token, 'base64').toString()) as {
+      domain: string;
+      username: string;
+      password: string;
+    };
+
+    const auth = Buffer.from(`${body.username}:${body.password}`).toString(
+      'base64'
+    );
+
+    const response = await fetch(`${body.domain}${path}`, {
+      headers: {
+        Authorization: `Basic ${auth}`,
+        'User-Agent': WORDPRESS_USER_AGENT,
+      },
+      // @ts-ignore - undici-only option; blocks SSRF to internal IPs
+      dispatcher: getSsrfSafeDispatcher(),
+    });
+
+    return response.json();
   }
 
   @Tool({
@@ -294,15 +304,7 @@ export class WordpressProvider
     postDetails: PostDetails<WordpressDto>[],
     integration: Integration
   ): Promise<PostResponse[]> {
-    const body = JSON.parse(Buffer.from(accessToken, 'base64').toString()) as {
-      domain: string;
-      username: string;
-      password: string;
-    };
-
-    const auth = Buffer.from(`${body.username}:${body.password}`).toString(
-      'base64'
-    );
+    const { domain, auth } = this.decodeToken(accessToken);
 
     let mediaId = '';
     if (postDetails?.[0]?.settings?.main_image?.path) {
@@ -316,7 +318,7 @@ export class WordpressProvider
       ).then((r) => r.blob());
 
       const mediaResponse = await (
-        await this.fetch(`${body.domain}/wp-json/wp/v2/media`, {
+        await this.fetch(`${domain}/wp-json/wp/v2/media`, {
           method: 'POST',
           headers: {
             Authorization: `Basic ${auth}`,
@@ -324,7 +326,6 @@ export class WordpressProvider
               .split('/')
               .pop()}"`,
             'Content-Type': blob.type,
-            'User-Agent': WORDPRESS_USER_AGENT,
           },
           body: blob,
         })
@@ -333,21 +334,18 @@ export class WordpressProvider
       mediaId = mediaResponse.id;
     }
 
-    const categories = (postDetails?.[0]?.settings?.categories || [])
-      .map((category) => Number(category))
-      .filter((category) => !isNaN(category));
-    const tags = (postDetails?.[0]?.settings?.tags || [])
-      .map((tag) => Number(tag))
-      .filter((tag) => !isNaN(tag));
+    const categories = this.normalizeTermIds(
+      postDetails?.[0]?.settings?.categories
+    );
+    const tags = this.normalizeTermIds(postDetails?.[0]?.settings?.tags);
 
     const submit = await (
       await this.fetch(
-        `${body.domain}/wp-json/wp/v2/${postDetails?.[0]?.settings?.type}`,
+        `${domain}/wp-json/wp/v2/${postDetails?.[0]?.settings?.type}`,
         {
           headers: {
             Authorization: `Basic ${auth}`,
             'Content-Type': 'application/json',
-            'User-Agent': WORDPRESS_USER_AGENT,
           },
           method: 'POST',
           body: JSON.stringify({
@@ -375,5 +373,9 @@ export class WordpressProvider
         releaseURL: submit.link,
       },
     ];
+  }
+
+  inlineImages() {
+    return true;
   }
 }

@@ -1,48 +1,43 @@
-import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
-  PendingCheckResponse,
+  ClientInformation,
   PostDetails,
   PostResponse,
   SocialProvider,
+  ReportMetricsMap,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import dayjs from 'dayjs';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import {
   BadBody,
-  Disconnect,
   RefreshToken,
   SocialAbstract,
+  Disconnect,
   ValidityMedia,
   rangeReadFailure,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { TikTokDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/tiktok.dto';
 import { timer } from '@gitroom/helpers/utils/timer';
+import { Integration } from '@prisma/client';
+import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { createReadStream } from 'fs';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
-import { Integration } from '@prisma/client';
-import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 
 @Rules(
-  [
-    'TikTok can have one video or one picture or multiple pictures, it cannot be without an attachment.',
-    'content_posting_method=DIRECT_POST publishes the post to the account. content_posting_method=UPLOAD does NOT publish: it only sends the media to the user inbox of the TikTok app, where the user must manually complete and publish it within 24 hours or it is discarded. Use DIRECT_POST unless the user explicitly asks to review or edit the post inside the TikTok app first.',
-    'With content_posting_method=UPLOAD, TikTok ignores every setting except the title / post content. Never tell the user that video_made_with_ai, privacy_level, duet, stitch, comment, autoAddMusic, brand_content_toggle or brand_organic_toggle will be applied in UPLOAD mode - they are silently discarded. If the user asks for any of those settings, tell them it requires DIRECT_POST.',
-    'video_made_with_ai, duet and stitch apply to video posts only. TikTok has no equivalent field for photo posts, so those settings are discarded when the attachment is a picture.',
-  ].join(' ')
+  'TikTok can have one video or one picture or multiple pictures, it cannot be without an attachment'
 )
 export class TiktokProvider extends SocialAbstract implements SocialProvider {
   identifier = 'tiktok';
-  reportMetrics: ReportMetricsMap = {
-    followers: ['Followers'],
-    reach: ['Views'],
-    engagement: ['Recent Likes', 'Recent Comments', 'Recent Shares'],
-  };
+
   name = 'Tiktok';
+
   isBetweenSteps = false;
+
   convertToJPEG = true;
+
   scopes = [
     'video.list',
     'user.info.basic',
@@ -51,53 +46,20 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     'user.info.profile',
     'user.info.stats',
   ];
-  override maxConcurrentJob = 10000;
+
+  override maxConcurrentJob = 300;
+
   dto = TikTokDto;
+
   editor = 'normal' as const;
+
   maxLength() {
     return 2000;
   }
 
-  override async checkValidity(
-    items: Array<ValidityMedia[]>
-  ): Promise<string | true> {
-    const [firstItems] = items ?? [];
-    if ((firstItems?.length ?? 0) === 0) {
-      return 'No video / images selected';
-    }
-    if (
-      (firstItems?.length ?? 0) > 1 &&
-      firstItems?.some((p) => (p?.path?.indexOf?.('mp4') ?? -1) > -1)
-    ) {
-      return 'Only pictures are supported when selecting multiple items';
-    } else if (
-      firstItems?.length !== 1 &&
-      (firstItems?.[0]?.path?.indexOf?.('mp4') ?? -1) > -1
-    ) {
-      return 'You need one media';
-    }
-
-    // TikTok fails the whole photo post when a single image is oversized, and
-    // the status only says `picture_size_check_failed` without naming it.
-    if (firstItems?.every((p) => (p?.path?.indexOf?.('mp4') ?? -1) === -1)) {
-      const dimensions = await Promise.all(
-        firstItems?.map((p) => this.getImageDimensions(p?.path)) ?? []
-      );
-      const tooBig = dimensions.findIndex(
-        (p) => Math.min(p?.width ?? 0, p?.height ?? 0) > 1080
-      );
-      if (tooBig > -1) {
-        return `Image ${tooBig + 1} is ${dimensions[tooBig]?.width}x${
-          dimensions[tooBig]?.height
-        }, TikTok allows a maximum of 1080px on the shorter side`;
-      }
-    }
-    return true;
-  }
-
   override handleErrors(body: string):
     | {
-        type: 'refresh-token' | 'bad-body' | 'disconnect';
+        type: 'refresh-token' | 'bad-body';
         value: string;
       }
     | undefined {
@@ -203,7 +165,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       return {
         type: 'bad-body' as const,
         value:
-          'TikTok limits pending posts to 5 within any 24-hour period. Please check your TikTok inbox in the TikTok mobile app and try again after 24 hours.',
+          'TikTok limit the maximum of pending posts to 5, TikTok limits you for now, please check your TikTok inbox at your TikTok mobile app and try again later',
       };
     }
 
@@ -222,14 +184,10 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       };
     }
 
-    // TikTok limits how many users of this app can post per day: refreshing
-    // the token cannot help, the channel must be re-connected (and can be
-    // migrated to another app via MIGRATE_PROVIDERS).
     if (body.indexOf('reached_active_user_cap') > -1) {
       return {
-        type: 'disconnect' as const,
-        value:
-          'TikTok daily user limit reached, please re-connect your account',
+        type: 'bad-body' as const,
+        value: 'Daily active user quota reached, please try again later',
       };
     }
 
@@ -245,8 +203,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     if (body.indexOf('url_ownership_unverified') > -1) {
       return {
         type: 'bad-body' as const,
-        value:
-          'You have to upload the picture/video to Postiz when sending a URL',
+        value: 'URL ownership not verified, please verify domain ownership',
       };
     }
 
@@ -284,8 +241,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     if (body.indexOf('picture_size_check_failed') > -1) {
       return {
         type: 'bad-body' as const,
-        value:
-          'Media size not supported by TikTok: images up to 1080px on the shorter side, videos at least 360px on both sides',
+        value: 'Video must be at least 720p, Picture must no exceed 1080p',
       };
     }
 
@@ -345,13 +301,15 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async generateAuthUrl() {
-    const state = makeSecureId(16);
+  async generateAuthUrl(clientInformation?: ClientInformation) {
+    const state = Math.random().toString(36).substring(2);
+    const clientKey =
+      clientInformation?.client_id || process.env.TIKTOK_CLIENT_ID;
 
     return {
       url:
         'https://www.tiktok.com/v2/auth/authorize/' +
-        `?client_key=${process.env.TIKTOK_CLIENT_ID}` +
+        `?client_key=${clientKey}` +
         `&redirect_uri=${encodeURIComponent(
           `${
             process?.env?.FRONTEND_URL?.indexOf('https') === -1
@@ -367,14 +325,21 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async authenticate(params: {
-    code: string;
-    codeVerifier: string;
-    refresh?: string;
-  }) {
+  async authenticate(
+    params: {
+      code: string;
+      codeVerifier: string;
+      refresh?: string;
+    },
+    clientInformation?: ClientInformation
+  ) {
+    const clientKey =
+      clientInformation?.client_id || process.env.TIKTOK_CLIENT_ID!;
+    const clientSecret =
+      clientInformation?.client_secret || process.env.TIKTOK_CLIENT_SECRET!;
     const value = {
-      client_key: process.env.TIKTOK_CLIENT_ID!,
-      client_secret: process.env.TIKTOK_CLIENT_SECRET!,
+      client_key: clientKey,
+      client_secret: clientSecret,
       code: params.code,
       grant_type: 'authorization_code',
       code_verifier: params.codeVerifier,
@@ -445,19 +410,14 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  // Single status check for a publish_id, no loops and no timers: `post` returns
-  // a `pending` PostResponse right after the upload, and the post workflow polls
-  // this method with durable timers, so a stuck/retried check can never re-run
-  // the publish and duplicate the post.
-  override async checkPostStatus(
-    accessToken: string,
-    pendingData: { publishId: string },
-    integration: Integration
-  ): Promise<PendingCheckResponse> {
-    let post: any;
-    let publicPostId: string | undefined;
-    try {
-      const raw = await (
+  private async uploadedVideoSuccess(
+    id: string,
+    publishId: string,
+    accessToken: string
+  ): Promise<{ url: string; id: string }> {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const post = await (
         await this.fetch(
           'https://open.tiktokapis.com/v2/post/publish/status/fetch/',
           {
@@ -467,90 +427,48 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
               Authorization: `Bearer ${accessToken}`,
             },
             body: JSON.stringify({
-              publish_id: pendingData.publishId,
+              publish_id: publishId,
             }),
           },
           '',
           0,
           true
         )
-      ).text();
-      ({ post, publicPostId } = this.parsePublishStatus(raw));
-    } catch (err) {
-      if (err instanceof RefreshToken || err instanceof Disconnect) {
-        throw err;
+      ).json();
+
+      const { status, publicaly_available_post_id } = post.data;
+
+      if (status === 'SEND_TO_USER_INBOX') {
+        return {
+          url: 'https://www.tiktok.com/messages?lang=en',
+          id: 'missing',
+        };
       }
 
-      // Transient API error while checking the status: the post may already
-      // be live, so keep polling instead of failing it - if the API stays
-      // broken the caller exhausts its checks and warns the user properly.
-      return { status: 'pending', pendingData };
+      if (status === 'PUBLISH_COMPLETE') {
+        return {
+          url: !publicaly_available_post_id
+            ? `https://www.tiktok.com/@${id}`
+            : `https://www.tiktok.com/@${id}/video/` +
+              publicaly_available_post_id,
+          id: !publicaly_available_post_id
+            ? publishId
+            : publicaly_available_post_id?.[0],
+        };
+      }
+
+      if (status === 'FAILED') {
+        const handleError = this.handleErrors(JSON.stringify(post));
+        throw new BadBody(
+          'titok-error-upload',
+          JSON.stringify(post),
+          Buffer.from(JSON.stringify(post)),
+          handleError?.value || ''
+        );
+      }
+
+      await timer(10000);
     }
-
-    const { status } = post?.data || {};
-
-    if (status === 'SEND_TO_USER_INBOX') {
-      // the id stays 'missing' until the user publishes the draft - the
-      // publish id rides in the URL fragment so resolveReleaseId can ask later
-      return {
-        status: 'completed',
-        releaseURL: `https://www.tiktok.com/messages?lang=en#${pendingData.publishId}`,
-        postId: 'missing',
-      };
-    }
-
-    if (status === 'PUBLISH_COMPLETE') {
-      // the id only shows up once moderation approves the post - fall back to
-      // the profile URL and keep the publish_id (resolveReleaseId fixes it later)
-      return {
-        status: 'completed',
-        releaseURL: !publicPostId
-          ? `https://www.tiktok.com/@${integration.profile}`
-          : this.postUrl(integration, pendingData.publishId, publicPostId),
-        postId: !publicPostId ? pendingData.publishId : publicPostId,
-      };
-    }
-
-    if (status === 'FAILED') {
-      const handleError = this.handleErrors(JSON.stringify(post));
-      throw new BadBody(
-        'titok-error-upload',
-        JSON.stringify(post),
-        Buffer.from(JSON.stringify(post)),
-        handleError?.value || ''
-      );
-    }
-
-    return { status: 'pending', pendingData };
-  }
-
-  // photo posts (p_pub_... / p_inbox_...) live under /photo/, TikTok rejects
-  // /video/ for them
-  private postUrl(integration: Integration, publishId: string, postId: string) {
-    return `https://www.tiktok.com/@${integration.profile}/${
-      publishId.indexOf('p_') === 0 ? 'photo' : 'video'
-    }/${postId}`;
-  }
-
-  // TikTok returns publicaly_available_post_id as an int64, which JSON.parse
-  // rounds past 2^53 - pull the digits out of the raw body before parsing.
-  private parsePublishStatus(raw: string) {
-    const [, publicPostId] =
-      raw.match(/"publicaly_available_post_id"\s*:\s*\[\s*"?(\d+)/) || [];
-
-    return { post: JSON.parse(raw), publicPostId };
-  }
-
-  // UPLOAD does not publish - it only drops the media into the user's TikTok
-  // inbox - so only an explicit UPLOAD selects it. A missing value (drafts, or
-  // any caller that skipped the setting) publishes instead of silently landing
-  // in the inbox.
-  private contentPostingMethod(
-    firstPost: PostDetails<TikTokDto>
-  ): TikTokDto['content_posting_method'] {
-    return firstPost?.settings?.content_posting_method === 'UPLOAD'
-      ? 'UPLOAD'
-      : 'DIRECT_POST';
   }
 
   private postingMethod(
@@ -630,100 +548,513 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  // ---------------------------------------------------------------------------
-  // OLD PULL_FROM_URL IMPLEMENTATION (kept for when the TikTok PULL bug is fixed)
-  // ---------------------------------------------------------------------------
-  // private buildTikokSourceInfoBody(firstPost: PostDetails<TikTokDto>) {
-  //   const isPhoto = !hasExtension(firstPost?.media?.[0]?.path, 'mp4');
-  //
-  //   if (isPhoto) {
-  //     return {
-  //       post_mode:
-  //         firstPost?.settings?.content_posting_method === 'DIRECT_POST'
-  //           ? 'DIRECT_POST'
-  //           : 'MEDIA_UPLOAD',
-  //       media_type: 'PHOTO',
-  //       source_info: {
-  //         source: 'PULL_FROM_URL',
-  //         photo_cover_index: 0,
-  //         photo_images: firstPost.media?.map((p) => p.path),
-  //       },
-  //     };
-  //   }
-  //
-  //   return {
-  //     source_info: {
-  //       source: 'PULL_FROM_URL',
-  //       video_url: firstPost?.media?.[0]?.path!,
-  //       ...(firstPost?.media?.[0]?.thumbnailTimestamp!
-  //         ? {
-  //             video_cover_timestamp_ms:
-  //               firstPost?.media?.[0]?.thumbnailTimestamp!,
-  //           }
-  //         : {}),
-  //     },
-  //   };
-  // }
-  //
-  // async post(
-  //   id: string,
-  //   accessToken: string,
-  //   postDetails: PostDetails<TikTokDto>[],
-  //   integration: Integration
-  // ): Promise<PostResponse[]> {
-  //   const [firstPost] = postDetails;
-  //   const isPhoto = !hasExtension(firstPost?.media?.[0]?.path, 'mp4');
-  //
-  //   console.log({
-  //     ...this.buildTikokPostInfoBody(firstPost),
-  //     ...this.buildTikokSourceInfoBody(firstPost),
-  //   });
-  //   const {
-  //     data: { publish_id },
-  //   } = await (
-  //     await this.fetch(
-  //       `https://open.tiktokapis.com/v2/post/publish${this.postingMethod(
-  //         firstPost.settings.content_posting_method,
-  //         !hasExtension(firstPost?.media?.[0]?.path, 'mp4')
-  //       )}`,
-  //       {
-  //         method: 'POST',
-  //         headers: {
-  //           'Content-Type': 'application/json; charset=UTF-8',
-  //           Authorization: `Bearer ${accessToken}`,
-  //         },
-  //         body: JSON.stringify({
-  //           ...this.buildTikokPostInfoBody(firstPost),
-  //           ...this.buildTikokSourceInfoBody(firstPost),
-  //         }),
-  //       }
-  //     )
-  //   ).json();
-  //
-  //   const { url, id: videoId } = await this.uploadedVideoSuccess(
-  //     integration.profile!,
-  //     publish_id,
-  //     accessToken
-  //   );
-  //
-  //   return [
-  //     {
-  //       id: firstPost.id,
-  //       releaseURL: url,
-  //       postId: String(videoId),
-  //       status: 'success',
-  //     },
-  //   ];
-  // }
+  private buildTikokSourceInfoBody(
+    firstPost: PostDetails<TikTokDto>,
+    videoSize?: number
+  ) {
+    const isPhoto = !hasExtension(firstPost?.media?.[0]?.path, 'mp4');
 
-  // ---------------------------------------------------------------------------
-  // NEW FILE_UPLOAD IMPLEMENTATION (no PULL_FROM_URL for videos)
-  // ---------------------------------------------------------------------------
-  // TikTok video chunk constraints: a chunk must be between 5MB and 64MB.
-  // When the whole file fits in a single chunk (<= 64MB) we upload it in one
-  // request; otherwise we split it into 10MB chunks (the final chunk carries
-  // the remainder, which TikTok allows to exceed chunk_size).
+    // TikTok photo posts only support PULL_FROM_URL, there is no FILE_UPLOAD
+    // path for photos, so this branch keeps pulling from the URL.
+    if (isPhoto) {
+      return {
+        post_mode:
+          this.contentPostingMethod(firstPost) === 'DIRECT_POST'
+            ? 'DIRECT_POST'
+            : 'MEDIA_UPLOAD',
+        media_type: 'PHOTO',
+        source_info: {
+          source: 'PULL_FROM_URL',
+          photo_cover_index: 0,
+          photo_images: firstPost.media?.map((p) => p.path),
+        },
+      };
+    }
+
+    const { chunkSize, totalChunkCount } = this.tiktokChunkPlan(videoSize || 0);
+
+    return {
+      source_info: {
+        source: 'FILE_UPLOAD',
+        video_size: videoSize,
+        chunk_size: chunkSize,
+        total_chunk_count: totalChunkCount,
+      },
+    };
+  }
+
+  async post(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails<TikTokDto>[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const [response] = await this.postPending(
+      id,
+      accessToken,
+      postDetails,
+      integration
+    );
+
+    const started = Date.now();
+
+    for (const _ of Array(27).keys()) {
+      // ~9 minutes at 20s interval
+      const check = await this.checkPostStatus(
+        accessToken,
+        response.pendingData,
+        integration
+      );
+
+      if (check.status === 'completed') {
+        return [
+          {
+            id: response.id,
+            releaseURL: check.releaseURL,
+            postId: String(check.postId),
+            status: 'success',
+          },
+        ];
+      }
+
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method: failing here (non-retryable) is safe, timing the activity
+      // out is not - a retried activity would publish the post again.
+      if (Date.now() - started > 8 * 60 * 1000) {
+        break;
+      }
+
+      await timer(20000);
+    }
+
+    throw new BadBody(
+      'titok-error-upload',
+      JSON.stringify({}),
+      Buffer.from(JSON.stringify({})),
+      'TikTok refused to publish your post'
+    );
+  }
+
+  async analytics(
+    id: string,
+    accessToken: string,
+    date: number
+  ): Promise<AnalyticsData[]> {
+    const today = dayjs().format('YYYY-MM-DD');
+
+    try {
+      // Get user stats (follower_count, following_count, likes_count, video_count)
+      const userStatsResponse = await this.analyticsFetch(
+        'https://open.tiktokapis.com/v2/user/info/?fields=follower_count,following_count,likes_count,video_count',
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      const userStatsData = await userStatsResponse.json();
+      const userStats = userStatsData?.data?.user;
+
+      const result: AnalyticsData[] = [];
+
+      if (userStats) {
+        if (userStats.follower_count !== undefined) {
+          result.push({
+            label: 'Followers',
+            percentageChange: 0,
+            data: [{ total: String(userStats.follower_count), date: today }],
+          });
+        }
+
+        if (userStats.following_count !== undefined) {
+          result.push({
+            label: 'Following',
+            percentageChange: 0,
+            data: [{ total: String(userStats.following_count), date: today }],
+          });
+        }
+
+        if (userStats.likes_count !== undefined) {
+          result.push({
+            label: 'Total Likes',
+            percentageChange: 0,
+            data: [{ total: String(userStats.likes_count), date: today }],
+          });
+        }
+
+        if (userStats.video_count !== undefined) {
+          result.push({
+            label: 'Videos',
+            percentageChange: 0,
+            data: [{ total: String(userStats.video_count), date: today }],
+          });
+        }
+      }
+
+      // Get recent videos and aggregate their stats
+      const videoListResponse = await this.analyticsFetch(
+        'https://open.tiktokapis.com/v2/video/list/?fields=id',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ max_count: 20 }),
+        }
+      );
+
+      const videoListData = await videoListResponse.json();
+      const videos = videoListData?.data?.videos;
+
+      if (videos && videos.length > 0) {
+        const videoIds = videos.map((v: { id: string }) => v.id);
+
+        // Query video details to get engagement metrics
+        const videoQueryResponse = await this.analyticsFetch(
+          'https://open.tiktokapis.com/v2/video/query/?fields=id,like_count,comment_count,share_count,view_count',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              filters: { video_ids: videoIds },
+            }),
+          }
+        );
+
+        const videoQueryData = await videoQueryResponse.json();
+        const videoDetails = videoQueryData?.data?.videos;
+
+        if (videoDetails && videoDetails.length > 0) {
+          let totalViews = 0;
+          let totalLikes = 0;
+          let totalComments = 0;
+          let totalShares = 0;
+
+          for (const video of videoDetails) {
+            totalViews += video.view_count || 0;
+            totalLikes += video.like_count || 0;
+            totalComments += video.comment_count || 0;
+            totalShares += video.share_count || 0;
+          }
+
+          result.push({
+            label: 'Views',
+            percentageChange: 0,
+            data: [{ total: String(totalViews), date: today }],
+          });
+
+          result.push({
+            label: 'Recent Likes',
+            percentageChange: 0,
+            data: [{ total: String(totalLikes), date: today }],
+          });
+
+          result.push({
+            label: 'Recent Comments',
+            percentageChange: 0,
+            data: [{ total: String(totalComments), date: today }],
+          });
+
+          result.push({
+            label: 'Recent Shares',
+            percentageChange: 0,
+            data: [{ total: String(totalShares), date: today }],
+          });
+        }
+      }
+
+      return result;
+    } catch (err) {
+      if (err instanceof RefreshToken) {
+        throw err;
+      }
+      console.error('Error fetching TikTok analytics:', err);
+      return [];
+    }
+  }
+
+  async missing(
+    id: string,
+    accessToken: string
+  ): Promise<{ id: string; url: string }[]> {
+    try {
+      const videoListResponse = await this.fetch(
+        'https://open.tiktokapis.com/v2/video/list/?fields=id,cover_image_url,title',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ max_count: 20 }),
+        }
+      );
+
+      const videoListData = await videoListResponse.json();
+      const videos = videoListData?.data?.videos;
+
+      if (!videos || videos.length === 0) {
+        return [];
+      }
+
+      return videos.map((v: { id: string; cover_image_url: string }) => ({
+        id: String(v.id),
+        url: v.cover_image_url,
+      }));
+    } catch (err) {
+      console.error('Error fetching TikTok missing content:', err);
+      return [];
+    }
+  }
+
+  async postAnalytics(
+    integrationId: string,
+    accessToken: string,
+    postId: string,
+    fromDate: number
+  ): Promise<AnalyticsData[]> {
+    const today = dayjs().format('YYYY-MM-DD');
+
+    if (postId.indexOf('v_pub_url') > -1) {
+      const post = await (
+        await this.analyticsFetch(
+          'https://open.tiktokapis.com/v2/post/publish/status/fetch/',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json; charset=UTF-8',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              publish_id: postId,
+            }),
+          }
+        )
+      ).json();
+
+      if (!post?.data?.publicaly_available_post_id?.[0]) {
+        return [];
+      }
+
+      postId = post.data.publicaly_available_post_id[0];
+    }
+
+    try {
+      // Query video details using the video ID
+      const response = await this.analyticsFetch(
+        'https://open.tiktokapis.com/v2/video/query/?fields=id,like_count,comment_count,share_count,view_count',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            filters: {
+              video_ids: [postId],
+            },
+          }),
+        }
+      );
+
+      const data = await response.json();
+      const video = data?.data?.videos?.[0];
+
+      if (!video) {
+        return [];
+      }
+
+      const result: AnalyticsData[] = [];
+
+      if (video.view_count !== undefined) {
+        result.push({
+          label: 'Views',
+          percentageChange: 0,
+          data: [{ total: String(video.view_count), date: today }],
+        });
+      }
+
+      if (video.like_count !== undefined) {
+        result.push({
+          label: 'Likes',
+          percentageChange: 0,
+          data: [{ total: String(video.like_count), date: today }],
+        });
+      }
+
+      if (video.comment_count !== undefined) {
+        result.push({
+          label: 'Comments',
+          percentageChange: 0,
+          data: [{ total: String(video.comment_count), date: today }],
+        });
+      }
+
+      if (video.share_count !== undefined) {
+        result.push({
+          label: 'Shares',
+          percentageChange: 0,
+          data: [{ total: String(video.share_count), date: today }],
+        });
+      }
+
+      return result;
+    } catch (err) {
+      if (err instanceof RefreshToken) {
+        throw err;
+      }
+      console.error('Error fetching TikTok post analytics:', err);
+      return [];
+    }
+  }
+
+  reportMetrics: ReportMetricsMap = {
+    followers: ['Followers'],
+    reach: ['Views'],
+    engagement: ['Recent Likes', 'Recent Comments', 'Recent Shares'],
+  };
+
+  override async checkValidity(
+    items: Array<ValidityMedia[]>
+  ): Promise<string | true> {
+    const [firstItems] = items ?? [];
+    if ((firstItems?.length ?? 0) === 0) {
+      return 'No video / images selected';
+    }
+    if (
+      (firstItems?.length ?? 0) > 1 &&
+      firstItems?.some((p) => (p?.path?.indexOf?.('mp4') ?? -1) > -1)
+    ) {
+      return 'Only pictures are supported when selecting multiple items';
+    } else if (
+      firstItems?.length !== 1 &&
+      (firstItems?.[0]?.path?.indexOf?.('mp4') ?? -1) > -1
+    ) {
+      return 'You need one media';
+    }
+
+    // TikTok fails the whole photo post when a single image is oversized, and
+    // the status only says `picture_size_check_failed` without naming it.
+    if (firstItems?.every((p) => (p?.path?.indexOf?.('mp4') ?? -1) === -1)) {
+      const dimensions = await Promise.all(
+        firstItems?.map((p) => this.getImageDimensions(p?.path)) ?? []
+      );
+      const tooBig = dimensions.findIndex(
+        (p) => Math.min(p?.width ?? 0, p?.height ?? 0) > 1080
+      );
+      if (tooBig > -1) {
+        return `Image ${tooBig + 1} is ${dimensions[tooBig]?.width}x${
+          dimensions[tooBig]?.height
+        }, TikTok allows a maximum of 1080px on the shorter side`;
+      }
+    }
+    return true;
+  }
+
+  override async checkPostStatus(
+    accessToken: string,
+    pendingData: { publishId: string },
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    let post: any;
+    let publicPostId: string | undefined;
+    try {
+      const raw = await (
+        await this.fetch(
+          'https://open.tiktokapis.com/v2/post/publish/status/fetch/',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json; charset=UTF-8',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              publish_id: pendingData.publishId,
+            }),
+          },
+          '',
+          0,
+          true
+        )
+      ).text();
+      ({ post, publicPostId } = this.parsePublishStatus(raw));
+    } catch (err) {
+      if (err instanceof RefreshToken || err instanceof Disconnect) {
+        throw err;
+      }
+
+      // Transient API error while checking the status: the post may already
+      // be live, so keep polling instead of failing it - if the API stays
+      // broken the caller exhausts its checks and warns the user properly.
+      return { status: 'pending', pendingData };
+    }
+
+    const { status } = post?.data || {};
+
+    if (status === 'SEND_TO_USER_INBOX') {
+      // the id stays 'missing' until the user publishes the draft - the
+      // publish id rides in the URL fragment so resolveReleaseId can ask later
+      return {
+        status: 'completed',
+        releaseURL: `https://www.tiktok.com/messages?lang=en#${pendingData.publishId}`,
+        postId: 'missing',
+      };
+    }
+
+    if (status === 'PUBLISH_COMPLETE') {
+      // the id only shows up once moderation approves the post - fall back to
+      // the profile URL and keep the publish_id (resolveReleaseId fixes it later)
+      return {
+        status: 'completed',
+        releaseURL: !publicPostId
+          ? `https://www.tiktok.com/@${integration.profile}`
+          : this.postUrl(integration, pendingData.publishId, publicPostId),
+        postId: !publicPostId ? pendingData.publishId : publicPostId,
+      };
+    }
+
+    if (status === 'FAILED') {
+      const handleError = this.handleErrors(JSON.stringify(post));
+      throw new BadBody(
+        'titok-error-upload',
+        JSON.stringify(post),
+        Buffer.from(JSON.stringify(post)),
+        handleError?.value || ''
+      );
+    }
+
+    return { status: 'pending', pendingData };
+  }
+
+  private postUrl(integration: Integration, publishId: string, postId: string) {
+    return `https://www.tiktok.com/@${integration.profile}/${
+      publishId.indexOf('p_') === 0 ? 'photo' : 'video'
+    }/${postId}`;
+  }
+
+  private parsePublishStatus(raw: string) {
+    const [, publicPostId] =
+      raw.match(/"publicaly_available_post_id"\s*:\s*\[\s*"?(\d+)/) || [];
+
+    return { post: JSON.parse(raw), publicPostId };
+  }
+
+  private contentPostingMethod(
+    firstPost: PostDetails<TikTokDto>
+  ): TikTokDto['content_posting_method'] {
+    return firstPost?.settings?.content_posting_method === 'UPLOAD'
+      ? 'UPLOAD'
+      : 'DIRECT_POST';
+  }
+
   private static readonly TIKTOK_MAX_SINGLE_CHUNK = 64 * 1024 * 1024;
+
   private static readonly TIKTOK_CHUNK_SIZE = 10 * 1024 * 1024;
 
   private tiktokChunkPlan(videoSize: number) {
@@ -738,9 +1069,6 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  // Returns a streaming body for the [start, end] byte range of the media so we
-  // never hold the whole file in memory: a ranged GET for remote URLs, a ranged
-  // read stream for local files.
   private async tiktokChunkStream(
     path: string,
     start: number,
@@ -789,9 +1117,6 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     return createReadStream(path, { start, end });
   }
 
-  // Streams the video bytes to the upload_url returned by the init call.
-  // We use the global fetch (not this.fetch) because chunked uploads answer
-  // with 206 (Partial Content), which this.fetch would treat as an error.
   private async uploadTikTokVideoBytes(
     uploadUrl: string,
     path: string,
@@ -835,41 +1160,6 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
         );
       }
     }
-  }
-
-  private buildTikokSourceInfoBody(
-    firstPost: PostDetails<TikTokDto>,
-    videoSize?: number
-  ) {
-    const isPhoto = !hasExtension(firstPost?.media?.[0]?.path, 'mp4');
-
-    // TikTok photo posts only support PULL_FROM_URL, there is no FILE_UPLOAD
-    // path for photos, so this branch keeps pulling from the URL.
-    if (isPhoto) {
-      return {
-        post_mode:
-          this.contentPostingMethod(firstPost) === 'DIRECT_POST'
-            ? 'DIRECT_POST'
-            : 'MEDIA_UPLOAD',
-        media_type: 'PHOTO',
-        source_info: {
-          source: 'PULL_FROM_URL',
-          photo_cover_index: 0,
-          photo_images: firstPost.media?.map((p) => p.path),
-        },
-      };
-    }
-
-    const { chunkSize, totalChunkCount } = this.tiktokChunkPlan(videoSize || 0);
-
-    return {
-      source_info: {
-        source: 'FILE_UPLOAD',
-        video_size: videoSize,
-        chunk_size: chunkSize,
-        total_chunk_count: totalChunkCount,
-      },
-    };
   }
 
   async postPending(
@@ -947,239 +1237,6 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     ];
   }
 
-  // Old blocking behavior, kept for workflow versions before v1.0.6 that still
-  // run (scheduled posts sleep inside them until publish time) and don't know
-  // how to resolve a `pending` response - they keep polling inside the
-  // activity exactly like before.
-  async post(
-    id: string,
-    accessToken: string,
-    postDetails: PostDetails<TikTokDto>[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    const [response] = await this.postPending(
-      id,
-      accessToken,
-      postDetails,
-      integration
-    );
-
-    const started = Date.now();
-
-    for (const _ of Array(27).keys()) {
-      // ~9 minutes at 20s interval
-      const check = await this.checkPostStatus(
-        accessToken,
-        response.pendingData,
-        integration
-      );
-
-      if (check.status === 'completed') {
-        return [
-          {
-            id: response.id,
-            releaseURL: check.releaseURL,
-            postId: String(check.postId),
-            status: 'success',
-          },
-        ];
-      }
-
-      // Cap below the 10-minute activity timeout of the old workflows using
-      // this method: failing here (non-retryable) is safe, timing the activity
-      // out is not - a retried activity would publish the post again.
-      if (Date.now() - started > 8 * 60 * 1000) {
-        break;
-      }
-
-      await timer(20000);
-    }
-
-    throw new BadBody(
-      'titok-error-upload',
-      JSON.stringify({}),
-      Buffer.from(JSON.stringify({})),
-      'TikTok refused to publish your post'
-    );
-  }
-
-  async analytics(
-    id: string,
-    accessToken: string,
-    date: number
-  ): Promise<AnalyticsData[]> {
-    const today = dayjs().format('YYYY-MM-DD');
-
-    try {
-      // Get user stats (follower_count, following_count, likes_count, video_count)
-      const userStatsResponse = await fetch(
-        'https://open.tiktokapis.com/v2/user/info/?fields=follower_count,following_count,likes_count,video_count',
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
-
-      const userStatsData = await userStatsResponse.json();
-      const userStats = userStatsData?.data?.user;
-
-      const result: AnalyticsData[] = [];
-
-      if (userStats) {
-        if (userStats.follower_count !== undefined) {
-          result.push({
-            label: 'Followers',
-            percentageChange: 0,
-            data: [{ total: String(userStats.follower_count), date: today }],
-          });
-        }
-
-        if (userStats.following_count !== undefined) {
-          result.push({
-            label: 'Following',
-            percentageChange: 0,
-            data: [{ total: String(userStats.following_count), date: today }],
-          });
-        }
-
-        if (userStats.likes_count !== undefined) {
-          result.push({
-            label: 'Total Likes',
-            percentageChange: 0,
-            data: [{ total: String(userStats.likes_count), date: today }],
-          });
-        }
-
-        if (userStats.video_count !== undefined) {
-          result.push({
-            label: 'Videos',
-            percentageChange: 0,
-            data: [{ total: String(userStats.video_count), date: today }],
-          });
-        }
-      }
-
-      // Get recent videos and aggregate their stats
-      const videoListResponse = await fetch(
-        'https://open.tiktokapis.com/v2/video/list/?fields=id',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ max_count: 20 }),
-        }
-      );
-
-      const videoListData = await videoListResponse.json();
-      const videos = videoListData?.data?.videos;
-
-      if (videos && videos.length > 0) {
-        const videoIds = videos.map((v: { id: string }) => v.id);
-
-        // Query video details to get engagement metrics
-        const videoQueryResponse = await fetch(
-          'https://open.tiktokapis.com/v2/video/query/?fields=id,like_count,comment_count,share_count,view_count',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify({
-              filters: { video_ids: videoIds },
-            }),
-          }
-        );
-
-        const videoQueryData = await videoQueryResponse.json();
-        const videoDetails = videoQueryData?.data?.videos;
-
-        if (videoDetails && videoDetails.length > 0) {
-          let totalViews = 0;
-          let totalLikes = 0;
-          let totalComments = 0;
-          let totalShares = 0;
-
-          for (const video of videoDetails) {
-            totalViews += video.view_count || 0;
-            totalLikes += video.like_count || 0;
-            totalComments += video.comment_count || 0;
-            totalShares += video.share_count || 0;
-          }
-
-          result.push({
-            label: 'Views',
-            percentageChange: 0,
-            data: [{ total: String(totalViews), date: today }],
-          });
-
-          result.push({
-            label: 'Recent Likes',
-            percentageChange: 0,
-            data: [{ total: String(totalLikes), date: today }],
-          });
-
-          result.push({
-            label: 'Recent Comments',
-            percentageChange: 0,
-            data: [{ total: String(totalComments), date: today }],
-          });
-
-          result.push({
-            label: 'Recent Shares',
-            percentageChange: 0,
-            data: [{ total: String(totalShares), date: today }],
-          });
-        }
-      }
-
-      return result;
-    } catch (err) {
-      console.error('Error fetching TikTok analytics:', err);
-      return [];
-    }
-  }
-
-  async missing(
-    id: string,
-    accessToken: string
-  ): Promise<{ id: string; url: string }[]> {
-    try {
-      const videoListResponse = await this.fetch(
-        'https://open.tiktokapis.com/v2/video/list/?fields=id,cover_image_url,title',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ max_count: 20 }),
-        }
-      );
-
-      const videoListData = await videoListResponse.json();
-      const videos = videoListData?.data?.videos;
-
-      if (!videos || videos.length === 0) {
-        return [];
-      }
-
-      return videos.map((v: { id: string; cover_image_url: string }) => ({
-        id: String(v.id),
-        url: v.cover_image_url,
-      }));
-    } catch (err) {
-      console.error('Error fetching TikTok missing content:', err);
-      return [];
-    }
-  }
-
-  // Posts published before moderation finished keep their publish_id
-  // (v_pub_file~... / p_pub_url~...) as releaseId - resolve it to the post id
   async resolveReleaseId(
     accessToken: string,
     releaseId: string,
@@ -1260,79 +1317,5 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     return data?.data?.videos?.[0]?.share_url?.split('?')[0] as
       | string
       | undefined;
-  }
-
-  async postAnalytics(
-    integrationId: string,
-    accessToken: string,
-    postId: string,
-    fromDate: number
-  ): Promise<AnalyticsData[]> {
-    const today = dayjs().format('YYYY-MM-DD');
-
-    try {
-      // Query video details using the video ID
-      const response = await fetch(
-        'https://open.tiktokapis.com/v2/video/query/?fields=id,like_count,comment_count,share_count,view_count',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({
-            filters: {
-              video_ids: [postId],
-            },
-          }),
-        }
-      );
-
-      const data = await response.json();
-      const video = data?.data?.videos?.[0];
-
-      if (!video) {
-        return [];
-      }
-
-      const result: AnalyticsData[] = [];
-
-      if (video.view_count !== undefined) {
-        result.push({
-          label: 'Views',
-          percentageChange: 0,
-          data: [{ total: String(video.view_count), date: today }],
-        });
-      }
-
-      if (video.like_count !== undefined) {
-        result.push({
-          label: 'Likes',
-          percentageChange: 0,
-          data: [{ total: String(video.like_count), date: today }],
-        });
-      }
-
-      if (video.comment_count !== undefined) {
-        result.push({
-          label: 'Comments',
-          percentageChange: 0,
-          data: [{ total: String(video.comment_count), date: today }],
-        });
-      }
-
-      if (video.share_count !== undefined) {
-        result.push({
-          label: 'Shares',
-          percentageChange: 0,
-          data: [{ total: String(video.share_count), date: today }],
-        });
-      }
-
-      return result;
-    } catch (err) {
-      console.error('Error fetching TikTok post analytics:', err);
-      return [];
-    }
   }
 }

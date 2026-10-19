@@ -8,6 +8,7 @@ Runtime.install({ shutdownSignals: [] });
 process.env.TZ = 'UTC';
 
 import cookieParser from 'cookie-parser';
+import { PrismaClient } from '@prisma/client';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -28,6 +29,7 @@ async function start() {
         'Authorization',
         'auth',
         'showorg',
+        'showprofile',
         'impersonate',
         'x-postiz-org',
         'x-postiz-include-deleted',
@@ -65,7 +67,9 @@ async function start() {
     })
   );
 
-  app.use(['/copilot/{*splat}', '/posts'], (req: any, res: any, next: any) => {
+  app.getHttpAdapter().getInstance().set('query parser', 'extended');
+
+  app.use(['/copilot', '/posts'], (req: any, res: any, next: any) => {
     json({ limit: '50mb' })(req, res, next);
   });
 
@@ -76,6 +80,7 @@ async function start() {
   app.useGlobalFilters(new HttpExceptionFilter());
 
   loadSwagger(app);
+  await migrateOrphanRecordsToDefaultProfile();
 
   const port = process.env.PORT || 3000;
 
@@ -90,6 +95,52 @@ async function start() {
     Logger.error(`Backend failed to start on port ${port}`, e);
     // exit so pm2 restarts it, otherwise it stays "online" without a port
     process.exit(1);
+  }
+}
+
+async function migrateOrphanRecordsToDefaultProfile() {
+  const prisma = new PrismaClient();
+  try {
+    // Find all organizations that have profiles
+    const orgsWithProfiles = await prisma.profile.findMany({
+      where: { isDefault: true },
+      select: { id: true, organizationId: true },
+    });
+
+    if (!orgsWithProfiles.length) {
+      return;
+    }
+
+    for (const defaultProfile of orgsWithProfiles) {
+      // Assign orphan posts to default profile
+      const postsUpdated = await prisma.post.updateMany({
+        where: {
+          organizationId: defaultProfile.organizationId,
+          profileId: null,
+        },
+        data: { profileId: defaultProfile.id },
+      });
+
+      // Assign orphan media to default profile
+      const mediaUpdated = await prisma.media.updateMany({
+        where: {
+          organizationId: defaultProfile.organizationId,
+          profileId: null,
+        },
+        data: { profileId: defaultProfile.id },
+      });
+
+      if (postsUpdated.count > 0 || mediaUpdated.count > 0) {
+        Logger.log(
+          `Migrated ${postsUpdated.count} posts and ${mediaUpdated.count} media to default profile for org ${defaultProfile.organizationId}`,
+          'ProfileMigration'
+        );
+      }
+    }
+  } catch (err) {
+    Logger.warn('Profile migration skipped (non-critical): ' + (err as Error).message, 'ProfileMigration');
+  } finally {
+    await prisma.$disconnect();
   }
 }
 

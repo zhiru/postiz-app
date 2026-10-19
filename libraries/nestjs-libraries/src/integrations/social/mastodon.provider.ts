@@ -1,29 +1,28 @@
 import {
   AuthTokenDetails,
-  PendingCheckResponse,
   PostDetails,
   PostResponse,
   SocialProvider,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import {
+  SocialAbstract,
   BadBody,
   RefreshToken,
-  SocialAbstract,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
-import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
-import { timer } from '@gitroom/helpers/utils/timer';
+import {
+  ssrfSafeFetch,
+  getSsrfSafeDispatcher,
+} from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import dayjs from 'dayjs';
 import { Integration } from '@prisma/client';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { timer } from '@gitroom/helpers/utils/timer';
 import { number, string } from 'yup';
 import FormDataUpload from 'form-data';
 import { PassThrough, Readable } from 'stream';
 
-// Travels through the workflow history between postPending, checkPostStatus
-// and finalizePost - keep it small JSON (the instance url, media ids and the
-// status content). The url makes checkPostStatus / finalizePost work the same
-// for the default instance and custom instances.
 type MastodonPendingData = {
   url: string;
   message: string;
@@ -32,46 +31,20 @@ type MastodonPendingData = {
 };
 
 export class MastodonProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 10; // Mastodon limits are per user, not per app
+  override maxConcurrentJob = 5;
+
   identifier = 'mastodon';
+
   name = 'Mastodon';
+
   isBetweenSteps = false;
+
   scopes = ['write:statuses', 'profile', 'write:media'];
+
   editor = 'normal' as const;
+
   maxLength() {
     return 500;
-  }
-
-  override handleErrors(
-    body: string,
-    status: number
-  ):
-    | { type: 'refresh-token' | 'bad-body' | 'retry'; value: string }
-    | undefined {
-    if (body.includes('Your login is currently disabled')) {
-      return {
-        type: 'refresh-token',
-        value: 'Your login is currently disabled',
-      };
-    }
-
-    if (body.includes('not finished processing')) {
-      return {
-        type: 'bad-body',
-        value:
-          'The media was still processing when the post was published, please try again',
-      };
-    }
-
-    if (body.includes('could not be found')) {
-      return {
-        type: 'bad-body',
-        value:
-          'The uploaded media expired before the post was published, please post again',
-      };
-    }
-
-    return undefined;
   }
 
   async refreshToken(refreshToken: string): Promise<AuthTokenDetails> {
@@ -85,6 +58,7 @@ export class MastodonProvider extends SocialAbstract implements SocialProvider {
       username: '',
     };
   }
+
   protected generateUrlDynamic(
     customUrl: string,
     state: string,
@@ -240,6 +214,193 @@ export class MastodonProvider extends SocialAbstract implements SocialProvider {
     return media.id;
   }
 
+  async dynamicPost(
+    id: string,
+    accessToken: string,
+    url: string,
+    postDetails: PostDetails[]
+  ): Promise<PostResponse[]> {
+    const [response] = await this.dynamicPostPending(
+      id,
+      accessToken,
+      url,
+      postDetails
+    );
+
+    let pendingData = response.pendingData;
+    const started = Date.now();
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // {} as Integration is safe here: checkPostStatus and finalizePost read
+      // everything from pendingData (including the instance url) - keep it
+      // that way if either method ever grows an integration dependency.
+      const check = await this.checkPostStatus(
+        accessToken,
+        pendingData,
+        {} as Integration
+      );
+
+      if (check.status === 'ready') {
+        const finalize = await this.finalizePost(
+          accessToken,
+          check.pendingData,
+          {} as Integration
+        );
+
+        if (finalize.status === 'completed') {
+          return [
+            {
+              id: response.id,
+              postId: finalize.postId,
+              releaseURL: finalize.releaseURL,
+              status: 'completed',
+            },
+          ];
+        }
+
+        pendingData = finalize.pendingData;
+      } else if (check.status === 'completed') {
+        return [
+          {
+            id: response.id,
+            postId: check.postId,
+            releaseURL: check.releaseURL,
+            status: 'completed',
+          },
+        ];
+      } else {
+        pendingData = check.pendingData;
+      }
+
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method: failing here is safe (the status is only created once the
+      // media is ready), timing the activity out is not - a retried activity
+      // would upload and publish again.
+      if (Date.now() - started > 8 * 60 * 1000) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          '{}',
+          'The media took too long to process, please try again'
+        );
+      }
+
+      await timer(20000);
+    }
+  }
+
+  async dynamicComment(
+    id: string,
+    postId: string,
+    lastCommentId: string | undefined,
+    accessToken: string,
+    url: string,
+    postDetails: PostDetails[]
+  ): Promise<PostResponse[]> {
+    const [commentPost] = postDetails;
+    const replyToId = lastCommentId || postId;
+
+    const uploadFiles = await Promise.all(
+      commentPost?.media?.map((media) =>
+        this.uploadFile(url, media.path, accessToken, media.alt)
+      ) || []
+    );
+
+    const form = new FormData();
+    form.append('status', commentPost.message);
+    form.append('visibility', 'public');
+    form.append('in_reply_to_id', replyToId);
+    if (uploadFiles.length) {
+      for (const file of uploadFiles) {
+        form.append('media_ids[]', file);
+      }
+    }
+
+    const post = await (
+      await this.fetch(`${url}/api/v1/statuses`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: form,
+      })
+    ).json();
+
+    return [
+      {
+        id: commentPost.id,
+        postId: post.id,
+        releaseURL: `${url}/statuses/${post.id}`,
+        status: 'completed',
+      },
+    ];
+  }
+
+  async post(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    return this.dynamicPost(
+      id,
+      accessToken,
+      process.env.MASTODON_URL || 'https://mastodon.social',
+      postDetails
+    );
+  }
+
+  async comment(
+    id: string,
+    postId: string,
+    lastCommentId: string | undefined,
+    accessToken: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    return this.dynamicComment(
+      id,
+      postId,
+      lastCommentId,
+      accessToken,
+      process.env.MASTODON_URL || 'https://mastodon.social',
+      postDetails
+    );
+  }
+
+  override handleErrors(
+    body: string,
+    status: number
+  ):
+    | { type: 'refresh-token' | 'bad-body' | 'retry'; value: string }
+    | undefined {
+    if (body.includes('Your login is currently disabled')) {
+      return {
+        type: 'refresh-token',
+        value: 'Your login is currently disabled',
+      };
+    }
+
+    if (body.includes('not finished processing')) {
+      return {
+        type: 'bad-body',
+        value:
+          'The media was still processing when the post was published, please try again',
+      };
+    }
+
+    if (body.includes('could not be found')) {
+      return {
+        type: 'bad-body',
+        value:
+          'The uploaded media expired before the post was published, please post again',
+      };
+    }
+
+    return undefined;
+  }
+
   protected async dynamicPostPending(
     id: string,
     accessToken: string,
@@ -392,146 +553,6 @@ export class MastodonProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  // Old blocking behavior, kept for workflow versions before v1.0.6 that still
-  // run and don't know how to resolve a `pending` response - they wait for the
-  // media processing and create the status inside the activity like before.
-  async dynamicPost(
-    id: string,
-    accessToken: string,
-    url: string,
-    postDetails: PostDetails[]
-  ): Promise<PostResponse[]> {
-    const [response] = await this.dynamicPostPending(
-      id,
-      accessToken,
-      url,
-      postDetails
-    );
-
-    let pendingData = response.pendingData;
-    const started = Date.now();
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      // {} as Integration is safe here: checkPostStatus and finalizePost read
-      // everything from pendingData (including the instance url) - keep it
-      // that way if either method ever grows an integration dependency.
-      const check = await this.checkPostStatus(
-        accessToken,
-        pendingData,
-        {} as Integration
-      );
-
-      if (check.status === 'ready') {
-        const finalize = await this.finalizePost(
-          accessToken,
-          check.pendingData,
-          {} as Integration
-        );
-
-        if (finalize.status === 'completed') {
-          return [
-            {
-              id: response.id,
-              postId: finalize.postId,
-              releaseURL: finalize.releaseURL,
-              status: 'completed',
-            },
-          ];
-        }
-
-        pendingData = finalize.pendingData;
-      } else if (check.status === 'completed') {
-        return [
-          {
-            id: response.id,
-            postId: check.postId,
-            releaseURL: check.releaseURL,
-            status: 'completed',
-          },
-        ];
-      } else {
-        pendingData = check.pendingData;
-      }
-
-      // Cap below the 10-minute activity timeout of the old workflows using
-      // this method: failing here is safe (the status is only created once the
-      // media is ready), timing the activity out is not - a retried activity
-      // would upload and publish again.
-      if (Date.now() - started > 8 * 60 * 1000) {
-        throw new BadBody(
-          this.identifier,
-          '{}',
-          '{}',
-          'The media took too long to process, please try again'
-        );
-      }
-
-      await timer(20000);
-    }
-  }
-
-  async dynamicComment(
-    id: string,
-    postId: string,
-    lastCommentId: string | undefined,
-    accessToken: string,
-    url: string,
-    postDetails: PostDetails[]
-  ): Promise<PostResponse[]> {
-    const [commentPost] = postDetails;
-    const replyToId = lastCommentId || postId;
-
-    const uploadFiles = await Promise.all(
-      commentPost?.media?.map((media) =>
-        this.uploadFile(url, media.path, accessToken, media.alt)
-      ) || []
-    );
-
-    const form = new FormData();
-    form.append('status', commentPost.message);
-    form.append('visibility', 'public');
-    form.append('in_reply_to_id', replyToId);
-    if (uploadFiles.length) {
-      for (const file of uploadFiles) {
-        form.append('media_ids[]', file);
-      }
-    }
-
-    const post = await (
-      await this.fetch(`${url}/api/v1/statuses`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: form,
-      })
-    ).json();
-
-    return [
-      {
-        id: commentPost.id,
-        postId: post.id,
-        releaseURL: `${url}/statuses/${post.id}`,
-        status: 'completed',
-      },
-    ];
-  }
-
-  async post(
-    id: string,
-    accessToken: string,
-    postDetails: PostDetails[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    return this.dynamicPost(
-      id,
-      accessToken,
-      process.env.MASTODON_URL || 'https://mastodon.social',
-      postDetails
-    );
-  }
-
   async postPending(
     id: string,
     accessToken: string,
@@ -540,24 +561,6 @@ export class MastodonProvider extends SocialAbstract implements SocialProvider {
   ): Promise<PostResponse[]> {
     return this.dynamicPostPending(
       id,
-      accessToken,
-      process.env.MASTODON_URL || 'https://mastodon.social',
-      postDetails
-    );
-  }
-
-  async comment(
-    id: string,
-    postId: string,
-    lastCommentId: string | undefined,
-    accessToken: string,
-    postDetails: PostDetails[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    return this.dynamicComment(
-      id,
-      postId,
-      lastCommentId,
       accessToken,
       process.env.MASTODON_URL || 'https://mastodon.social',
       postDetails

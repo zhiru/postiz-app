@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { omit } from 'lodash';
+import { EncryptionService } from '@gitroom/nestjs-libraries/crypto/encryption.service';
+import { decryptIntegrationToken } from '@gitroom/nestjs-libraries/crypto/integration-token.helper';
 import { SocialCommentsRepository } from '@gitroom/nestjs-libraries/database/prisma/social-comments/social.comments.repository';
 import {
   IntegrationManager,
@@ -33,26 +34,27 @@ export class SocialCommentsService {
   constructor(
     private _socialCommentsRepository: SocialCommentsRepository,
     private _integrationManager: IntegrationManager,
+    private _encryption: EncryptionService,
     private _webhooksService: WebhooksService
   ) {}
 
-  async getComments(orgId: string, query: GetSocialCommentsDto) {
+  async getComments(orgId: string, query: GetSocialCommentsDto, profileId?: string) {
     const [comments, count] = await Promise.all([
-      this._socialCommentsRepository.getComments(orgId, query),
-      this._socialCommentsRepository.countComments(orgId, query),
+      this._socialCommentsRepository.getComments(orgId, query, profileId),
+      this._socialCommentsRepository.countComments(orgId, query, profileId),
     ]);
 
     return { comments, count };
   }
 
-  async getComment(orgId: string, id: string) {
-    const comment = await this._socialCommentsRepository.getComment(orgId, id);
+  async getComment(orgId: string, id: string, profileId?: string) {
+    const comment = await this._socialCommentsRepository.getComment(orgId, id, profileId);
     if (!comment) {
       return undefined;
     }
 
     // The integration row carries the access token - it never leaves here.
-    return { ...comment, integration: omit(comment.integration, ['token']) };
+    return { ...comment, integration: { id: comment.integration.id, name: comment.integration.name, picture: comment.integration.picture, providerIdentifier: comment.integration.providerIdentifier } };
   }
 
   getAutoReply(orgId: string) {
@@ -70,9 +72,10 @@ export class SocialCommentsService {
     orgId: string,
     id: string,
     message: string,
-    source: ReplySource
+    source: ReplySource,
+    profileId?: string
   ) {
-    const comment = await this._socialCommentsRepository.getComment(orgId, id);
+    const comment = await this._socialCommentsRepository.getComment(orgId, id, profileId);
     if (!comment) {
       throw new BadRequestException('Comment not found');
     }
@@ -96,7 +99,7 @@ export class SocialCommentsService {
     }
 
     await provider.replyToComment(
-      comment.integration.token,
+      decryptIntegrationToken(this._encryption, comment.integration.token),
       comment.providerCommentId,
       message,
       comment.integration as any
@@ -153,7 +156,7 @@ export class SocialCommentsService {
     }
 
     const comments = await provider.listComments(
-      post.integration.token,
+      decryptIntegrationToken(this._encryption, post.integration.token),
       post.releaseId,
       post.integration as any
     );

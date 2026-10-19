@@ -20,7 +20,7 @@ import { useEffect } from 'react';
 const postType = [
   {
     value: 'post',
-    label: 'Post',
+    label: 'Post / Reel',
   },
   {
     value: 'story',
@@ -52,7 +52,7 @@ export const FacebookSettings = () => {
     <>
       <div className="pt-[20px]">
         <Select
-          label="Post Type"
+          label={t('post_type', 'Post Type')}
           {...register('post_type', {
             value: 'post',
           })}
@@ -62,7 +62,12 @@ export const FacebookSettings = () => {
           </option>
           {postType.map((item) => (
             <option key={item.value} value={item.value}>
-              {item.label}
+              {t(
+                item.value === 'story'
+                  ? 'post_type_option_story'
+                  : 'post_type_option_post_reel',
+                item.label
+              )}
             </option>
           ))}
         </Select>
@@ -71,7 +76,10 @@ export const FacebookSettings = () => {
       {postCurrentType !== 'story' && (
         <>
           <Input
-            label={'Embedded URL (only for text Post)'}
+            label={t(
+              'facebook_embedded_url',
+              'Embedded URL (only for text Post)'
+            )}
             {...register('url')}
           />
           <Input
@@ -93,7 +101,10 @@ export const FacebookSettings = () => {
                 : undefined
             }
           >
-            <option value="" style={{ background: '#ffffff', color: '#1c1e21' }}>
+            <option
+              value=""
+              style={{ background: '#ffffff', color: '#1c1e21' }}
+            >
               {t('facebook_background_none', 'None (plain text)')}
             </option>
             {FACEBOOK_PRESETS.map((item) => {
@@ -103,7 +114,9 @@ export const FacebookSettings = () => {
                   key={item.id}
                   value={item.id}
                   style={
-                    bg ? { background: bg.background, color: bg.text } : undefined
+                    bg
+                      ? { background: bg.background, color: bg.text }
+                      : undefined
                   }
                 >
                   {item.name}
@@ -129,5 +142,39 @@ export default withProvider<FacebookDto>({
   SettingsComponent: FacebookSettings,
   CustomPreviewComponent: FacebookPreview,
   dto: FacebookDto,
+  defaults: { post_type: 'post' },
+  checkValidity: async ([firstPost, ...otherPosts] = [], settings) => {
+    if (settings?.post_type !== 'story') {
+      return true;
+    }
+
+    if (!firstPost?.length) {
+      return 'Stories should have at least one media';
+    }
+
+    const checkVideosLength = await Promise.all(
+      firstPost
+        ?.filter((f) => (f?.path?.indexOf?.('mp4') ?? -1) > -1)
+        ?.flatMap((p) => p?.path)
+        ?.map((p) => {
+          return new Promise<number>((res) => {
+            const video = document.createElement('video');
+            video.preload = 'metadata';
+            video.src = p;
+            video.addEventListener('loadedmetadata', () => {
+              res(video.duration);
+            });
+          });
+        }) ?? []
+    );
+
+    for (const video of checkVideosLength) {
+      if (video > 60) {
+        return 'Facebook Stories video should be maximum 60 seconds';
+      }
+    }
+
+    return true;
+  },
   maximumCharacters: 63206,
 });

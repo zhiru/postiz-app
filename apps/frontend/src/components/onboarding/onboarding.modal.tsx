@@ -9,6 +9,7 @@ import SafeImage from '@gitroom/react/helpers/safe.image';
 import { AddProviderComponent } from '@gitroom/frontend/components/launches/add.provider.component';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
+import { getPlatformIconPath } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import {
@@ -195,7 +196,7 @@ const OnboardingStep1: FC<{ onNext: () => void; onSkip: () => void }> = ({
                     height={28}
                   />
                   <SafeImage
-                    src={`/icons/platforms/${integration.identifier}.png`}
+                    src={getPlatformIconPath(integration.identifier)}
                     className="rounded-full absolute -bottom-[3px] -end-[3px] border border-fifth"
                     alt={integration.identifier}
                     width={14}

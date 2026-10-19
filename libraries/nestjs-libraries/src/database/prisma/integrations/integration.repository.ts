@@ -1,24 +1,32 @@
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'crypto';
 import dayjs from 'dayjs';
 import { Integration, Prisma } from '@prisma/client';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { IntegrationTimeDto } from '@gitroom/nestjs-libraries/dtos/integrations/integration.time.dto';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { PlugDto } from '@gitroom/nestjs-libraries/dtos/plugs/plug.dto';
+import { EncryptionService } from '@gitroom/nestjs-libraries/crypto/encryption.service';
+import { encryptIntegrationToken } from '@gitroom/nestjs-libraries/crypto/integration-token.helper';
+import { createHash } from 'crypto';
 
 @Injectable()
 export class IntegrationRepository {
   private storage = UploadFactory.createStorage();
+
   constructor(
     private _integration: PrismaRepository<'integration'>,
     private _posts: PrismaRepository<'post'>,
     private _plugs: PrismaRepository<'plugs'>,
     private _exisingPlugData: PrismaRepository<'exisingPlugData'>,
     private _customers: PrismaRepository<'customer'>,
-    private _mentions: PrismaRepository<'mentions'>
+    private _mentions: PrismaRepository<'mentions'>,
+    private _encryption: EncryptionService
   ) {}
+
+  private get shouldEncryptTokens(): boolean {
+    return process.env.DISABLE_INTEGRATION_TOKEN_ENCRYPTION !== 'true';
+  }
 
   getMentions(platform: string, q: string) {
     return this._mentions.model.mentions.findMany({
@@ -70,14 +78,9 @@ export class IntegrationRepository {
   }
 
   async checkPreviousConnections(org: string, id: string) {
-    // Deleted accounts keep their integrations with an md5 hashed
-    // rootInternalId, so match both the raw id and its hash to still catch
-    // channels that were connected by a deleted account.
     const findIt = await this._integration.model.integration.findMany({
       where: {
-        rootInternalId: {
-          in: [id, createHash('md5').update(id).digest('hex')],
-        },
+        rootInternalId: id.split('_').pop(),
       },
       select: {
         organizationId: true,
@@ -100,21 +103,6 @@ export class IntegrationRepository {
       },
       data: {
         additionalSettings: settings,
-      },
-    });
-  }
-
-  updateCustomName(org: string, id: string, name: string) {
-    return this._integration.model.integration.update({
-      select: {
-        id: true,
-      },
-      where: {
-        id,
-        organizationId: org,
-      },
-      data: {
-        customName: name.trim() || null,
       },
     });
   }
@@ -169,7 +157,18 @@ export class IntegrationRepository {
       (params.picture.indexOf(process.env.CLOUDFLARE_BUCKET_URL!) === -1 ||
         params.picture.indexOf(process.env.FRONTEND_URL!) === -1)
     ) {
-      params.picture = await this.storage.uploadSimple(params.picture);
+      try {
+        params.picture = await this.storage.uploadSimple(params.picture);
+      } catch (err) {
+        // Avatar e cosmetico: uma falha de storage (ex.: credencial R2 errada)
+        // NAO pode derrubar a selecao de pagina / conexao do canal. Mantem a
+        // URL original do provider (publica e utilizavel).
+        console.error(
+          `[integration] falha ao subir avatar na selecao de pagina (mantendo original): ${
+            (err as Error)?.name || 'Error'
+          }: ${(err as Error)?.message || 'sem detalhe'}`
+        );
+      }
     }
 
     const existing = await this._integration.model.integration.findUnique({
@@ -202,87 +201,66 @@ export class IntegrationRepository {
       });
     }
 
+    // Só cifra valores realmente presentes (string nao-vazia). null/''/undefined
+    // passam por `...params` inalterados — evita divergencia on/off (cifrar so
+    // faz sentido para um token real; nao marcar tokenEncrypted sem ter cifrado).
+    const encryptedTokenFields = this.shouldEncryptTokens
+      ? {
+          ...(params.token
+            ? { token: encryptIntegrationToken(this._encryption, params.token) }
+            : {}),
+          ...(params.refreshToken
+            ? {
+                refreshToken: encryptIntegrationToken(
+                  this._encryption,
+                  params.refreshToken
+                ),
+              }
+            : {}),
+          ...(params.token || params.refreshToken
+            ? { tokenEncrypted: true }
+            : {}),
+        }
+      : {};
+
     return this._integration.model.integration.update({
       where: {
         ...(existing ? { id: existing.id } : { id }),
       },
       data: {
         ...params,
+        ...encryptedTokenFields,
         disabled: false,
         deletedAt: null,
       },
     });
   }
 
-  disconnectChannel(org: string, id: string) {
+  setIntegrationProfile(id: string, profileId: string) {
     return this._integration.model.integration.update({
+      where: { id },
+      data: { profileId },
+    });
+  }
+
+  async markRefreshNeeded(
+    org: string,
+    id: string,
+    reason?: string
+  ): Promise<boolean> {
+    const { count } = await this._integration.model.integration.updateMany({
       where: {
         id,
         organizationId: org,
+        refreshNeeded: false,
       },
       data: {
         refreshNeeded: true,
+        refreshError: reason ?? null,
+        refreshErrorAt: new Date(),
       },
     });
-  }
-
-  getIntegrationByInternalId(org: string, internalId: string) {
-    return this._integration.model.integration.findFirst({
-      where: {
-        organizationId: org,
-        internalId,
-        deletedAt: null,
-      },
-    });
-  }
-
-  // Moves a channel to another provider in place (MIGRATE_PROVIDERS): only the
-  // provider and the app-scoped ids change, so the integration id - and with it
-  // scheduled posts, settings and customers - survives the migration. The
-  // follow-up createOrUpdateIntegration upsert matches the new internalId and
-  // stores the fresh tokens.
-  async migrateIntegration(
-    org: string,
-    id: string,
-    internalId: string,
-    providerIdentifier: string,
-    rootInternalId: string
-  ) {
-    // A soft-deleted channel can still hold the target internalId
-    // (deleteChannel keeps it): rename it out of the way like updateIntegration
-    // does, otherwise the organizationId_internalId unique constraint rejects
-    // the migration. Live channels are rejected by the service before this.
-    const existing = await this._integration.model.integration.findUnique({
-      where: {
-        organizationId_internalId: {
-          organizationId: org,
-          internalId,
-        },
-      },
-    });
-
-    if (existing && existing.deletedAt) {
-      await this._integration.model.integration.update({
-        where: {
-          id: existing.id,
-        },
-        data: {
-          internalId: `deleted_${internalId}_${makeId(10)}`,
-        },
-      });
-    }
-
-    return this._integration.model.integration.update({
-      where: {
-        id,
-        organizationId: org,
-      },
-      data: {
-        internalId,
-        providerIdentifier,
-        rootInternalId,
-      },
-    });
+    return count > 0;
   }
 
   async createOrUpdateIntegration(
@@ -309,8 +287,17 @@ export class IntegrationRepository {
     isBetweenSteps = false,
     refresh?: string,
     timezone?: number,
-    customInstanceDetails?: string
+    customInstanceDetails?: string,
+    profileId?: string
   ) {
+    const encToken = this.shouldEncryptTokens
+      ? encryptIntegrationToken(this._encryption, token)
+      : token;
+    const encRefreshToken = this.shouldEncryptTokens
+      ? encryptIntegrationToken(this._encryption, refreshToken)
+      : refreshToken;
+    const tokenEncrypted = this.shouldEncryptTokens;
+
     const postTimes = timezone
       ? {
           postingTimes: JSON.stringify([
@@ -331,11 +318,12 @@ export class IntegrationRepository {
         type: type as any,
         name,
         providerIdentifier: provider,
-        token,
+        token: encToken,
         profile: username,
         ...(picture ? { picture } : {}),
         inBetweenSteps: isBetweenSteps,
-        refreshToken,
+        refreshToken: encRefreshToken,
+        tokenEncrypted,
         ...(expiresIn
           ? { tokenExpiration: new Date(Date.now() + expiresIn * 1000) }
           : {}),
@@ -343,8 +331,11 @@ export class IntegrationRepository {
         ...postTimes,
         organizationId: org,
         refreshNeeded: false,
-        rootInternalId: internalId,
+        refreshError: null,
+        refreshErrorAt: null,
+        rootInternalId: internalId.split('_').pop(),
         ...(customInstanceDetails ? { customInstanceDetails } : {}),
+        ...(profileId ? { profileId } : {}),
         additionalSettings: additionalSettings
           ? JSON.stringify(additionalSettings)
           : '[]',
@@ -363,9 +354,9 @@ export class IntegrationRepository {
         ...(picture ? { picture } : {}),
         profile: username,
         providerIdentifier: provider,
-        token,
-        // never wipe a stored refresh token with an empty one
-        ...(refreshToken ? { refreshToken } : {}),
+        token: encToken,
+        ...(refreshToken ? { refreshToken: encRefreshToken } : {}),
+        tokenEncrypted,
         ...(expiresIn
           ? { tokenExpiration: new Date(Date.now() + expiresIn * 1000) }
           : {}),
@@ -373,6 +364,8 @@ export class IntegrationRepository {
         organizationId: org,
         deletedAt: null,
         refreshNeeded: false,
+        refreshError: null,
+        refreshErrorAt: null,
       },
     });
 
@@ -385,7 +378,7 @@ export class IntegrationRepository {
               internalId: internalId,
             },
           })
-        )?.rootInternalId || internalId;
+        )?.rootInternalId || internalId.split('_').pop()!;
 
       await this._integration.model.integration.updateMany({
         where: {
@@ -393,11 +386,16 @@ export class IntegrationRepository {
             not: upsert.id,
           },
           rootInternalId: rootId,
+          organizationId: org,
+          ...(profileId ? { profileId } : {}),
         },
         data: {
-          token,
-          refreshToken,
+          token: encToken,
+          ...(refreshToken ? { refreshToken: encRefreshToken } : {}),
+          tokenEncrypted,
           refreshNeeded: false,
+          refreshError: null,
+          refreshErrorAt: null,
           ...(expiresIn
             ? { tokenExpiration: new Date(Date.now() + expiresIn * 1000) }
             : {}),
@@ -417,6 +415,7 @@ export class IntegrationRepository {
         inBetweenSteps: false,
         deletedAt: null,
         refreshNeeded: false,
+        OR: [{ profileId: null }, { clientProfile: { deletedAt: null } }],
       },
     });
   }
@@ -431,6 +430,7 @@ export class IntegrationRepository {
       },
     });
   }
+
   refreshNeeded(org: string, id: string) {
     return this._integration.model.integration.update({
       where: {
@@ -455,11 +455,43 @@ export class IntegrationRepository {
     });
   }
 
-  getIntegrationById(org: string, id: string) {
+  getIntegrationById(org: string, id: string, profileId?: string) {
     return this._integration.model.integration.findFirst({
       where: {
         organizationId: org,
         id,
+        deletedAt: null,
+        AND: [
+          { OR: [{ profileId: null }, { clientProfile: { deletedAt: null } }] },
+          ...(profileId ? [{ OR: [{ profileId }, { profileId: null }] }] : []),
+        ],
+      },
+    });
+  }
+
+  getIntegrationsByInternalId(internalId: string) {
+    return this._integration.model.integration.findMany({
+      where: {
+        internalId,
+        deletedAt: null,
+        disabled: false,
+        OR: [{ profileId: null }, { clientProfile: { deletedAt: null } }],
+      },
+    });
+  }
+
+  findActiveByOrgAndInternalIdWithProfile(org: string, internalId: string) {
+    return this._integration.model.integration.findFirst({
+      where: {
+        organizationId: org,
+        internalId,
+        deletedAt: null,
+        OR: [{ profileId: null }, { clientProfile: { deletedAt: null } }],
+      },
+      include: {
+        clientProfile: {
+          select: { id: true, name: true },
+        },
       },
     });
   }
@@ -555,6 +587,319 @@ export class IntegrationRepository {
     });
   }
 
+  customers(orgId: string) {
+    return this._customers.model.customer.findMany({
+      where: {
+        orgId,
+        deletedAt: null,
+      },
+    });
+  }
+
+  getIntegrationsList(org: string, profileId?: string) {
+    return this._integration.model.integration.findMany({
+      where: {
+        organizationId: org,
+        deletedAt: null,
+        AND: [
+          { OR: [{ profileId: null }, { clientProfile: { deletedAt: null } }] },
+          ...(profileId ? [{ OR: [{ profileId }, { profileId: null }] }] : []),
+        ],
+      },
+      include: {
+        customer: true,
+      },
+    });
+  }
+
+  getProblemChannels(org: string, profileId?: string) {
+    return this._integration.model.integration.findMany({
+      where: {
+        organizationId: org,
+        deletedAt: null,
+        OR: [{ refreshNeeded: true }, { disabled: true }],
+        AND: [
+          { OR: [{ profileId: null }, { clientProfile: { deletedAt: null } }] },
+        ],
+        ...(profileId ? { profileId } : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        providerIdentifier: true,
+        internalId: true,
+        picture: true,
+        refreshNeeded: true,
+        disabled: true,
+        refreshError: true,
+        refreshErrorAt: true,
+        clientProfile: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  async disableChannel(org: string, id: string) {
+    await this._integration.model.integration.update({
+      where: {
+        id,
+        organizationId: org,
+      },
+      data: {
+        disabled: true,
+      },
+    });
+  }
+
+  async enableChannel(org: string, id: string) {
+    await this._integration.model.integration.update({
+      where: {
+        id,
+        organizationId: org,
+      },
+      data: {
+        disabled: false,
+      },
+    });
+  }
+
+  getPostsForChannel(org: string, id: string) {
+    return this._posts.model.post.groupBy({
+      by: ['group'],
+      where: {
+        organizationId: org,
+        integrationId: id,
+        deletedAt: null,
+      },
+    });
+  }
+
+  deleteChannel(org: string, id: string) {
+    return this._integration.model.integration.update({
+      where: {
+        id,
+        organizationId: org,
+      },
+      data: {
+        deletedAt: new Date(),
+      },
+    });
+  }
+
+  async checkForDeletedOnceAndUpdate(org: string, page: string) {
+    return this._integration.model.integration.updateMany({
+      where: {
+        organizationId: org,
+        internalId: page,
+        OR: [
+          { deletedAt: { not: null } },
+          { clientProfile: { deletedAt: { not: null } } },
+        ],
+      },
+      data: {
+        internalId: makeId(10),
+      },
+    });
+  }
+
+  async disableIntegrations(org: string, totalChannels: number) {
+    const getChannels = await this._integration.model.integration.findMany({
+      where: {
+        organizationId: org,
+        disabled: false,
+        deletedAt: null,
+        OR: [{ profileId: null }, { clientProfile: { deletedAt: null } }],
+      },
+      take: totalChannels,
+      select: {
+        id: true,
+      },
+    });
+
+    for (const channel of getChannels) {
+      await this._integration.model.integration.update({
+        where: {
+          id: channel.id,
+        },
+        data: {
+          disabled: true,
+        },
+      });
+    }
+  }
+
+  getPlugsByIntegrationId(org: string, id: string) {
+    return this._plugs.model.plugs.findMany({
+      where: {
+        organizationId: org,
+        integrationId: id,
+      },
+    });
+  }
+
+  createOrUpdatePlug(org: string, integrationId: string, body: PlugDto) {
+    return this._plugs.model.plugs.upsert({
+      where: {
+        organizationId: org,
+        plugFunction_integrationId: {
+          integrationId,
+          plugFunction: body.func,
+        },
+      },
+      create: {
+        integrationId,
+        organizationId: org,
+        plugFunction: body.func,
+        data: JSON.stringify(body.fields),
+        activated: true,
+      },
+      update: {
+        data: JSON.stringify(body.fields),
+      },
+      select: {
+        activated: true,
+      },
+    });
+  }
+
+  changePlugActivation(orgId: string, plugId: string, status: boolean) {
+    return this._plugs.model.plugs.update({
+      where: {
+        organizationId: orgId,
+        id: plugId,
+      },
+      data: {
+        activated: !!status,
+      },
+    });
+  }
+
+  async loadExisingData(
+    methodName: string,
+    integrationId: string,
+    id: string[]
+  ) {
+    return this._exisingPlugData.model.exisingPlugData.findMany({
+      where: {
+        integrationId,
+        methodName,
+        value: {
+          in: id,
+        },
+      },
+    });
+  }
+
+  async saveExisingData(
+    methodName: string,
+    integrationId: string,
+    value: string[]
+  ) {
+    return this._exisingPlugData.model.exisingPlugData.createMany({
+      data: value.map((p) => ({
+        integrationId,
+        methodName,
+        value: p,
+      })),
+    });
+  }
+
+  async getPostingTimes(orgId: string, integrationsId?: string) {
+    return this._integration.model.integration.findMany({
+      where: {
+        ...(integrationsId ? { id: integrationsId } : {}),
+        organizationId: orgId,
+        disabled: false,
+        deletedAt: null,
+        OR: [{ profileId: null }, { clientProfile: { deletedAt: null } }],
+      },
+      select: {
+        postingTimes: true,
+      },
+    });
+  }
+
+  updateCustomName(org: string, id: string, name: string) {
+    return this._integration.model.integration.update({
+      select: {
+        id: true,
+      },
+      where: {
+        id,
+        organizationId: org,
+      },
+      data: {
+        customName: name.trim() || null,
+      },
+    });
+  }
+
+  disconnectChannel(org: string, id: string) {
+    return this._integration.model.integration.update({
+      where: {
+        id,
+        organizationId: org,
+      },
+      data: {
+        refreshNeeded: true,
+      },
+    });
+  }
+
+  getIntegrationByInternalId(org: string, internalId: string) {
+    return this._integration.model.integration.findFirst({
+      where: {
+        organizationId: org,
+        internalId,
+        deletedAt: null,
+      },
+    });
+  }
+
+  async migrateIntegration(
+    org: string,
+    id: string,
+    internalId: string,
+    providerIdentifier: string,
+    rootInternalId: string
+  ) {
+    // A soft-deleted channel can still hold the target internalId
+    // (deleteChannel keeps it): rename it out of the way like updateIntegration
+    // does, otherwise the organizationId_internalId unique constraint rejects
+    // the migration. Live channels are rejected by the service before this.
+    const existing = await this._integration.model.integration.findUnique({
+      where: {
+        organizationId_internalId: {
+          organizationId: org,
+          internalId,
+        },
+      },
+    });
+
+    if (existing && existing.deletedAt) {
+      await this._integration.model.integration.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          internalId: `deleted_${internalId}_${makeId(10)}`,
+        },
+      });
+    }
+
+    return this._integration.model.integration.update({
+      where: {
+        id,
+        organizationId: org,
+      },
+      data: {
+        internalId,
+        providerIdentifier,
+        rootInternalId,
+      },
+    });
+  }
+
   getCustomerByName(orgId: string, name: string) {
     return this._customers.model.customer.findFirst({
       where: {
@@ -573,27 +918,6 @@ export class IntegrationRepository {
       },
       data: {
         name,
-      },
-    });
-  }
-
-  customers(orgId: string) {
-    return this._customers.model.customer.findMany({
-      where: {
-        orgId,
-        deletedAt: null,
-      },
-    });
-  }
-
-  getIntegrationsList(org: string) {
-    return this._integration.model.integration.findMany({
-      where: {
-        organizationId: org,
-        deletedAt: null,
-      },
-      include: {
-        customer: true,
       },
     });
   }
@@ -744,56 +1068,6 @@ export class IntegrationRepository {
     });
   }
 
-  async disableChannel(org: string, id: string) {
-    await this._integration.model.integration.update({
-      where: {
-        id,
-        organizationId: org,
-      },
-      data: {
-        disabled: true,
-      },
-    });
-  }
-
-  async enableChannel(org: string, id: string) {
-    await this._integration.model.integration.update({
-      where: {
-        id,
-        organizationId: org,
-      },
-      data: {
-        disabled: false,
-      },
-    });
-  }
-
-  getPostsForChannel(org: string, id: string) {
-    return this._posts.model.post.groupBy({
-      by: ['group'],
-      where: {
-        organizationId: org,
-        integrationId: id,
-        deletedAt: null,
-      },
-    });
-  }
-
-  deleteChannel(org: string, id: string) {
-    return this._integration.model.integration.update({
-      select: {
-        id: true,
-      },
-      where: {
-        id,
-        organizationId: org,
-      },
-      data: {
-        deletedAt: new Date(),
-      },
-    });
-  }
-
   async deleteIntegrationsForAccount(org: string) {
     const hash = (value: string) =>
       createHash('md5').update(value).digest('hex');
@@ -843,46 +1117,6 @@ export class IntegrationRepository {
     }
   }
 
-  async checkForDeletedOnceAndUpdate(org: string, page: string) {
-    return this._integration.model.integration.updateMany({
-      where: {
-        organizationId: org,
-        internalId: page,
-        deletedAt: {
-          not: null,
-        },
-      },
-      data: {
-        internalId: makeId(10),
-      },
-    });
-  }
-
-  async disableIntegrations(org: string, totalChannels: number) {
-    const getChannels = await this._integration.model.integration.findMany({
-      where: {
-        organizationId: org,
-        disabled: false,
-        deletedAt: null,
-      },
-      take: totalChannels,
-      select: {
-        id: true,
-      },
-    });
-
-    for (const channel of getChannels) {
-      await this._integration.model.integration.update({
-        where: {
-          id: channel.id,
-        },
-        data: {
-          disabled: true,
-        },
-      });
-    }
-  }
-
   enableAllIntegrations(org: string) {
     return this._integration.model.integration.updateMany({
       where: {
@@ -892,96 +1126,6 @@ export class IntegrationRepository {
       },
       data: {
         disabled: false,
-      },
-    });
-  }
-
-  getPlugsByIntegrationId(org: string, id: string) {
-    return this._plugs.model.plugs.findMany({
-      where: {
-        organizationId: org,
-        integrationId: id,
-      },
-    });
-  }
-
-  createOrUpdatePlug(org: string, integrationId: string, body: PlugDto) {
-    return this._plugs.model.plugs.upsert({
-      where: {
-        organizationId: org,
-        plugFunction_integrationId: {
-          integrationId,
-          plugFunction: body.func,
-        },
-      },
-      create: {
-        integrationId,
-        organizationId: org,
-        plugFunction: body.func,
-        data: JSON.stringify(body.fields),
-        activated: true,
-      },
-      update: {
-        data: JSON.stringify(body.fields),
-      },
-      select: {
-        activated: true,
-      },
-    });
-  }
-
-  changePlugActivation(orgId: string, plugId: string, status: boolean) {
-    return this._plugs.model.plugs.update({
-      where: {
-        organizationId: orgId,
-        id: plugId,
-      },
-      data: {
-        activated: !!status,
-      },
-    });
-  }
-
-  async loadExisingData(
-    methodName: string,
-    integrationId: string,
-    id: string[]
-  ) {
-    return this._exisingPlugData.model.exisingPlugData.findMany({
-      where: {
-        integrationId,
-        methodName,
-        value: {
-          in: id,
-        },
-      },
-    });
-  }
-
-  async saveExisingData(
-    methodName: string,
-    integrationId: string,
-    value: string[]
-  ) {
-    return this._exisingPlugData.model.exisingPlugData.createMany({
-      data: value.map((p) => ({
-        integrationId,
-        methodName,
-        value: p,
-      })),
-    });
-  }
-
-  async getPostingTimes(orgId: string, integrationsId?: string) {
-    return this._integration.model.integration.findMany({
-      where: {
-        ...(integrationsId ? { id: integrationsId } : {}),
-        organizationId: orgId,
-        disabled: false,
-        deletedAt: null,
-      },
-      select: {
-        postingTimes: true,
       },
     });
   }

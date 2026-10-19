@@ -81,6 +81,9 @@ export class SocialCommentsRepository {
           select: {
             id: true,
             token: true,
+            organizationId: true,
+            profileId: true,
+            additionalSettings: true,
             providerIdentifier: true,
           },
         },
@@ -129,13 +132,14 @@ export class SocialCommentsRepository {
     });
   }
 
-  getComments(orgId: string, query: GetSocialCommentsDto) {
+  getComments(orgId: string, query: GetSocialCommentsDto, profileId?: string) {
     const page = query.page || 1;
     const take = 20;
 
     return this._socialComments.model.socialComments.findMany({
       where: {
         organizationId: orgId,
+        ...(profileId ? { integration: { profileId, organizationId: orgId, deletedAt: null } } : {}),
         ...(query.integrationId ? { integrationId: query.integrationId } : {}),
         ...(query.postId ? { postId: query.postId } : {}),
         ...(query.status ? { status: query.status as SocialCommentStatus } : {}),
@@ -149,10 +153,11 @@ export class SocialCommentsRepository {
     });
   }
 
-  countComments(orgId: string, query: GetSocialCommentsDto) {
+  countComments(orgId: string, query: GetSocialCommentsDto, profileId?: string) {
     return this._socialComments.model.socialComments.count({
       where: {
         organizationId: orgId,
+        ...(profileId ? { integration: { profileId, organizationId: orgId, deletedAt: null } } : {}),
         ...(query.integrationId ? { integrationId: query.integrationId } : {}),
         ...(query.postId ? { postId: query.postId } : {}),
         ...(query.status ? { status: query.status as SocialCommentStatus } : {}),
@@ -160,11 +165,12 @@ export class SocialCommentsRepository {
     });
   }
 
-  getComment(orgId: string, id: string) {
+  getComment(orgId: string, id: string, profileId?: string) {
     return this._socialComments.model.socialComments.findFirst({
       where: {
         id,
         organizationId: orgId,
+        ...(profileId ? { integration: { profileId, organizationId: orgId, deletedAt: null } } : {}),
       },
       select: {
         ...commentSelect,
@@ -175,6 +181,9 @@ export class SocialCommentsRepository {
             picture: true,
             providerIdentifier: true,
             token: true,
+            organizationId: true,
+            profileId: true,
+            additionalSettings: true,
           },
         },
       },

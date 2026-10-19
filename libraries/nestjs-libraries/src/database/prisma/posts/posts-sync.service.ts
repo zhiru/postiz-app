@@ -1,3 +1,5 @@
+import { EncryptionService } from '@gitroom/nestjs-libraries/crypto/encryption.service';
+import { decryptIntegrationToken } from '@gitroom/nestjs-libraries/crypto/integration-token.helper';
 import {
   BadRequestException,
   Injectable,
@@ -24,7 +26,8 @@ export class PostsSyncService implements OnApplicationBootstrap {
     private posts: PostsRepository,
     private providers: IntegrationManager,
     private temporal: TemporalService,
-    private refresh: RefreshIntegrationService
+    private refresh: RefreshIntegrationService,
+    private encryption: EncryptionService = new EncryptionService()
   ) {}
 
   async onApplicationBootstrap() {
@@ -50,9 +53,25 @@ export class PostsSyncService implements OnApplicationBootstrap {
     return this.repository.eligible(supported);
   }
 
-  private async channel(organizationId: string, id: string) {
-    const integration = await this.repository.get(organizationId, id);
+  private async channel(
+    organizationId: string,
+    id: string,
+    profileId?: string
+  ) {
+    const integration = await this.repository.get(
+      organizationId,
+      id,
+      profileId
+    );
     if (!integration) throw new NotFoundException('Channel not found');
+    integration.token = decryptIntegrationToken(
+      this.encryption,
+      integration.token
+    );
+    integration.refreshToken = decryptIntegrationToken(
+      this.encryption,
+      integration.refreshToken
+    );
     const provider = this.providers.getSocialIntegration(
       integration.providerIdentifier
     );
@@ -63,8 +82,8 @@ export class PostsSyncService implements OnApplicationBootstrap {
     return { integration, provider };
   }
 
-  async status(organizationId: string, id: string) {
-    const { integration } = await this.channel(organizationId, id);
+  async status(organizationId: string, id: string, profileId?: string) {
+    const { integration } = await this.channel(organizationId, id, profileId);
     return {
       lastSuccessAt: integration.postsSyncLastSuccessAt,
       historyCompletedAt: integration.postsSyncCompletedAt,
@@ -73,8 +92,8 @@ export class PostsSyncService implements OnApplicationBootstrap {
     };
   }
 
-  async request(organizationId: string, id: string) {
-    const { integration } = await this.channel(organizationId, id);
+  async request(organizationId: string, id: string, profileId?: string) {
+    const { integration } = await this.channel(organizationId, id, profileId);
     if (
       integration.disabled ||
       integration.inBetweenSteps ||
@@ -153,7 +172,14 @@ export class PostsSyncService implements OnApplicationBootstrap {
       throw new Error('Provider returned a repeated cursor');
     let imported = 0;
     for (const item of page.posts) {
-      if (await this.posts.importPlatformPost(organizationId, id, item))
+      if (
+        await this.posts.importPlatformPost(
+          organizationId,
+          id,
+          item,
+          integration.profileId || undefined
+        )
+      )
         imported++;
     }
     if (full)

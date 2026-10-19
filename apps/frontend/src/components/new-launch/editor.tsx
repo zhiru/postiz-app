@@ -122,10 +122,7 @@ const EditorImage = Node.create({
   },
 });
 
-const insertImages = (
-  editor: any,
-  media: { path: string; alt?: string }[]
-) => {
+const insertImages = (editor: any, media: { path: string; alt?: string }[]) => {
   if (!media.length) {
     return;
   }
@@ -1017,6 +1014,12 @@ export const Editor: FC<{
                     value={props.pictures}
                     dummy={dummy}
                     name="image"
+                    editor={editorRef?.current?.editor}
+                    platform={
+                      identifier && identifier !== 'global'
+                        ? identifier
+                        : undefined
+                    }
                     insertInContent={
                       inlineImages
                         ? (media) =>
@@ -1117,13 +1120,17 @@ export const Editor: FC<{
                           ? clsx(
                               'post-toolbar mobile:fixed mobile:bottom-0 mobile:inset-x-0 mobile:items-center mobile:px-[16px] mobile:py-[12px] mobile:bg-newBgColorInner',
                               // the picker opens from the bar and has to cover the top bar
-                              emojiPickerOpen ? 'mobile:z-[500]' : 'mobile:z-[440]'
+                              emojiPickerOpen
+                                ? 'mobile:z-[500]'
+                                : 'mobile:z-[440]'
                             )
                           : 'mobile:hidden'
                         : undefined
                     }
                     toolsStyle={
-                      flat && active && keyboard ? { bottom: keyboard } : undefined
+                      flat && active && keyboard
+                        ? { bottom: keyboard }
+                        : undefined
                     }
                     toolBarEnd={
                       flat && active ? (

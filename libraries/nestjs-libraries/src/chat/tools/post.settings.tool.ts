@@ -1,3 +1,4 @@
+import { readRequestContext } from '@gitroom/nestjs-libraries/chat/tools/tool.context.helper';
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -39,7 +40,7 @@ If validation fails, the result contains output.errors describing what to fix; t
             z.object({
               key: z.string().describe('Name of the settings key to change'),
               value: z
-                .any()
+                .string()
                 .describe(
                   'New value of the key, always prefer the id then label if possible. When the settings schema says a field is an id, pass the id returned by the channel tools, never the display label'
                 ),
@@ -59,14 +60,15 @@ If validation fails, the result contains output.errors describing what to fix; t
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
+        const profileId = readRequestContext(context).get('profileId') as string | undefined;
         const organizationId = JSON.parse(
-          (context?.requestContext as any)?.get('organization') as string
+          readRequestContext(context).get('organization') as string
         ).id;
 
         const settings = (inputData.settings || []).reduce(
           (acc: Record<string, any>, s: { key: string; value: any }) => ({
             ...acc,
-            [s.key]: s.value,
+            [s.key]: (() => { try { return JSON.parse(s.value); } catch { return s.value; } })(),
           }),
           {} as Record<string, any>
         );
@@ -76,7 +78,8 @@ If validation fails, the result contains output.errors describing what to fix; t
             organizationId,
             inputData.id,
             settings,
-            'MCP'
+            'MCP',
+            profileId
           );
 
           return { output };

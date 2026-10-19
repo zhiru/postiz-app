@@ -1,3 +1,4 @@
+import { readRequestContext } from '@gitroom/nestjs-libraries/chat/tools/tool.context.helper';
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import { createTool } from '@mastra/core/tools';
 import { Injectable } from '@nestjs/common';
@@ -50,14 +51,16 @@ Use the returned path as an attachment URL in integrationSchedulePostTool instea
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
+        const profileId = readRequestContext(context).get('profileId') as string | undefined;
         const organizationId = JSON.parse(
-          (context?.requestContext as any)?.get('organization') as string
+          readRequestContext(context).get('organization') as string
         ).id;
 
         const { pages, results } = await this._mediaService.getMedia(
           organizationId,
           inputData.page || 1,
-          inputData.search
+          inputData.search,
+          profileId
         );
 
         return {

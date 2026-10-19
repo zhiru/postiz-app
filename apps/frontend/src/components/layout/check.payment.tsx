@@ -27,6 +27,7 @@ export const CheckPaymentInner: FC<{
   const fetch = useFetch();
   const toaster = useToaster();
   const modal = useDecisionModal();
+  const t = useT();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -54,11 +55,13 @@ export const CheckPaymentInner: FC<{
     }
     if (status === 1) {
       modal.open({
-        title: 'Invalid Payment',
+        title: t('invalid_payment', 'Invalid Payment'),
         onlyApprove: true,
-        approveLabel: 'OK',
-        description:
-          'We could not validate your payment method, please try again',
+        approveLabel: t('ok', 'OK'),
+        description: t(
+          'could_not_validate_payment',
+          'We could not validate your payment method, please try again'
+        ),
       });
       setShowLoader(false);
     }

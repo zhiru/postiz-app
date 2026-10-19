@@ -1,0 +1,455 @@
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service',
+  () => ({ IntegrationService: class IntegrationServiceMock {} })
+);
+jest.mock('@gitroom/nestjs-libraries/ai/ai-text.service', () => ({
+  AiTextService: class AiTextServiceMock {},
+}));
+jest.mock('@gitroom/nestjs-libraries/openai/openai.service', () => ({
+  OpenaiService: class OpenaiServiceMock {},
+}));
+
+jest.mock('@gitroom/nestjs-libraries/upload/upload.factory', () => ({
+  UploadFactory: { createStorage: jest.fn().mockReturnValue({}) },
+}));
+
+import { CreationMethod } from '@prisma/client';
+jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
+  IntegrationManager: class IntegrationManagerMock {},
+}));
+jest.mock(
+  '@gitroom/nestjs-libraries/integrations/refresh.integration.service',
+  () => ({ RefreshIntegrationService: class RefreshIntegrationServiceMock {} })
+);
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/media/media.service',
+  () => ({ MediaService: class MediaServiceMock {} })
+);
+jest.mock('@gitroom/nestjs-libraries/short-linking/short.link.service', () => ({
+  ShortLinkService: class ShortLinkServiceMock {},
+}));
+
+import { BadRequestException } from '@nestjs/common';
+import { createMock } from '@gitroom/nestjs-libraries/test';
+import { PostsRepository } from './posts.repository';
+import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
+import { PostsService } from './posts.service';
+
+const makeBody = (overrides: Record<string, unknown> = {}) => ({
+  type: 'schedule' as const,
+  shortLink: false,
+  date: '2026-09-04T17:00:00.000Z',
+  tags: [] as Array<{ value: string; label: string }>,
+  posts: [
+    {
+      integration: { id: 'int-1' },
+      value: [
+        {
+          id: 'post-1',
+          content: '<p>Teste</p>',
+          delay: 0,
+          image: [] as Array<{ id: string; path: string }>,
+        },
+      ],
+      settings: { __type: 'instagram' },
+    },
+  ],
+  ...overrides,
+});
+
+const publishedPost = {
+  id: 'post-1',
+  organizationId: 'org-1',
+  profileId: 'profile-1',
+  state: 'PUBLISHED',
+  publishDate: new Date('2026-09-03T12:00:00.000Z'),
+  integration: {
+    id: 'int-1',
+    providerIdentifier: 'instagram',
+  },
+};
+
+const buildService = () => {
+  const repository = createMock<PostsRepository>();
+  const integrationService = createMock<IntegrationService>();
+  const service = new PostsService(
+    repository,
+    { getSocialIntegration: jest.fn().mockReturnValue({}) } as any,
+    integrationService,
+    null as any,
+    null as any,
+    null as any,
+    null as any,
+    null as any,
+    {} as any, // webhooksService
+    null as any,
+    {} as any,
+    {} as any
+  );
+
+  jest.spyOn(service as any, 'startWorkflow').mockResolvedValue(undefined);
+  integrationService.getIntegrationById.mockResolvedValue({
+    id: 'int-1',
+    profileId: 'profile-1',
+  } as any);
+  repository.getAnchoredCommentsForPost.mockResolvedValue([]);
+  repository.getPostById.mockResolvedValue(publishedPost as any);
+  repository.createOrUpdatePost.mockResolvedValue({
+    posts: [{ id: 'post-1', state: 'QUEUE' }],
+  } as any);
+  repository.changeDate.mockResolvedValue({ id: 'post-1' } as any);
+
+  return { service, repository };
+};
+
+describe('PostsService - republicacao explicita', () => {
+  it('rejeita salvar como schedule um post publicado sem opt-in', async () => {
+    const { service, repository } = buildService();
+
+    const result = expect(
+      service.createPost(
+        'org-1',
+        makeBody() as any,
+        CreationMethod.WEB,
+        false,
+        'profile-1'
+      )
+    ).rejects;
+    await result.toBeInstanceOf(BadRequestException);
+    await result.toThrow("use type 'update'");
+    await result.toThrow('republish: true');
+
+    expect(repository.getPostById).toHaveBeenCalledWith('post-1', 'org-1');
+    expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+  });
+
+  it('valida todo o lote antes de escrever o primeiro canal', async () => {
+    const { service, repository } = buildService();
+    const body = makeBody() as any;
+    body.posts = [
+      {
+        ...body.posts[0],
+        value: [{ ...body.posts[0].value[0], id: undefined }],
+      },
+      {
+        ...body.posts[0],
+        integration: { id: 'int-2' },
+        value: [{ ...body.posts[0].value[0], id: 'post-2' }],
+      },
+    ];
+
+    await expect(
+      service.createPost('org-1', body, CreationMethod.WEB, false, 'profile-1')
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(repository.getPostById).toHaveBeenCalledWith('post-2', 'org-1');
+    expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+  });
+
+  it('exige booleano true real para autorizar a republicacao', async () => {
+    const { service, repository } = buildService();
+
+    await expect(
+      service.createPost(
+        'org-1',
+        makeBody({ republish: 'true' }) as any,
+        CreationMethod.WEB,
+        false,
+        'profile-1'
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+  });
+
+  it('permite republicar quando o cliente envia republish true', async () => {
+    const { service, repository } = buildService();
+
+    await service.createPost(
+      'org-1',
+      makeBody({ republish: true }) as any,
+      CreationMethod.WEB,
+      false,
+      'profile-1'
+    );
+
+    expect(repository.getPostById).toHaveBeenCalledWith('post-1', 'org-1');
+    expect(repository.createOrUpdatePost).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejeita republicacao fora do perfil mesmo com opt-in', async () => {
+    const { service, repository } = buildService();
+    repository.getPostById.mockResolvedValue({
+      ...publishedPost,
+      profileId: 'profile-2',
+    } as any);
+
+    await expect(
+      service.createPost(
+        'org-1',
+        makeBody({ republish: true }) as any,
+        CreationMethod.WEB,
+        false,
+        'profile-1'
+      )
+    ).rejects.toThrow('Post does not belong to this profile');
+
+    expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+  });
+
+  it('rejeita id que existe fora da organizacao antes do upsert', async () => {
+    const { service, repository } = buildService();
+    // Escopado na org: nao encontra. Sem escopo: existe. E tentativa de
+    // sequestrar o post de outra organizacao pelo `where: { id }` do upsert.
+    repository.getPostById.mockImplementation(((id: string, org?: string) =>
+      Promise.resolve(
+        org ? null : ({ ...publishedPost, organizationId: 'org-2' } as any)
+      )) as any);
+
+    await expect(
+      service.createPost(
+        'org-1',
+        makeBody({ type: 'update' }) as any,
+        CreationMethod.WEB,
+        false,
+        'profile-1'
+      )
+    ).rejects.toThrow('Post not found');
+
+    expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+  });
+
+  it('aceita id novo gerado no cliente para um post que ainda nao existe', async () => {
+    const { service, repository } = buildService();
+    // A UI gera `value[].id` com makeId(10) antes de salvar; o upsert cria o
+    // post com esse id. Nao existe em lugar nenhum, entao nao e sequestro.
+    repository.getPostById.mockResolvedValue(null);
+
+    await service.createPost(
+      'org-1',
+      makeBody() as any,
+      CreationMethod.WEB,
+      false,
+      'profile-1'
+    );
+
+    expect(repository.createOrUpdatePost).toHaveBeenCalledTimes(1);
+  });
+
+  it('nao bloqueia o agendamento de um post que ainda esta na fila', async () => {
+    const { service, repository } = buildService();
+    repository.getPostById.mockResolvedValue({
+      ...publishedPost,
+      state: 'QUEUE',
+    } as any);
+
+    await service.createPost(
+      'org-1',
+      makeBody() as any,
+      CreationMethod.WEB,
+      false,
+      'profile-1'
+    );
+
+    expect(repository.createOrUpdatePost).toHaveBeenCalledTimes(1);
+  });
+
+  it('mantem updates de conteudo de posts publicados sem exigir republicacao', async () => {
+    const { service, repository } = buildService();
+
+    await service.createPost(
+      'org-1',
+      makeBody({ type: 'update' }) as any,
+      CreationMethod.WEB,
+      false,
+      'profile-1'
+    );
+
+    expect(repository.getPostById).toHaveBeenCalledWith('post-1', 'org-1');
+    expect(repository.createOrUpdatePost).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserva update explicito ao alterar apenas a data', async () => {
+    const { service, repository } = buildService();
+
+    await service.changeDate(
+      'org-1',
+      'post-1',
+      '2026-09-04T17:00:00.000Z',
+      'update',
+      false,
+      'profile-1'
+    );
+
+    expect(repository.changeDate).toHaveBeenCalledWith(
+      'org-1',
+      'post-1',
+      '2026-09-04T17:00:00.000Z',
+      false,
+      'update',
+      'profile-1'
+    );
+    expect((service as any).startWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('rejeita reagendar um post publicado sem opt-in antes de qualquer escrita', async () => {
+    const { service, repository } = buildService();
+
+    await expect(
+      service.changeDate(
+        'org-1',
+        'post-1',
+        '2026-09-04T17:00:00.000Z',
+        'schedule',
+        false,
+        'profile-1'
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(repository.changeDate).not.toHaveBeenCalled();
+    expect((service as any).startWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('preserva profileId e permite reagendar com opt-in explicito', async () => {
+    const { service, repository } = buildService();
+
+    await service.changeDate(
+      'org-1',
+      'post-1',
+      '2026-09-04T17:00:00.000Z',
+      'schedule',
+      true,
+      'profile-1'
+    );
+
+    expect(repository.changeDate).toHaveBeenCalledWith(
+      'org-1',
+      'post-1',
+      '2026-09-04T17:00:00.000Z',
+      false,
+      'schedule',
+      'profile-1'
+    );
+    expect((service as any).startWorkflow).toHaveBeenCalledTimes(1);
+  });
+
+  it('reagenda um post em fila sem exigir opt-in de republicacao', async () => {
+    const { service, repository } = buildService();
+    repository.getPostById.mockResolvedValue({
+      ...publishedPost,
+      state: 'QUEUE',
+    } as any);
+
+    await service.changeDate(
+      'org-1',
+      'post-1',
+      '2026-09-04T17:00:00.000Z',
+      'schedule',
+      false,
+      'profile-1'
+    );
+
+    expect(repository.changeDate).toHaveBeenCalledTimes(1);
+    expect((service as any).startWorkflow).toHaveBeenCalledTimes(1);
+  });
+
+  it('nao aceita string como opt-in ao reagendar', async () => {
+    const { service, repository } = buildService();
+
+    await expect(
+      service.changeDate(
+        'org-1',
+        'post-1',
+        '2026-09-04T17:00:00.000Z',
+        'schedule',
+        'true' as any,
+        'profile-1'
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(repository.changeDate).not.toHaveBeenCalled();
+  });
+  it('rejeita alterar a data fora do perfil antes de escrever ou iniciar workflow', async () => {
+    const { service, repository } = buildService();
+    await expect(
+      service.changeDate(
+        'org-1',
+        'post-1',
+        '2026-10-19T17:00:00Z',
+        'update',
+        false,
+        'profile-other'
+      )
+    ).rejects.toThrow('Post does not belong to this profile');
+    expect(repository.changeDate).not.toHaveBeenCalled();
+    expect((service as any).startWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('rejeita alterar data de post inexistente sem TypeError nem escrita', async () => {
+    const { service, repository } = buildService();
+    repository.getPostById.mockResolvedValue(null);
+    await expect(
+      service.changeDate('org-1', 'missing', '2026-10-19T17:00:00Z')
+    ).rejects.toThrow('Post not found');
+    expect(repository.changeDate).not.toHaveBeenCalled();
+  });
+
+  it('mantem o historico importado somente leitura mesmo com opt-in', async () => {
+    const { service, repository } = buildService();
+    repository.getPostById.mockResolvedValue({
+      ...publishedPost,
+      importedFromPlatform: true,
+    } as any);
+    await expect(
+      service.changeDate(
+        'org-1',
+        'post-1',
+        '2026-10-19T17:00:00Z',
+        'schedule',
+        true,
+        'profile-1'
+      )
+    ).rejects.toThrow('read-only');
+    expect(repository.changeDate).not.toHaveBeenCalled();
+  });
+
+  it('valida todos os canais antes de escrever o primeiro', async () => {
+    const { service, repository } = buildService();
+    const integrationService = (service as any)._integrationService;
+    integrationService.getIntegrationById
+      .mockResolvedValueOnce({ id: 'int-1', profileId: 'profile-1' })
+      .mockResolvedValueOnce(null);
+    const body = makeBody();
+    body.posts = [
+      body.posts[0],
+      { ...body.posts[0], integration: { id: 'foreign-channel' } },
+    ];
+    await expect(
+      service.createPost(
+        'org-1',
+        { ...body, type: 'update' } as any,
+        CreationMethod.WEB,
+        false,
+        'profile-1'
+      )
+    ).rejects.toThrow('Channel not found');
+    expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+  });
+  it('nao adota uma publicacao sem perfil ao receber um perfil explicito', async () => {
+    const { service, repository } = buildService();
+    repository.getPostById.mockResolvedValue({
+      ...publishedPost,
+      profileId: null,
+    } as any);
+    await expect(
+      service.createPost(
+        'org-1',
+        makeBody({ type: 'update' }) as any,
+        CreationMethod.WEB,
+        false,
+        'profile-1'
+      )
+    ).rejects.toThrow('Post does not belong to this profile');
+    expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+  });
+});

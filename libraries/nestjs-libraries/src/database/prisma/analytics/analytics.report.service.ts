@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Organization } from '@prisma/client';
 import { AnalyticsReportRepository } from '@gitroom/nestjs-libraries/database/prisma/analytics/analytics.report.repository';
 import {
@@ -28,11 +28,13 @@ export class AnalyticsReportService {
 
   async getReport(
     organizationId: string,
-    { from, to, integrations }: GetReportDto
+    { from, to, integrations }: GetReportDto,
+    profileId?: string
   ): Promise<Report> {
     const channels = await this._analyticsReportRepository.getChannels(
       organizationId,
-      integrations
+      integrations,
+      profileId
     );
     const ids = channels.map((channel) => channel.id);
     const { previousFrom, previousTo } = previousPeriod(from, to);
@@ -69,8 +71,8 @@ export class AnalyticsReportService {
     });
   }
 
-  async getReportCsv(organizationId: string, query: GetReportDto) {
-    return reportToCsv(await this.getReport(organizationId, query));
+  async getReportCsv(organizationId: string, query: GetReportDto, profileId?: string) {
+    return reportToCsv(await this.getReport(organizationId, query, profileId));
   }
 
   // Walks every connected social channel once a day. One channel failing must
@@ -104,15 +106,16 @@ export class AnalyticsReportService {
   async backfill(
     organization: Organization,
     integrationId: string,
-    days = DEFAULT_BACKFILL_DAYS
+    days = DEFAULT_BACKFILL_DAYS,
+    profileId?: string
   ) {
     const integration = await this._integrationService.getIntegrationById(
       organization.id,
       integrationId
     );
 
-    if (!integration) {
-      throw new Error('Invalid integration');
+    if (!integration || (profileId && integration.profileId !== profileId)) {
+      throw new BadRequestException('Invalid integration');
     }
 
     return {

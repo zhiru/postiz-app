@@ -24,11 +24,11 @@ if (
     });
     const repository = new PostsRepository(
       ...([
-        ...Array(6).fill({ model: db }),
-        { model: db },
-      ] as ConstructorParameters<typeof PostsRepository>)
+        ...Array(6).fill({ model: db } as any),
+        { model: db } as any,
+      ] as unknown as ConstructorParameters<typeof PostsRepository>)
     );
-    const sync = new PostsSyncRepository({ model: db });
+    const sync = new PostsSyncRepository({ model: db } as any);
     const org = randomUUID();
     const otherOrg = randomUUID();
     let channel: string;
@@ -461,9 +461,9 @@ if (
         'https://example.com/report'
       );
       const report = new AnalyticsReportRepository(
-        { model: db },
-        { model: db },
-        { model: db }
+        { model: db } as any,
+        { model: db } as any,
+        { model: db } as any
       );
       const from = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
       const to = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
@@ -475,9 +475,9 @@ if (
       );
       expect(points.reduce((sum, point) => sum + point.value, 0)).toBe(1);
       const comments = new SocialCommentsRepository(
-        { model: db },
-        { model: db },
-        { model: db }
+        { model: db } as any,
+        { model: db } as any,
+        { model: db } as any
       );
       const polled = await comments.getPostsToPoll(['instagram'], 7);
       expect(

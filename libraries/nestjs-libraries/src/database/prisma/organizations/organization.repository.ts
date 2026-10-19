@@ -1,5 +1,11 @@
 import { PrismaRepository, PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
-import { Prisma, Role, ShortLinkPreference, SubscriptionTier } from '@prisma/client';
+import {
+  Prisma,
+  ProfileRole,
+  Role,
+  ShortLinkPreference,
+  SubscriptionTier,
+} from '@prisma/client';
 import { Injectable } from '@nestjs/common';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
@@ -12,6 +18,7 @@ export class OrganizationRepository {
     private _organization: PrismaRepository<'organization'>,
     private _userOrg: PrismaRepository<'userOrganization'>,
     private _user: PrismaRepository<'user'>,
+    private _profileMember: PrismaRepository<'profileMember'>,
     private _transaction: PrismaTransaction
   ) {}
 
@@ -25,6 +32,14 @@ export class OrganizationRepository {
         name: name ? `${name}###${id}` : `Unnamed User###${id}`,
         apiKey: AuthService.fixedEncryption(makeSecureId(20)),
         isTrailing: false,
+        profilesBootstrappedAt: new Date(),
+        profiles: {
+          create: {
+            name: 'Default',
+            slug: 'default',
+            isDefault: true,
+          },
+        },
         subscription: {
           create: {
             totalChannels: 1000000,
@@ -287,6 +302,14 @@ export class OrganizationRepository {
     });
   }
 
+  async isInviteConsumed(inviteId: string) {
+    const existing = await this._user.model.user.findFirst({
+      where: { inviteId },
+      select: { id: true },
+    });
+    return !!existing;
+  }
+
   getOrgByIdWithSubscription(id: string) {
     return this._organization.model.organization.findUnique({
       where: {
@@ -469,14 +492,27 @@ export class OrganizationRepository {
     body: Omit<CreateOrgUserDto, 'providerToken'> & { providerId?: string },
     hasEmail: boolean,
     ip: string,
-    userAgent: string
+    userAgent: string,
+    language?: string | null
   ) {
     return this._organization.model.organization.create({
       data: {
         name: body.company,
         apiKey: AuthService.fixedEncryption(makeSecureId(20)),
+        language: language ?? null,
         allowTrial: true,
         isTrailing: true,
+        // Perfil Default criado junto com a org; o criador (SUPERADMIN) tem
+        // acesso implicito, sem ProfileMember. O marcador impede que o seed
+        // de backfill (one-time) conceda memberships em orgs novas.
+        profilesBootstrappedAt: new Date(),
+        profiles: {
+          create: {
+            name: 'Default',
+            slug: 'default',
+            isDefault: true,
+          },
+        },
         users: {
           create: {
             role: Role.SUPERADMIN,
@@ -505,6 +541,60 @@ export class OrganizationRepository {
           },
         },
       },
+    });
+  }
+
+  // Cria SOMENTE a conta do usuario (sem workspace pessoal). Usado no registro
+  // via convite: a pessoa entra apenas no workspace de quem convidou (via
+  // addUserToOrg), como membro — modelo agencia/equipe. O auto-cadastro (sem
+  // convite) continua usando createOrgAndUser (comportamento SaaS multi-tenant).
+  async createUserForInvite(
+    body: Omit<CreateOrgUserDto, 'providerToken'> & { providerId?: string },
+    hasEmail: boolean,
+    ip: string,
+    userAgent: string
+  ) {
+    return this._user.model.user.create({
+      data: {
+        activated: body.provider !== 'LOCAL' || !hasEmail,
+        email: body.email,
+        password: body.password
+          ? AuthService.hashPassword(body.password)
+          : '',
+        providerName: body.provider,
+        providerId: body.providerId || '',
+        timezone: 0,
+        ip,
+        agent: userAgent,
+      },
+    });
+  }
+
+  // Cria um workspace pessoal para um usuario JA existente. Usado como fallback
+  // quando a entrada no workspace do convite falha (org em tier sem team,
+  // convite ja consumido, corrida) — garante que o usuario nunca fica orfao
+  // (sem nenhuma org), estado que quebraria o AuthMiddleware.
+  async createOrgForUser(
+    userId: string,
+    company: string,
+    language?: string | null
+  ) {
+    return this._organization.model.organization.create({
+      data: {
+        name: company,
+        apiKey: AuthService.fixedEncryption(makeSecureId(20)),
+        language: language ?? null,
+        allowTrial: true,
+        isTrailing: true,
+        profilesBootstrappedAt: new Date(),
+        profiles: {
+          create: { name: 'Default', slug: 'default', isDefault: true },
+        },
+        users: {
+          create: { role: Role.SUPERADMIN, user: { connect: { id: userId } } },
+        },
+      },
+      select: { id: true },
     });
   }
 
@@ -578,6 +668,15 @@ export class OrganizationRepository {
                 sendSuccessEmails: true,
                 sendFailureEmails: true,
                 sendStreakEmails: true,
+                // Perfis (e funcao no perfil) do membro NESTA org — para a tela
+                // de equipe mostrar "Fulano = Visualizador no Dell".
+                profileMembers: {
+                  where: { profile: { organizationId: orgId, deletedAt: null } },
+                  select: {
+                    role: true,
+                    profile: { select: { id: true, name: true } },
+                  },
+                },
               },
             },
           },
@@ -608,18 +707,100 @@ export class OrganizationRepository {
     });
   }
 
-  deleteOrganization(orgId: string) {
-    return this._organization.model.organization.update({
+  // Destinatarios de e-mail de notificacao escopados por perfil: admins/superadmins
+  // sempre; demais, apenas se forem membros do perfil dono do canal. profileId
+  // nulo => notificacao org-wide (todos os membros, comportamento anterior).
+  async getUsersForNotification(orgId: string, profileId?: string | null) {
+    const userOrgs = await this._userOrg.model.userOrganization.findMany({
+      where: {
+        organizationId: orgId,
+        ...(profileId
+          ? {
+              OR: [
+                { role: { in: [Role.ADMIN, Role.SUPERADMIN] } },
+                {
+                  user: {
+                    profileMembers: {
+                      // escopa a membership a ESTA org (um usuario pode ter
+                      // perfis em varias orgs) — defense-in-depth caso um
+                      // (orgId, profileId) inconsistente chegue aqui.
+                      // VIEWER e somente leitura: nao recebe e-mail de
+                      // sucesso/falha de post (isso e para Editor+).
+                      some: {
+                        profileId,
+                        profile: { organizationId: orgId },
+                        role: { not: ProfileRole.VIEWER },
+                      },
+                    },
+                  },
+                },
+              ],
+            }
+          : {}),
+      },
+      select: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            sendSuccessEmails: true,
+            sendFailureEmails: true,
+          },
+        },
+      },
+    });
+    return userOrgs.map((u) => u.user);
+  }
+
+  // Usado pelo digest/streak (via activity). Retorna o idioma da org e, por
+  // usuario, role + profileIds (escopados nesta org) + preferencias de e-mail,
+  // para o workflow filtrar destinatarios por perfil sem tocar o banco.
+  getTeamForNotifications(orgId: string) {
+    return this._organization.model.organization.findUnique({
       where: {
         id: orgId,
       },
-      data: {
-        deletedAt: new Date(),
+      select: {
+        language: true,
+        users: {
+          select: {
+            role: true,
+            user: {
+              select: {
+                email: true,
+                id: true,
+                sendSuccessEmails: true,
+                sendFailureEmails: true,
+                sendStreakEmails: true,
+                profileMembers: {
+                  where: {
+                    profile: {
+                      organizationId: orgId,
+                      deletedAt: null,
+                    },
+                  },
+                  select: {
+                    profileId: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
   }
 
   async deleteTeamMember(orgId: string, userId: string) {
+    // Remove tambem as memberships de perfil da org — sem isso, um reconvite
+    // do mesmo usuario ressuscitaria os acessos antigos sem passar pela
+    // selecao de perfis do convite.
+    await this._profileMember.model.profileMember.deleteMany({
+      where: {
+        userId,
+        profile: { organizationId: orgId },
+      },
+    });
     return this._userOrg.model.userOrganization.delete({
       where: {
         userId_organizationId: {
@@ -666,45 +847,103 @@ export class OrganizationRepository {
     });
   }
 
-  createOrgForUser(userId: string, name: string) {
-    return this._organization.model.organization.create({
-      data: {
-        name,
-        apiKey: AuthService.fixedEncryption(makeSecureId(20)),
-        allowTrial: false,
-        isTrailing: false,
-        users: {
-          create: {
-            role: Role.SUPERADMIN,
-            userId,
-          },
-        },
-      },
-      select: {
-        id: true,
-      },
-    });
-  }
-
-  getOrganizationName(orgId: string) {
+  getLanguage(orgId: string) {
     return this._organization.model.organization.findUnique({
       where: {
         id: orgId,
       },
       select: {
-        name: true,
+        language: true,
       },
     });
   }
 
-  updateOrganizationName(orgId: string, name: string) {
+  updateLanguage(orgId: string, language: string) {
     return this._organization.model.organization.update({
       where: {
         id: orgId,
       },
       data: {
-        name,
+        language,
       },
+      select: { language: true },
+    });
+  }
+
+  // Idioma dos e-mails de conta (forgot/resend) para um usuario possivelmente
+  // multi-org: usa a org mais antiga (a criada no cadastro, onde o locale foi
+  // capturado). Fallback fica com o chamador (normalizeLang -> 'pt').
+  async getFirstOrgLanguageByUserId(userId: string) {
+    const org = await this._organization.model.organization.findFirst({
+      where: {
+        users: {
+          some: {
+            userId,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+      select: {
+        language: true,
+      },
+    });
+    return org?.language ?? null;
+  }
+
+  getZernioApiKey(orgId: string) {
+    return this._organization.model.organization.findUnique({
+      where: { id: orgId },
+      select: { zernioApiKey: true },
+    });
+  }
+
+  saveZernioApiKey(orgId: string, encryptedKey: string) {
+    return this._organization.model.organization.update({
+      where: { id: orgId },
+      data: { zernioApiKey: encryptedKey },
+      select: { id: true },
+    });
+  }
+
+  removeZernioApiKey(orgId: string) {
+    return this._organization.model.organization.update({
+      where: { id: orgId },
+      data: { zernioApiKey: null },
+      select: { id: true },
+    });
+  }
+
+  getShareZernioWithProfiles(orgId: string) {
+    return this._organization.model.organization.findUnique({
+      where: { id: orgId },
+      select: { shareZernioWithProfiles: true },
+    });
+  }
+
+  updateShareZernioWithProfiles(orgId: string, enabled: boolean) {
+    return this._organization.model.organization.update({
+      where: { id: orgId },
+      data: { shareZernioWithProfiles: enabled },
+      select: { shareZernioWithProfiles: true },
+    });
+  }
+
+  async getShareProviderCredentials(orgId: string) {
+    const org = await this._organization.model.organization.findUnique({
+      where: { id: orgId },
+      select: { shareProviderCredentialsWithProfiles: true },
+    });
+    // Fail-open para o padrao ligado se a org sumir (nunca deveria aqui).
+    return org?.shareProviderCredentialsWithProfiles ?? true;
+  }
+
+  updateShareProviderCredentials(orgId: string, enabled: boolean) {
+    return this._organization.model.organization.update({
+      where: { id: orgId },
+      data: { shareProviderCredentialsWithProfiles: enabled },
+      select: { shareProviderCredentialsWithProfiles: true },
     });
   }
 
@@ -735,6 +974,7 @@ export class OrganizationRepository {
             data: {
               deletedAt: new Date(),
             },
+            select: { id: true },
           });
         },
         {
@@ -748,4 +988,39 @@ export class OrganizationRepository {
         throw err;
       });
   }
+  deleteOrganization(orgId: string) {
+    return this._organization.model.organization.update({
+      where: {
+        id: orgId,
+      },
+      data: {
+        deletedAt: new Date(),
+      },
+      select: { id: true },
+    });
+  }
+
+  getOrganizationName(orgId: string) {
+    return this._organization.model.organization.findUnique({
+      where: {
+        id: orgId,
+      },
+      select: {
+        name: true,
+      },
+    });
+  }
+
+  updateOrganizationName(orgId: string, name: string) {
+    return this._organization.model.organization.update({
+      where: {
+        id: orgId,
+      },
+      data: {
+        name,
+      },
+      select: { id: true, name: true },
+    });
+  }
+
 }

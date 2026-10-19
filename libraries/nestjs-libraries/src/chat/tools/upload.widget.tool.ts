@@ -1,3 +1,4 @@
+import { readRequestContext } from '@gitroom/nestjs-libraries/chat/tools/tool.context.helper';
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -40,12 +41,13 @@ Returns a sessionId: the files the user uploads are reported in the conversation
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
+        const profileId = readRequestContext(context).get('profileId') as string | undefined;
         try {
           const org = JSON.parse(
-            (context?.requestContext as any)?.get('organization') as string
+            readRequestContext(context).get('organization') as string
           );
           return {
-            sessionId: await this._mediaService.createUploadSession(org.id),
+            sessionId: await this._mediaService.createUploadSession(org.id, profileId),
           };
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);

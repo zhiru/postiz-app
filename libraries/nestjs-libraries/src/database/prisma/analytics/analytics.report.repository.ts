@@ -20,12 +20,14 @@ export class AnalyticsReportRepository {
   // gaining new days.
   async getChannels(
     organizationId: string,
-    integrationIds?: string[]
+    integrationIds?: string[],
+    profileId?: string
   ): Promise<ReportChannel[]> {
     return this._integration.model.integration.findMany({
       where: {
         organizationId,
         type: 'social',
+        ...(profileId ? { profileId } : {}),
         deletedAt: null,
         ...(integrationIds?.length ? { id: { in: integrationIds } } : {}),
       },

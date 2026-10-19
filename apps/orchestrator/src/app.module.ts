@@ -12,17 +12,21 @@ import { ClippingActivity } from '@gitroom/orchestrator/activities/clipping.acti
 import { CommentsActivity } from '@gitroom/orchestrator/activities/comments.activity';
 import { VideoModule } from '@gitroom/nestjs-libraries/videos/video.module';
 import { HealthController } from '@gitroom/orchestrator/health.controller';
+import { FlowActivity } from '@gitroom/orchestrator/activities/flow.activity';
+import { RepostActivity } from '@gitroom/orchestrator/activities/repost.activity';
 
 const activities = [
+  VideoActivity,
+  MediaActivity,
+  ClippingActivity,
+  CommentsActivity,
   PostsSyncActivity,
   PostActivity,
   AutopostActivity,
   EmailActivity,
   IntegrationsActivity,
-  VideoActivity,
-  MediaActivity,
-  ClippingActivity,
-  CommentsActivity,
+  FlowActivity,
+  RepostActivity,
 ];
 @Module({
   imports: [

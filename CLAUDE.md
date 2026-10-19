@@ -78,3 +78,17 @@ const useCommunity = () => {
 - Never silently change the meaning or format of a value persisted in an existing DB column; that affects every reader and all historical rows, so ask first. 
 - Never return a raw Prisma row from a model that holds credentials (`Integration`, `User` and similar) in a controller response. Repository writes on those models must use a `select` with only the fields the caller needs (like `setTimes` with `select: { id: true }`), or the controller returns nothing. This applies even where nearby code looks different.
 - Be extra careful with code invoked by webhooks of external systems (Stripe, RevenueCat and other payment providers), including everything they call down the stack (e.g. `SubscriptionService.createOrUpdateSubscription`, `modifySubscription`, `deleteSubscription`). That code must not throw exceptions: never add a `throw`, and wrap any call that can fail (DB, provider API) so a failure is caught and logged instead of propagating. A webhook that throws leaves billing state half-applied for a paying customer.
+
+
+## Integrated Robo MultiPost base
+
+This fork combines maiconramos/robo-multipost b6686fe0 with zhiru/postiz-app 741a4f70. The canonical writable GitHub repository remains **zhiru/postiz-app**. Always specify `--repo zhiru/postiz-app` for GitHub operations; donor repository examples are references only.
+
+- Preserve the existing local client, authentication, model/provider selection, hooks and deployment configuration. Never automatically enable donor MCP servers, dotcontext, Graphify generation, proxies or routing.
+- Read child CLAUDE.md for the affected area. The imported child architecture guides describe profiles, credentials, AI, automation flows and reposting.
+- Frontend copy uses `useT()` and both English/Portuguese translations; reuse native components.
+- Keep existing workflows byte-for-byte compatible with origin/main; new implementations use new workflow and activity names.
+- Preserve all production schema models/columns, platform post identities, recurring snapshots, external-post synchronization, analytics reports, comment inbox, webhook delivery history and instance administration.
+- Every read/write introduced by a profile must be scoped to both the authenticated organization and permitted profile. Credentials stay server-side and are decrypted only at the point of use.
+- Add focused regression tests for integrations and unknown-result sends. Update product docs and the Unreleased changelog alongside changes.
+- Production deployment is a separate release step after migration and regression validation. No automatic release, third-party registry push or live comment/DM tests.

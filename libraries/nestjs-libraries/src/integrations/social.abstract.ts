@@ -1,3 +1,14 @@
+import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import sharp from 'sharp';
+import { createReadStream, statSync } from 'fs';
+import { Readable } from 'stream';
+
+const MEDIA_READ_TIMEOUT = 120_000;
+const isReadTimeout = (err: any) =>
+  err?.name === 'TimeoutError' || err?.cause?.name === 'TimeoutError';
+export const stripQuery = heartbeatEndpoint;
+export type ValidityMedia = { path: string; thumbnail?: string };
+
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Integration } from '@prisma/client';
 import {
@@ -5,59 +16,45 @@ import {
   PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { ApplicationFailure } from '@temporalio/activity';
-import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
 import {
   getSsrfSafeAxios,
-  getSsrfSafeDispatcher,
+  ssrfSafeFetch,
 } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
-import sharp from 'sharp';
-import { createReadStream, readFileSync, statSync } from 'fs';
-import { Readable } from 'stream';
+import { AxiosInstance } from 'axios';
+import { readFileSync } from 'fs';
+import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
 
-// Media reads answer headers in well under a second and the chunk sizes the
-// providers ask for finish in under two, with the slowest healthy read we
-// measured at about eleven, so two minutes is only ever reached by a stalled
-// transfer.
-const MEDIA_READ_TIMEOUT = 120_000;
-
-// AbortSignal.timeout rejects with a TimeoutError, which undici may surface
-// directly or wrap as the cause of the fetch rejection.
-const isReadTimeout = (err: any) =>
-  err?.name === 'TimeoutError' || err?.cause?.name === 'TimeoutError';
-
-export const stripQuery = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.origin}${parsed.pathname}`;
-  } catch (err) {
-    return url.split('?')[0];
-  }
-};
-
-export type ValidityMedia = {
-  path: string;
-  thumbnail?: string;
-};
-
-// Temporal serializes the whole ApplicationFailure (message + details) into the
-// workflow history and ships it over gRPC, which has a hard frame limit (4MB by
-// default). Provider error messages/bodies can be huge (full HTML error pages,
-// base64 media echoed back, stack traces), so we cap every string that goes into
-// the failure to keep the history small and avoid "GRPC Message too large".
+// Temporal persiste ApplicationFailure inteira no historico e a transporta por
+// gRPC. Respostas de provider podem conter HTML, stacks ou blobs enormes; os
+// limites abaixo mantem o diagnostico util sem permitir que uma falha estoure o
+// frame/historico. Os codigos Meta aparecem no inicio do JSON e sao preservados.
 const MAX_FAILURE_MESSAGE = 2_000;
 const MAX_FAILURE_FIELD = 4_000;
 
-export function truncateForTemporal(value: any, max: number): string {
+export function heartbeatEndpoint(value: string): string {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return 'unsupported-url';
+    }
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return 'invalid-url';
+  }
+}
+
+export function truncateForTemporal(value: unknown, max: number): string {
   if (value === null || value === undefined) {
     return '';
   }
 
-  const str = typeof value === 'string' ? value : safeStringify(value);
-  if (str.length <= max) {
-    return str;
+  const serialized = typeof value === 'string' ? value : safeStringify(value);
+  const text = typeof serialized === 'string' ? serialized : String(value);
+  if (text.length <= max) {
+    return text;
   }
 
-  return `${str.slice(0, max)}… [truncated ${str.length - max} chars]`;
+  return `${text.slice(0, max)}… [truncated ${text.length - max} chars]`;
 }
 
 export class RefreshToken extends ApplicationFailure {
@@ -170,6 +167,7 @@ export function safeStringify(obj: any) {
 export abstract class SocialAbstract {
   abstract identifier: string;
   maxConcurrentJob = 1;
+  hiddenFromList = false;
 
   public handleErrors(
     body: string,
@@ -297,17 +295,19 @@ export abstract class SocialAbstract {
       return (
         // the media path is user-influenced, so it goes through the same
         // SSRF-safe client as every other outbound media read
-        await this.getSsrfSafeAxios()({
-          url: path,
-          method: 'GET',
-          responseType: 'arraybuffer',
-          // Same stall as the ranged reads: headers arrive fast and the body
-          // then stops, and without a deadline the read never settles and
-          // holds the activity's worker slot. Images are a few MB and arrive
-          // in about a second.
-          signal: AbortSignal.timeout(MEDIA_READ_TIMEOUT),
-        })
-      ).data;
+        (
+          await this.getSsrfSafeAxios()({
+            url: path,
+            method: 'GET',
+            responseType: 'arraybuffer',
+            // Same stall as the ranged reads: headers arrive fast and the body
+            // then stops, and without a deadline the read never settles and
+            // holds the activity's worker slot. Images are a few MB and arrive
+            // in about a second.
+            signal: AbortSignal.timeout(MEDIA_READ_TIMEOUT),
+          })
+        ).data
+      );
     } catch (err: any) {
       // axios reports an aborted signal as a canceled request
       if (err?.code !== 'ERR_CANCELED' && !isReadTimeout(err)) {
@@ -320,7 +320,10 @@ export abstract class SocialAbstract {
 
       throw new BadBody(
         '',
-        JSON.stringify({ timeoutMs: MEDIA_READ_TIMEOUT, path: stripQuery(path) }),
+        JSON.stringify({
+          timeoutMs: MEDIA_READ_TIMEOUT,
+          path: stripQuery(path),
+        }),
         Buffer.from('{}'),
         'We could not read the media for this post, so it was not published'
       );
@@ -370,9 +373,7 @@ export abstract class SocialAbstract {
     rangeRetries = 0
   ): Promise<Buffer> {
     if (path.indexOf('http') === 0) {
-      setHeartbeatDetails(
-        `media chunk ${start}-${end} ${stripQuery(path)}`
-      );
+      setHeartbeatDetails(`media chunk ${start}-${end} ${stripQuery(path)}`);
       try {
         const response = await fetch(path, {
           headers: {
@@ -563,6 +564,16 @@ export abstract class SocialAbstract {
     try {
       value = await func();
     } catch (err) {
+      // Log cru do erro antes de passar por handleErrors — caso contrario
+      // o wrapper do runInConcurrent joga fora o stack e a mensagem original
+      // do provider (ex.: resposta da API do X/Twitter), dificultando
+      // diagnosticar falhas no worker do Temporal. Divergencia documentada
+      // em .claude/skills/sync-upstream/SKILL.md.
+      console.error(
+        '[runInConcurrent] provider error:',
+        (err as any)?.data || (err as any)?.message || err,
+        (err as any)?.stack || ''
+      );
       const handle = this.handleErrors(safeStringify(err), 200);
       value = { err: true, value: 'Unknown Error', ...(handle || {}) };
       globalErr = err;
@@ -604,17 +615,10 @@ export abstract class SocialAbstract {
     ignoreConcurrency = false,
     message = ''
   ): Promise<Response> {
-    // A platform that accepts the connection and then goes silent leaves the
-    // activity with nothing logged until startToCloseTimeout. Record the call
-    // first so the timeout failure names it. Query string is dropped - some
-    // providers carry access_token there and details are stored by Temporal.
-    setHeartbeatDetails(`fetch ${stripQuery(url)}`);
-
-    const request = await fetch(url, {
-      ...options,
-      // @ts-ignore - undici-only option, not in the lib.dom RequestInit type
-      dispatcher: (options as any).dispatcher ?? getSsrfSafeDispatcher(),
-    });
+    // Query strings may contain access tokens. Persist only the endpoint path
+    // as Temporal heartbeat diagnostic data.
+    setHeartbeatDetails(`fetch ${heartbeatEndpoint(url)}`);
+    const request = await ssrfSafeFetch(url, options);
 
     if (request.status === 200 || request.status === 201) {
       return request;
@@ -665,12 +669,7 @@ export abstract class SocialAbstract {
     }
 
     if (handleError?.type === 'disconnect') {
-      throw new Disconnect(
-        identifier,
-        json,
-        options.body!,
-        handleError?.value
-      );
+      throw new Disconnect(identifier, json, options.body!, handleError?.value);
     }
 
     if (
@@ -692,6 +691,41 @@ export abstract class SocialAbstract {
       options.body!,
       handleError?.value || 'Unknown Error'
     );
+  }
+
+  // Analytics must not inherit posting retries/BadBody, but RefreshToken is
+  // kept so the service layer can renew or self-heal the integration.
+  protected async analyticsFetch(
+    url: string,
+    options: RequestInit = {}
+  ): Promise<Response> {
+    const request = await ssrfSafeFetch(url, options);
+
+    if (request.status === 200 || request.status === 201) {
+      return request;
+    }
+
+    let body = '{}';
+    try {
+      body = await request.clone().text();
+    } catch (err) {
+      body = '{}';
+    }
+
+    const handleError = this.handleErrors(body, request.status);
+    if (
+      handleError?.type === 'refresh-token' ||
+      (request.status === 401 && !handleError)
+    ) {
+      throw new RefreshToken(
+        '',
+        body,
+        options.body || '{}',
+        handleError?.value
+      );
+    }
+
+    return request;
   }
 
   checkScopes(required: string[], got: string | string[]) {

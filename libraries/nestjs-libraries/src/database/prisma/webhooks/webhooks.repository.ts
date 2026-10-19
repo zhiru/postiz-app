@@ -35,19 +35,21 @@ export class WebhooksRepository {
     private _webhookDeliveries: PrismaRepository<'webhookDeliveries'>
   ) {}
 
-  getTotal(orgId: string) {
+  getTotal(orgId: string, profileId?: string) {
     return this._webhooks.model.webhooks.count({
       where: {
         organizationId: orgId,
+        ...(profileId ? { profileId } : {}),
         deletedAt: null,
       },
     });
   }
 
-  getWebhooks(orgId: string) {
+  getWebhooks(orgId: string, profileId?: string) {
     return this._webhooks.model.webhooks.findMany({
       where: {
         organizationId: orgId,
+        ...(profileId ? { profileId } : {}),
         deletedAt: null,
       },
       select: listSelect,
@@ -55,11 +57,15 @@ export class WebhooksRepository {
   }
 
   // Only the dispatcher needs the secret, and it never leaves the backend.
-  getWebhooksForDispatch(orgId: string) {
+  getWebhooksForDispatch(orgId: string, integrationId?: string) {
     return this._webhooks.model.webhooks.findMany({
       where: {
         organizationId: orgId,
         deletedAt: null,
+        ...(integrationId ? { OR: [
+          { profileId: null },
+          { profile: { integrations: { some: { id: integrationId } } } },
+        ] } : {}),
       },
       select: {
         ...listSelect,
@@ -68,39 +74,44 @@ export class WebhooksRepository {
     });
   }
 
-  deleteWebhook(orgId: string, id: string) {
+  deleteWebhook(orgId: string, id: string, profileId?: string) {
     return this._webhooks.model.webhooks.update({
       where: {
         id,
         organizationId: orgId,
+        ...(profileId ? { profileId } : {}),
       },
       data: {
         deletedAt: new Date(),
       },
+      select: { id: true },
     });
   }
 
-  async rotateSecret(orgId: string, id: string) {
+  async rotateSecret(orgId: string, id: string, profileId?: string) {
     const secret = generateWebhookSecret();
     await this._webhooks.model.webhooks.update({
       where: {
         id,
         organizationId: orgId,
+        ...(profileId ? { profileId } : {}),
       },
       data: {
         secret,
       },
+      select: { id: true },
     });
 
     return { secret };
   }
 
-  getDeliveries(orgId: string, id: string) {
+  getDeliveries(orgId: string, id: string, profileId?: string) {
     return this._webhookDeliveries.model.webhookDeliveries.findMany({
       where: {
         webhookId: id,
         webhook: {
           organizationId: orgId,
+          ...(profileId ? { profileId } : {}),
         },
       },
       orderBy: {
@@ -140,13 +151,14 @@ export class WebhooksRepository {
     });
   }
 
-  async createWebhook(orgId: string, body: WebhooksDto) {
+  async createWebhook(orgId: string, body: WebhooksDto, profileId?: string) {
     const secret = generateWebhookSecret();
     const { id, secret: savedSecret } =
       await this._webhooks.model.webhooks.upsert({
         where: {
           id: body.id || uuidv4(),
           organizationId: orgId,
+          ...(profileId ? { profileId } : {}),
         },
         create: {
           organizationId: orgId,
@@ -154,27 +166,31 @@ export class WebhooksRepository {
           name: body.name,
           events: body.events || [],
           secret,
+          ...(profileId ? { profileId } : {}),
         },
         update: {
           url: body.url,
           name: body.name,
           events: body.events || [],
         },
+        select: { id: true, secret: true },
       });
 
     await this._webhooks.model.webhooks.update({
       where: {
         id,
         organizationId: orgId,
+        ...(profileId ? { profileId } : {}),
       },
       data: {
         integrations: {
           deleteMany: {},
           create: body.integrations.map((integration) => ({
-            integrationId: integration.id,
+            integration: { connect: { id: integration.id, organizationId: orgId, ...(profileId ? { profileId } : {}) } },
           })),
         },
       },
+      select: { id: true },
     });
 
     // Returned once, on creation only, so the screen can show it and forget it.

@@ -10,6 +10,7 @@ import {
   ValidateNested,
   IsOptional,
 } from 'class-validator';
+import { MediaDto } from '@gitroom/nestjs-libraries/dtos/media/media.dto';
 
 export class Collaborators {
   @IsDefined()
@@ -65,6 +66,11 @@ export class InstagramDto {
   @IsArray()
   @IsOptional()
   collaborators: Collaborators[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MediaDto)
+  cover?: MediaDto;
 
   @Type(() => InstagramAudio)
   @ValidateNested()

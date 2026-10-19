@@ -1,4 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
+import { detectAllowedUploadMime } from '@gitroom/nestjs-libraries/upload/allowed.upload.mime';
 import { pipeline, Readable, Transform } from 'stream';
 import { IUploadProvider } from './upload.interface';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -89,5 +90,52 @@ export async function uploadStreamToStorage(
     // The size cap rejects mid-upload with its own BadRequestException
     body.destroy();
     throw err;
+  }
+}
+
+export const getMaxUploadSize = getMaxSize;
+
+@Injectable()
+export class CustomFileValidationPipe implements PipeTransform {
+  async transform(value: any) {
+    if (!value || typeof value !== 'object') {
+      return value;
+    }
+
+    // Skip non-file parameters (org, body, query, etc.)
+    if (
+      !('buffer' in value) &&
+      !('mimetype' in value) &&
+      !('fieldname' in value)
+    ) {
+      return value;
+    }
+
+    if (!value.buffer || !Buffer.isBuffer(value.buffer)) {
+      throw new BadRequestException('Invalid file upload.');
+    }
+
+    // Valida pelo conteudo real (magic bytes), nunca pelo mimetype declarado.
+    const detected = await detectAllowedUploadMime(value.buffer);
+    if (!detected) {
+      throw new BadRequestException('Unsupported file type.');
+    }
+
+    const maxSize = getMaxUploadSize(detected.mime);
+    if (value.size > maxSize) {
+      throw new BadRequestException(
+        `File size exceeds the maximum allowed size of ${maxSize} bytes.`
+      );
+    }
+
+    value.mimetype = detected.mime;
+    const safeBase =
+      (value.originalname || 'upload')
+        .replace(/\.[^./\\]*$/, '')
+        .replace(/[\\/]/g, '_')
+        .slice(0, 100) || 'upload';
+    value.originalname = `${safeBase}.${detected.ext}`;
+
+    return value;
   }
 }

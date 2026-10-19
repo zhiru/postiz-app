@@ -7,6 +7,8 @@ import OrganizationNameComponent from '@gitroom/frontend/components/settings/org
 import AuthenticationComponent from '@gitroom/frontend/components/settings/authentication.component';
 import EmailNotificationsComponent from '@gitroom/frontend/components/settings/email-notifications.component';
 import ShortlinkPreferenceComponent from '@gitroom/frontend/components/settings/shortlink-preference.component';
+import ShareZernioWithProfilesComponent from '@gitroom/frontend/components/settings/share-zernio-with-profiles.component';
+import LanguagePreferenceComponent from '@gitroom/frontend/components/settings/language-preference.component';
 import DeleteAccountComponent from '@gitroom/frontend/components/settings/delete-account.component';
 
 const MetricComponent = dynamic(
@@ -25,7 +27,9 @@ export const GlobalSettings = () => {
       <AuthenticationComponent />
       <MetricComponent />
       <EmailNotificationsComponent />
+      <LanguagePreferenceComponent />
       <ShortlinkPreferenceComponent />
+      <ShareZernioWithProfilesComponent />
       <DeleteAccountComponent />
     </div>
   );

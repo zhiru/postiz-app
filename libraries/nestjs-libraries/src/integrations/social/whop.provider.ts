@@ -6,26 +6,43 @@ import {
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { timer } from '@gitroom/helpers/utils/timer';
 import {
-  BadBody,
   SocialAbstract,
+  BadBody,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
-import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { WhopDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/whop.dto';
+import {
+  ssrfSafeFetch,
+  getSsrfSafeDispatcher,
+} from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { Integration } from '@prisma/client';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 
 export class WhopProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 3; // Whop limits are per token
   identifier = 'whop';
+
   name = 'Whop';
+
   isBetweenSteps = false;
-  scopes = ['openid', 'profile', 'email', 'forum:post:create', 'forum:read', 'company:basic:read'];
+
+  scopes = [
+    'openid',
+    'profile',
+    'email',
+    'forum:post:create',
+    'forum:read',
+    'company:basic:read',
+  ];
+
   refreshCron = false;
+
   editor = 'markdown' as const;
+
   dto = WhopDto;
+
   toolTip = 'Schedule posts to forums';
 
   maxLength() {
@@ -38,9 +55,7 @@ export class WhopProvider extends SocialAbstract implements SocialProvider {
 
   override handleErrors(
     body: string
-  ):
-    | { type: 'refresh-token' | 'bad-body'; value: string }
-    | undefined {
+  ): { type: 'refresh-token' | 'bad-body'; value: string } | undefined {
     if (body.includes('invalid_grant')) {
       return {
         type: 'refresh-token' as const,
@@ -107,7 +122,7 @@ export class WhopProvider extends SocialAbstract implements SocialProvider {
     const state = makeSecureId(6);
     const codeVerifier = randomBytes(32).toString('base64url');
     const codeChallenge = this.generateCodeChallenge(codeVerifier);
-    const nonce = makeSecureId(16);
+    const nonce = makeId(16);
 
     return {
       url:
@@ -427,4 +442,6 @@ export class WhopProvider extends SocialAbstract implements SocialProvider {
       },
     ];
   }
+
+  override maxConcurrentJob = 3;
 }

@@ -2,6 +2,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -82,6 +83,13 @@ class CloudflareStorage implements IUploadProvider {
           return next(args);
         },
       { step: 'build', name: 'customHeaders' }
+    );
+  }
+
+  async healthCheck(): Promise<void> {
+    // HeadBucket valida credencial R2 + acesso ao bucket SEM escrever nada.
+    await this._client.send(
+      new HeadBucketCommand({ Bucket: this._bucketName })
     );
   }
 
@@ -244,16 +252,47 @@ class CloudflareStorage implements IUploadProvider {
   }
 
   // Accepts either the public URL or the bare key
-  async removeFile(filePath: string): Promise<void> {
-    const fileName = filePath.split('/').pop();
-    if (!fileName) {
+  /**
+   * Deriva a Key do objeto no bucket a partir da URL publica gravada em
+   * `Media.path`/`Media.thumbnail`. Exige o prefixo `CLOUDFLARE_BUCKET_URL`:
+   * uma URL de terceiro (import externo, CDN de rede social) nao pertence ao
+   * nosso bucket e nao pode virar `DeleteObject` — deletariamos por engano um
+   * objeto homonimo. Retorna '' quando a URL nao e nossa.
+   */
+  private resolveObjectKey(publicPath: string): string {
+    if (!publicPath || !this._uploadUrl) {
+      return '';
+    }
+
+    const clean = publicPath.split('?')[0].split('#')[0];
+    const prefix = this._uploadUrl.endsWith('/')
+      ? this._uploadUrl
+      : `${this._uploadUrl}/`;
+
+    if (!clean.startsWith(prefix)) {
+      return '';
+    }
+
+    try {
+      return decodeURIComponent(clean.slice(prefix.length));
+    } catch {
+      return clean.slice(prefix.length);
+    }
+  }
+
+  // Implement the removeFile method from IUploadProvider
+  async removeFile(publicPath: string): Promise<void> {
+    const key = this.resolveObjectKey(publicPath);
+    if (!key) {
       return;
     }
 
+    // DeleteObject no R2/S3 e idempotente: apagar chave inexistente devolve
+    // 204, entao nao ha caso de "not found" para tratar aqui.
     await this._client.send(
       new DeleteObjectCommand({
         Bucket: this._bucketName,
-        Key: fileName,
+        Key: key,
       })
     );
   }

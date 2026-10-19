@@ -1,3 +1,4 @@
+import { readRequestContext } from '@gitroom/nestjs-libraries/chat/tools/tool.context.helper';
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -48,9 +49,11 @@ export class ClippingWidgetTicketTool implements AgentToolInterface {
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
+        const profileId = readRequestContext(context).get('profileId') as string | undefined;
+        if (profileId) return { error: 'Clipping requires organization credentials.' };
         try {
           const org = JSON.parse(
-            (context?.requestContext as any)?.get('organization') as string
+            readRequestContext(context).get('organization') as string
           );
           return {
             ticket: await this._clippingService.createWidgetTicket(

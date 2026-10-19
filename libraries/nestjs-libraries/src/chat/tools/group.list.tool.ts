@@ -1,3 +1,4 @@
+import { readRequestContext } from '@gitroom/nestjs-libraries/chat/tools/tool.context.helper';
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import { createTool } from '@mastra/core/tools';
 import { Injectable } from '@nestjs/common';
@@ -34,10 +35,15 @@ export class GroupListTool implements AgentToolInterface {
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
+        const profileId = readRequestContext(context).get('profileId') as string | undefined;
         const organizationId = JSON.parse(
-          (context?.requestContext as any)?.get('organization') as string
+          readRequestContext(context).get('organization') as string
         ).id;
 
+        if (profileId) {
+          const channels = await this._integrationService.getIntegrationsList(organizationId, profileId);
+          return { output: [...new Map(channels.filter((item) => item.customer).map((item) => [item.customer.id, { id: item.customer.id, name: item.customer.name }])).values()] };
+        }
         return {
           output: (await this._integrationService.customers(organizationId)).map(
             (p) => ({

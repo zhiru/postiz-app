@@ -1,38 +1,44 @@
-import { ReportMetricsMap } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
-  PendingCheckResponse,
+  ClientInformation,
   PostDetails,
   PostResponse,
   SocialProvider,
+  ReportMetricsMap,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { Integration } from '@prisma/client';
-import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
-import { google } from 'googleapis';
+import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
+import { google, youtube_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library/build/src/auth/oauth2client';
 import { YoutubeSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/youtube.settings.dto';
 import {
   BadBody,
+  SocialAbstract,
   PublishedWithError,
   RefreshToken,
-  SocialAbstract,
   ValidityMedia,
   rangeReadFailure,
   stripQuery,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import * as process from 'node:process';
 import dayjs from 'dayjs';
+import { GaxiosResponse } from 'gaxios/build/src/common';
+import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { Integration } from '@prisma/client';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { createReadStream, statSync } from 'fs';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
-import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 
-const clientAndYoutube = () => {
+import Schema$Video = youtube_v3.Schema$Video;
+
+const clientAndYoutube = (clientInformation?: ClientInformation) => {
   const client = new google.auth.OAuth2({
-    clientId: process.env.YOUTUBE_CLIENT_ID,
-    clientSecret: process.env.YOUTUBE_CLIENT_SECRET,
+    clientId: clientInformation?.client_id || process.env.YOUTUBE_CLIENT_ID,
+    clientSecret:
+      clientInformation?.client_secret || process.env.YOUTUBE_CLIENT_SECRET,
     redirectUri: `${process.env.FRONTEND_URL}/integrations/social/youtube`,
   });
 
@@ -59,15 +65,18 @@ const clientAndYoutube = () => {
 
 @Rules('YouTube must have on video attachment, it cannot be empty')
 export class YoutubeProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 200; // YouTube has strict upload quotas
+  override maxConcurrentJob = 200;
+
   identifier = 'youtube';
-  reportMetrics: ReportMetricsMap = {
-    followersGained: ['Subscribers Gained'],
-    engagement: ['Likes'],
-  };
+
   name = 'YouTube';
+
   isBetweenSteps = true;
+
+  keepReconnectAuthTokens = true;
+
   dto = YoutubeSettingsDto;
+
   scopes = [
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email',
@@ -80,21 +89,9 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
   ];
 
   editor = 'normal' as const;
+
   maxLength() {
     return 5000;
-  }
-
-  override async checkValidity(
-    items: Array<ValidityMedia[]>
-  ): Promise<string | true> {
-    const [firstItems] = items ?? [];
-    if (items?.[0]?.length !== 1) {
-      return 'You need one media';
-    }
-    if ((firstItems?.[0]?.path?.indexOf?.('mp4') ?? -1) === -1) {
-      return 'Item must be a video';
-    }
-    return true;
   }
 
   override handleErrors(body: string):
@@ -103,117 +100,11 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         value: string;
       }
     | undefined {
-    if (body.includes('invalidTags')) {
-      return {
-        type: 'bad-body',
-        value: 'The maximum allowed is 500 characters in total.',
-      };
-    }
-
     if (body.includes('invalidTitle')) {
       return {
         type: 'bad-body',
         value:
           'We have uploaded your video but we could not set the title. Title is too long.',
-      };
-    }
-
-    if (body.includes('invalidDescription')) {
-      return {
-        type: 'bad-body',
-        value:
-          'Your video description is invalid, it may contain disallowed characters such as < or >.',
-      };
-    }
-
-    if (body.includes('invalidCategoryId')) {
-      return {
-        type: 'bad-body',
-        value: 'The selected video category is invalid.',
-      };
-    }
-
-    if (body.includes('invalidPublishAt')) {
-      return {
-        type: 'bad-body',
-        value: 'The scheduled publishing time is invalid.',
-      };
-    }
-
-    if (body.includes('invalidRecordingDetails')) {
-      return {
-        type: 'bad-body',
-        value: 'The recording details for the video are invalid.',
-      };
-    }
-
-    if (body.includes('invalidVideoGameRating')) {
-      return {
-        type: 'bad-body',
-        value: 'The video game rating is invalid.',
-      };
-    }
-
-    if (body.includes('invalidFilename')) {
-      return {
-        type: 'bad-body',
-        value: 'The video file name is invalid.',
-      };
-    }
-
-    if (body.includes('defaultLanguageNotSet')) {
-      return {
-        type: 'bad-body',
-        value:
-          'We could not set the localized video details because no default language is set.',
-      };
-    }
-
-    if (body.includes('invalidVideoMetadata')) {
-      return {
-        type: 'bad-body',
-        value:
-          'Some of the video details are invalid, please review the title, description and tags.',
-      };
-    }
-
-    if (body.includes('mediaBodyRequired')) {
-      return {
-        type: 'bad-body',
-        value:
-          'The video file is missing or could not be read, please re-upload the video.',
-      };
-    }
-
-    if (body.includes('imageFormatUnsupported')) {
-      return {
-        type: 'bad-body',
-        value:
-          'We have uploaded your video but the thumbnail format is not supported, please use JPEG or PNG.',
-      };
-    }
-
-    if (body.includes('imageTooTall')) {
-      return {
-        type: 'bad-body',
-        value:
-          'We have uploaded your video but the thumbnail image is too tall.',
-      };
-    }
-
-    if (body.includes('imageTooWide')) {
-      return {
-        type: 'bad-body',
-        value:
-          'We have uploaded your video but the thumbnail image is too wide.',
-      };
-    }
-
-    if (body.includes('rateLimitExceeded')) {
-      return {
-        type: 'bad-body',
-        value:
-          'You are sending requests too quickly, please wait a little while and try again.',
       };
     }
 
@@ -245,7 +136,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       return {
         type: 'bad-body',
         value:
-          'Your video was uploaded to YouTube successfully, but we could not set the thumbnail: custom thumbnails require a phone-verified YouTube channel. Verify your channel at youtube.com/verify, and set this video\'s thumbnail manually in YouTube Studio.',
+          'Your account is not verified, we have uploaded your video but we could not set the thumbnail. Please verify your account and try again.',
       };
     }
 
@@ -267,21 +158,18 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     return undefined;
   }
 
-  refreshErrorMessage(err: any): string | undefined {
-    const data = err?.response?.data || {};
-    const text = `${data.error_subtype || ''} ${data.error_description || ''} ${
-      err?.message || ''
-    }`;
-
-    if (text.includes('invalid_rapt')) {
-      return `because your organization's Google Workspace session policy invalidated its access. Ask your Google Workspace admin to mark Postiz as a trusted app and turn on "Exempt trusted apps" (https://support.google.com/a/answer/9368756) to prevent this from happening again`;
-    }
-
-    return undefined;
-  }
-
-  async refreshToken(refresh_token: string): Promise<AuthTokenDetails> {
-    const { client, oauth2 } = clientAndYoutube();
+  async refreshToken(
+    refresh_token: string,
+    clientInformation?: ClientInformation
+  ): Promise<AuthTokenDetails> {
+    // Passar clientInformation aqui e critico: o refresh_token foi emitido
+    // pelo OAuth client do workspace (Settings > Credenciais > YouTube),
+    // entao o refresh tem que usar o MESMO client_id/client_secret. Caso
+    // contrario o Google retorna invalid_grant e o orchestrator marca a
+    // integracao como `refreshNeeded` num loop infinito (usuario reconecta,
+    // proximo cron quebra de novo). Sintoma anterior: refreshToken="" no
+    // banco e mensagem "you need to reconnect" repetindo a cada hora.
+    const { client, oauth2 } = clientAndYoutube(clientInformation);
     client.setCredentials({ refresh_token });
     const { credentials } = await client.refreshAccessToken();
     const user = oauth2(client);
@@ -303,13 +191,16 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async generateAuthUrl() {
+  async generateAuthUrl(clientInformation?: ClientInformation) {
     const state = makeSecureId(7);
-    const { client } = clientAndYoutube();
+    const { client } = clientAndYoutube(clientInformation);
     return {
       url: client.generateAuthUrl({
         access_type: 'offline',
         prompt: 'consent',
+        // Sem isso o Google pode pular a tela de consent quando a conta ja
+        // autorizou o app, e nao emitir refresh_token novo.
+        include_granted_scopes: false,
         state,
         redirect_uri: `${process.env.FRONTEND_URL}/integrations/social/youtube`,
         scope: this.scopes.slice(0),
@@ -319,12 +210,37 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  async authenticate(params: {
-    code: string;
-    codeVerifier: string;
-    refresh?: string;
-  }) {
-    const { client, oauth2 } = clientAndYoutube();
+  async revokeToken(accessToken: string): Promise<void> {
+    // POST https://oauth2.googleapis.com/revoke?token={token}
+    // Aceita access_token ou refresh_token. Se o token ja estiver expirado,
+    // a chamada pode falhar — ignoramos silenciosamente porque o
+    // include_granted_scopes=false + prompt=consent ja forcam novo refresh.
+    try {
+      await this.getSsrfSafeAxios().post(
+        `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(
+          accessToken
+        )}`,
+        null,
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        }
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  async authenticate(
+    params: {
+      code: string;
+      codeVerifier: string;
+      refresh?: string;
+    },
+    clientInformation?: ClientInformation
+  ) {
+    const { client, oauth2 } = clientAndYoutube(clientInformation);
     const { tokens } = await client.getToken(params.code);
     client.setCredentials(tokens);
     const { scopes } = await client.getTokenInfo(tokens.access_token!);
@@ -415,17 +331,10 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     requiredId: string,
     accessToken: string
   ): Promise<Omit<AuthTokenDetails, 'refreshToken' | 'expiresIn'>> {
-    const { client, youtube } = clientAndYoutube();
-    client.setCredentials({ access_token: accessToken });
+    const pages = await this.pages(accessToken);
+    const findPage = pages.find((p) => p.id === requiredId);
 
-    // don't go through pages() here, it swallows the real Google error and an
-    // empty list would be reported as a missing channel
-    const { data } = await youtube(client).channels.list({
-      part: ['id'],
-      mine: true,
-    });
-
-    if (!(data.items || []).some((p) => p.id === requiredId)) {
+    if (!findPage) {
       throw new Error('Channel not found');
     }
 
@@ -442,20 +351,256 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  // ---------------------------------------------------------------------------
-  // RESUMABLE UPLOAD (no more videos.insert): YouTube only creates the video
-  // resource when the final byte of the session is received, so a failed or
-  // retried upload can never leave a video behind - and the session URI can
-  // always be asked whether the video was created (the "unknown outcome" cure).
-  // ---------------------------------------------------------------------------
-  // YouTube requires chunk sizes to be a multiple of 256KB (except the last).
+  async post(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const [response] = await this.postPending(
+      id,
+      accessToken,
+      postDetails,
+      integration
+    );
+
+    if (response.status !== 'pending') {
+      return [response];
+    }
+
+    let pendingData = response.pendingData;
+    const started = Date.now();
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method, leaving room for one more full upload batch: failing here
+      // is safe (no video exists until the upload completes and the abandoned
+      // session just expires), timing the activity out is not.
+      if (
+        Date.now() - started >
+        8 * 60 * 1000 - YoutubeProvider.YOUTUBE_UPLOAD_BATCH_MS
+      ) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          '{}',
+          'The video upload took too long, please try a smaller video'
+        );
+      }
+
+      const finalize = await this.finalizePost(
+        accessToken,
+        pendingData,
+        integration
+      );
+
+      if (finalize.status === 'completed') {
+        return [
+          {
+            id: response.id,
+            releaseURL: finalize.releaseURL,
+            postId: finalize.postId,
+            status: 'success',
+          },
+        ];
+      }
+
+      pendingData = finalize.pendingData;
+    }
+  }
+
+  async analytics(
+    id: string,
+    accessToken: string,
+    date: number
+  ): Promise<AnalyticsData[]> {
+    try {
+      const endDate = dayjs().format('YYYY-MM-DD');
+      const startDate = dayjs().subtract(date, 'day').format('YYYY-MM-DD');
+
+      const { client, youtubeAnalytics } = clientAndYoutube();
+      client.setCredentials({ access_token: accessToken });
+
+      const youtubeClient = youtubeAnalytics(client);
+      const { data } = await youtubeClient.reports.query({
+        ids: 'channel==MINE',
+        startDate,
+        endDate,
+        metrics:
+          'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,likes,subscribersLost',
+        dimensions: 'day',
+        sort: 'day',
+      });
+
+      const columns = data?.columnHeaders?.map((p) => p.name)!;
+      const mappedData = data?.rows?.map((p) => {
+        return columns.reduce((acc, curr, index) => {
+          acc[curr!] = p[index];
+          return acc;
+        }, {} as any);
+      });
+
+      const acc = [] as any[];
+      acc.push({
+        label: 'Estimated Minutes Watched',
+        data: mappedData?.map((p: any) => ({
+          total: p.estimatedMinutesWatched,
+          date: p.day,
+        })),
+      });
+
+      acc.push({
+        label: 'Average View Duration',
+        average: true,
+        data: mappedData?.map((p: any) => ({
+          total: p.averageViewDuration,
+          date: p.day,
+        })),
+      });
+
+      acc.push({
+        label: 'Average View Percentage',
+        average: true,
+        data: mappedData?.map((p: any) => ({
+          total: p.averageViewPercentage,
+          date: p.day,
+        })),
+      });
+
+      acc.push({
+        label: 'Subscribers Gained',
+        data: mappedData?.map((p: any) => ({
+          total: p.subscribersGained,
+          date: p.day,
+        })),
+      });
+
+      acc.push({
+        label: 'Subscribers Lost',
+        data: mappedData?.map((p: any) => ({
+          total: p.subscribersLost,
+          date: p.day,
+        })),
+      });
+
+      acc.push({
+        label: 'Likes',
+        data: mappedData?.map((p: any) => ({
+          total: p.likes,
+          date: p.day,
+        })),
+      });
+
+      return acc;
+    } catch (err) {
+      console.error('Error fetching YouTube analytics:', err);
+      return [];
+    }
+  }
+
+  async postAnalytics(
+    integrationId: string,
+    accessToken: string,
+    postId: string,
+    date: number
+  ): Promise<AnalyticsData[]> {
+    const today = dayjs().format('YYYY-MM-DD');
+
+    try {
+      const { client, youtube } = clientAndYoutube();
+      client.setCredentials({ access_token: accessToken });
+      const youtubeClient = youtube(client);
+
+      // Fetch video statistics
+      const response = await youtubeClient.videos.list({
+        part: ['statistics', 'snippet'],
+        id: [postId],
+      });
+
+      const video = response.data.items?.[0];
+
+      if (!video || !video.statistics) {
+        return [];
+      }
+
+      const stats = video.statistics;
+      const result: AnalyticsData[] = [];
+
+      if (stats.viewCount !== undefined) {
+        result.push({
+          label: 'Views',
+          percentageChange: 0,
+          data: [{ total: String(stats.viewCount), date: today }],
+        });
+      }
+
+      if (stats.likeCount !== undefined) {
+        result.push({
+          label: 'Likes',
+          percentageChange: 0,
+          data: [{ total: String(stats.likeCount), date: today }],
+        });
+      }
+
+      if (stats.commentCount !== undefined) {
+        result.push({
+          label: 'Comments',
+          percentageChange: 0,
+          data: [{ total: String(stats.commentCount), date: today }],
+        });
+      }
+
+      if (stats.favoriteCount !== undefined) {
+        result.push({
+          label: 'Favorites',
+          percentageChange: 0,
+          data: [{ total: String(stats.favoriteCount), date: today }],
+        });
+      }
+
+      return result;
+    } catch (err) {
+      console.error('Error fetching YouTube post analytics:', err);
+      return [];
+    }
+  }
+
+  reportMetrics: ReportMetricsMap = {
+    followersGained: ['Subscribers Gained'],
+    engagement: ['Likes'],
+  };
+
+  override async checkValidity(
+    items: Array<ValidityMedia[]>
+  ): Promise<string | true> {
+    const [firstItems] = items ?? [];
+    if (items?.[0]?.length !== 1) {
+      return 'You need one media';
+    }
+    if ((firstItems?.[0]?.path?.indexOf?.('mp4') ?? -1) === -1) {
+      return 'Item must be a video';
+    }
+    return true;
+  }
+
+  refreshErrorMessage(err: any): string | undefined {
+    const data = err?.response?.data || {};
+    const text = `${data.error_subtype || ''} ${data.error_description || ''} ${
+      err?.message || ''
+    }`;
+
+    if (text.includes('invalid_rapt')) {
+      return `because your organization's Google Workspace session policy invalidated its access. Ask your Google Workspace admin to mark Postiz as a trusted app and turn on "Exempt trusted apps" (https://support.google.com/a/answer/9368756) to prevent this from happening again`;
+    }
+
+    return undefined;
+  }
+
   private static readonly YOUTUBE_CHUNK_SIZE = 8 * 1024 * 1024;
-  // Keep each upload batch well below the 10-minute activity timeout, the
-  // workflow calls finalizePost again for the remaining bytes.
+
   private static readonly YOUTUBE_UPLOAD_BATCH_MS = 4 * 60 * 1000;
 
-  // Resolves the total byte size of the media without loading it into memory:
-  // a HEAD request for remote URLs, statSync for local files.
   private async youtubeMediaSize(
     path: string,
     totalRetries = 0
@@ -495,9 +640,6 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     return statSync(path).size;
   }
 
-  // Returns a streaming body for the [start, end] byte range of the media so we
-  // never hold the whole file in memory: a ranged GET for remote URLs, a ranged
-  // read stream for local files.
   private async youtubeChunkStream(
     path: string,
     start: number,
@@ -549,10 +691,6 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     return createReadStream(path, { start, end });
   }
 
-  // Asks the upload session for the truth: the created video when the upload
-  // completed, or the exact byte offset to resume from. We use the global fetch
-  // because the probe answers with 308 (Resume Incomplete), which this.fetch
-  // would treat as an error.
   private async probeUploadSession(
     accessToken: string,
     uploadUri: string,
@@ -909,233 +1047,5 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       postId: videoId,
       releaseURL,
     };
-  }
-
-  // Old blocking behavior, kept for workflow versions before v1.0.6 that still
-  // run and don't know how to resolve a `pending` response - they upload and
-  // set the thumbnail inside the activity like before.
-  async post(
-    id: string,
-    accessToken: string,
-    postDetails: PostDetails[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    const [response] = await this.postPending(
-      id,
-      accessToken,
-      postDetails,
-      integration
-    );
-
-    if (response.status !== 'pending') {
-      return [response];
-    }
-
-    let pendingData = response.pendingData;
-    const started = Date.now();
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      // Cap below the 10-minute activity timeout of the old workflows using
-      // this method, leaving room for one more full upload batch: failing here
-      // is safe (no video exists until the upload completes and the abandoned
-      // session just expires), timing the activity out is not.
-      if (
-        Date.now() - started >
-        8 * 60 * 1000 - YoutubeProvider.YOUTUBE_UPLOAD_BATCH_MS
-      ) {
-        throw new BadBody(
-          this.identifier,
-          '{}',
-          '{}',
-          'The video upload took too long, please try a smaller video'
-        );
-      }
-
-      const finalize = await this.finalizePost(
-        accessToken,
-        pendingData,
-        integration
-      );
-
-      if (finalize.status === 'completed') {
-        return [
-          {
-            id: response.id,
-            releaseURL: finalize.releaseURL,
-            postId: finalize.postId,
-            status: 'success',
-          },
-        ];
-      }
-
-      pendingData = finalize.pendingData;
-    }
-  }
-
-  async analytics(
-    id: string,
-    accessToken: string,
-    date: number
-  ): Promise<AnalyticsData[]> {
-    try {
-      const endDate = dayjs().format('YYYY-MM-DD');
-      const startDate = dayjs().subtract(date, 'day').format('YYYY-MM-DD');
-
-      const { client, youtubeAnalytics } = clientAndYoutube();
-      client.setCredentials({ access_token: accessToken });
-
-      const youtubeClient = youtubeAnalytics(client);
-      const { data } = await youtubeClient.reports.query({
-        ids: 'channel==MINE',
-        startDate,
-        endDate,
-        metrics:
-          'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,likes,subscribersLost',
-        dimensions: 'day',
-        sort: 'day',
-      });
-
-      const columns = data?.columnHeaders?.map((p) => p.name)!;
-      const mappedData = data?.rows?.map((p) => {
-        return columns.reduce((acc, curr, index) => {
-          acc[curr!] = p[index];
-          return acc;
-        }, {} as any);
-      });
-
-      const acc = [] as any[];
-      acc.push({
-        label: 'Estimated Minutes Watched',
-        data: mappedData?.map((p: any) => ({
-          total: p.estimatedMinutesWatched,
-          date: p.day,
-        })),
-      });
-
-      acc.push({
-        label: 'Average View Duration',
-        average: true,
-        data: mappedData?.map((p: any) => ({
-          total: p.averageViewDuration,
-          date: p.day,
-        })),
-      });
-
-      acc.push({
-        label: 'Average View Percentage',
-        average: true,
-        data: mappedData?.map((p: any) => ({
-          total: p.averageViewPercentage,
-          date: p.day,
-        })),
-      });
-
-      acc.push({
-        label: 'Subscribers Gained',
-        data: mappedData?.map((p: any) => ({
-          total: p.subscribersGained,
-          date: p.day,
-        })),
-      });
-
-      acc.push({
-        label: 'Subscribers Lost',
-        data: mappedData?.map((p: any) => ({
-          total: p.subscribersLost,
-          date: p.day,
-        })),
-      });
-
-      acc.push({
-        label: 'Likes',
-        data: mappedData?.map((p: any) => ({
-          total: p.likes,
-          date: p.day,
-        })),
-      });
-
-      return acc;
-    } catch (err) {
-      return [];
-    }
-  }
-
-  async postAnalytics(
-    integrationId: string,
-    accessToken: string,
-    postId: string,
-    date: number
-  ): Promise<AnalyticsData[]> {
-    const today = dayjs().format('YYYY-MM-DD');
-
-    try {
-      const { client, youtube } = clientAndYoutube();
-      client.setCredentials({ access_token: accessToken });
-      const youtubeClient = youtube(client);
-
-      // Fetch video statistics
-      const response = await youtubeClient.videos.list({
-        part: ['statistics', 'snippet'],
-        id: [postId],
-      });
-
-      const video = response.data.items?.[0];
-
-      if (!video || !video.statistics) {
-        return [];
-      }
-
-      const stats = video.statistics;
-      const result: AnalyticsData[] = [];
-
-      if (stats.viewCount !== undefined) {
-        result.push({
-          label: 'Views',
-          percentageChange: 0,
-          data: [{ total: String(stats.viewCount), date: today }],
-        });
-      }
-
-      if (stats.likeCount !== undefined) {
-        result.push({
-          label: 'Likes',
-          percentageChange: 0,
-          data: [{ total: String(stats.likeCount), date: today }],
-        });
-      }
-
-      if (stats.commentCount !== undefined) {
-        result.push({
-          label: 'Comments',
-          percentageChange: 0,
-          data: [{ total: String(stats.commentCount), date: today }],
-        });
-      }
-
-      if (stats.favoriteCount !== undefined) {
-        result.push({
-          label: 'Favorites',
-          percentageChange: 0,
-          data: [{ total: String(stats.favoriteCount), date: today }],
-        });
-      }
-
-      return result;
-    } catch (err: any) {
-      // Expired or revoked token, checkPostAnalytics refreshes it and retries once
-      if (err?.response?.status === 401) {
-        throw new RefreshToken(
-          this.identifier,
-          JSON.stringify(err.response.data || {}),
-          '{}'
-        );
-      }
-      console.error(
-        'Error fetching YouTube post analytics:',
-        err?.message || err
-      );
-      return [];
-    }
   }
 }
