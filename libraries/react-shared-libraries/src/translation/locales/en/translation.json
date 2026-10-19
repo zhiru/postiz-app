@@ -601,7 +601,7 @@
   "select_channels": "Select Channels",
   "start_a_new_chat": "Start a new chat",
   "your_assistant": "Your Assistant",
-  "agent_welcome_message": "Hello, I am your Robô MultiPost agent 🙌🏻.\n\nI can schedule a post or multiple posts to multiple channels and generate pictures and videos.\n\nYou can select the channels you want to use from the left menu.\n\nYou can see your previous conversations from the right menu.\n\nYou can also use me as an MCP Server, check Settings >> Public API",
+  "agent_welcome_message": "Hello, I am your Robô MultiPost agent 🙌🏻.\n\nI can schedule a post or multiple posts to multiple channels and generate pictures and videos.\n\nYou can select the channels you want to use from the left menu.\n\nYou can see your previous conversations from the right menu.\n\nYou can also use me as an MCP Server, check Settings >> Agents / Dev",
   "last_github_trending": "Last Github Trending",
   "next_predicted_github_trending": "Next Predicted GitHub Trending",
   "repository": "Repository",
@@ -752,7 +752,7 @@
   "connect_agents": "Connect Agents",
   "connect_your_ai_agent": "Connect Your AI Agent",
   "connect_agent_description": "Pick the agent you use and let it create and schedule posts for you",
-  "agent_access_unavailable": "Agent access is not available for your current plan or role. You can set it up later under Settings > Agents.",
+  "agent_access_unavailable": "Agent access is not available for your current plan or role. You can set it up later under Settings > Agents / Dev.",
   "sign_in_no_api_key": "Sign in with Postiz (no API key)",
   "oauth_sign_in_hint": "Your agent will open a browser window to sign in to Postiz.",
   "add_to_cursor": "Add to Cursor",
@@ -770,7 +770,7 @@
   "connector_self_hosted_description": "The official connector works with self-hosted Postiz too. When asked to sign in, choose \"Use self-hosted\" and enter {{url}} with your API key.",
   "mcp_onboarding_description": "Give your agent Postiz tools to create, schedule and manage posts",
   "cli_onboarding_description": "Install the Postiz CLI and the skill that teaches your agent how to use it",
-  "agent_settings_later": "More agents and full instructions are available under Settings > Agents",
+  "agent_settings_later": "More agents and full instructions are available under Settings > Agents / Dev",
   "agents": "Agents",
   "watch_tutorial": "Watch Tutorial",
   "watch_tutorial_title": "Learn How to Use Robô MultiPost",
@@ -2303,5 +2303,10 @@
   "shares": "Shares",
   "saves": "Saves",
   "platform_branding_title": "Platform logo",
-  "platform_branding_public": "Visible to everyone"
+  "platform_branding_public": "Visible to everyone",
+  "autopost_creates_drafts_from_your_rss_new_items": "Autopost creates drafts from your RSS new items, review and schedule them from the calendar to publish them",
+  "agents_dev": "Agents / Dev",
+  "timezone": "Timezone",
+  "automatic_timezone": "Automatic ({{timezone}})",
+  "could_not_save_timezone": "Could not save the timezone"
 }
