@@ -7,6 +7,10 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Configure custom HTTPS endpoints and discover models for text, images, Omni video and web search, preserving scoped encrypted credentials.
+- Apply reasoning effort to text/chat and supported image requests; lock model presets to the default and prevent conflicting overrides on fallback requests.
+- Keep Instagram automation definitions, delivery deduplication and synchronization unchanged.
+
 - Added configurable OpenAI-compatible text endpoints (including Omni), explicit custom model IDs, and independent opt-in AI variations for public replies, DMs and follow-gate messages, preserving legacy automation behavior and delivery deduplication.
 
 - Add an independent private-message switch to Instagram comment automations. Turning it off removes private actions and follow-gate messages on save, including multi-account creation, while preserving existing flows by default.

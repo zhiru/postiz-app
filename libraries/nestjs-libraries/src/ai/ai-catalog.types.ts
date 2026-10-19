@@ -16,6 +16,7 @@ export interface CatalogModel {
   displayName: string;
   provider: string;
   kind: AiKind;
+  reasoning?: { supported: boolean; efforts: string[]; preset?: string };
   contextLength?: number;
   inputModalities?: string[];
   outputModalities?: string[];

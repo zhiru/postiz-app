@@ -25,6 +25,23 @@ describe('Compatible AI provider connection test', () => {
     );
   });
 
+  it('tests a custom OpenRouter destination without forwarding its key to the official host', async () => {
+    const request = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue({ ok: true } as Response);
+    expect(
+      await service.test(
+        'openrouter',
+        'demo-key',
+        'https://proxy.example.com/v1'
+      )
+    ).toEqual({ ok: true });
+    expect(request.mock.calls[0][0]).toBe(
+      'https://proxy.example.com/v1/models'
+    );
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it('blocks a private literal before dispatch and hides credential-bearing errors', async () => {
     const request = jest
       .spyOn(global, 'fetch')

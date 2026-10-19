@@ -86,9 +86,7 @@ export class AiCredentialsController {
     @GetOrgFromRequest() org: Organization,
     @GetUserFromRequest() user: User
   ) {
-    const credentials = await this._credentialService.listRedactedByOrg(
-      org.id
-    );
+    const credentials = await this._credentialService.listRedactedByOrg(org.id);
     const orgRole = getOrgRole(org);
     if (orgRole !== 'USER') {
       return credentials;
@@ -201,11 +199,7 @@ export class AiCredentialsController {
   ) {
     const kind = parseKindParam(kindRaw);
     try {
-      const resolved = await this._resolver.resolve(
-        org.id,
-        kind,
-        profile?.id
-      );
+      const resolved = await this._resolver.resolve(org.id, kind, profile?.id);
       return {
         provider: resolved.provider,
         model: resolved.model,
@@ -222,6 +216,30 @@ export class AiCredentialsController {
     }
   }
 
+  @Post('/:kind/models')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
+  async previewModels(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
+    @Param('kind') kindRaw: string,
+    @Body() body: unknown,
+    @Query('profileId') profileIdRaw?: string
+  ) {
+    const kind = parseKindParam(kindRaw);
+    const ctx = await this.resolveScope(
+      org.id,
+      { userId: user.id, orgRole: getOrgRole(org) },
+      profileIdRaw
+    );
+    return this._credentialService.previewModels(
+      org.id,
+      ctx.scope,
+      kind,
+      SaveAiCredentialPayloadSchema.parse(body),
+      ctx.profileId
+    );
+  }
+
   @Post('/:kind/test')
   @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
   async test(
@@ -236,11 +254,6 @@ export class AiCredentialsController {
       { userId: user.id, orgRole: getOrgRole(org) },
       profileIdRaw
     );
-    return this._credentialService.test(
-      org.id,
-      ctx.scope,
-      kind,
-      ctx.profileId
-    );
+    return this._credentialService.test(org.id, ctx.scope, kind, ctx.profileId);
   }
 }

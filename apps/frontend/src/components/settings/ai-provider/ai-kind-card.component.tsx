@@ -23,6 +23,8 @@ import {
 import { useProfilesList } from '@gitroom/frontend/components/settings/profile-persona.hooks';
 import { SearchableModelSelect } from './searchable-model-select';
 
+import { modelReasoningPreset } from '@gitroom/helpers/utils/ai.model';
+
 const SENTINEL = '__REDACTED__';
 const MASK = '••••••••';
 
@@ -46,6 +48,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   'openai-compatible': 'OpenAI compatible',
   kieai: 'KieAI',
   tavily: 'Tavily',
+  omni: 'Omni',
 };
 
 const labelForProvider = (id: string) =>
@@ -483,10 +486,15 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
   const isLocked = configured && !editing;
   const defaultProvider = providers[0]?.value ?? '';
 
+  const [remoteModels, setRemoteModels] = useState<CatalogModel[] | null>(null);
+  const [loadingModels, setLoadingModels] = useState(false);
+  useEffect(() => {
+    setRemoteModels(null);
+  }, [form.provider, form.options.baseURL, form.apiKey]);
   const { data: catalog } = useAiCatalog(kind, form.provider || null);
   const models: CatalogModel[] = useMemo(
-    () => catalog?.models ?? [],
-    [catalog]
+    () => remoteModels ?? catalog?.models ?? [],
+    [catalog, remoteModels]
   );
   const modelOptions = useMemo(
     () =>
@@ -499,6 +507,14 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
       })),
     [models]
   );
+  const selectedModel = models.find((m) => m.id === form.model);
+  const effortSupported =
+    ['TEXT', 'IMAGE'].includes(kind) &&
+    (selectedModel?.reasoning?.supported ??
+      selectedModel?.supportedParameters?.some(
+        (p) => p === 'reasoning' || p === 'reasoning_effort'
+      ) ??
+      false);
   const fallbackOptions = useMemo(
     () => modelOptions.filter((m) => m.value !== form.model),
     [modelOptions, form.model]
@@ -752,26 +768,25 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
         />
       </FieldRow>
 
-      {kind === 'TEXT' &&
-        ['openai', 'openai-compatible'].includes(form.provider) && (
-          <FieldRow label={t('ai_provider_base_url', 'URL base da API')}>
-            <input
-              aria-label={t('ai_provider_base_url', 'URL base da API')}
-              type="url"
-              className="w-full bg-newBgColorInner border border-newTableBorder rounded-[8px] h-[42px] px-[16px] text-[14px]"
-              placeholder="https://api.example.com/v1"
-              value={form.options.baseURL || ''}
-              disabled={isLocked}
-              onChange={(e) => updateOption('baseURL', e.target.value)}
-            />
-            <p className="text-[12px] text-customColor18 mt-[4px]">
-              {t(
-                'ai_provider_base_url_hint',
-                'Use a URL HTTPS da API compatível, incluindo /v1 quando necessário. Em branco, OpenAI usa a URL oficial. Ao mudar o destino, informe a chave novamente.'
-              )}
-            </p>
-          </FieldRow>
-        )}
+      {form.provider && (
+        <FieldRow label={t('ai_provider_base_url', 'URL base da API')}>
+          <input
+            aria-label={t('ai_provider_base_url', 'URL base da API')}
+            type="url"
+            className="w-full bg-newBgColorInner border border-newTableBorder rounded-[8px] h-[42px] px-[16px] text-[14px]"
+            placeholder="https://api.example.com/v1"
+            value={form.options.baseURL || ''}
+            disabled={isLocked}
+            onChange={(e) => updateOption('baseURL', e.target.value)}
+          />
+          <p className="text-[12px] text-customColor18 mt-[4px]">
+            {t(
+              'ai_provider_base_url_hint',
+              'Informe a URL HTTPS da API no protocolo do provedor escolhido. No Omni, inclua /v1. Em branco, os provedores nativos usam a URL oficial. Ao mudar o destino, informe a chave novamente.'
+            )}
+          </p>
+        </FieldRow>
+      )}
 
       <FieldRow label={t('ai_provider_apikey', 'API Key')}>
         <div className="bg-newBgColorInner h-[42px] border-newTableBorder border rounded-[8px] flex items-center">
@@ -806,53 +821,68 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
         )}
       </FieldRow>
 
-      {form.provider && kind !== 'WEB_SEARCH' && (
+      {form.provider && (kind !== 'WEB_SEARCH' || form.provider === 'omni') && (
         <>
           <FieldRow label={t('ai_provider_model', 'Modelo principal')}>
-            {kind === 'TEXT' &&
-            (form.provider === 'openai-compatible' || form.options.baseURL) ? (
-              <input
-                aria-label={t('ai_provider_model', 'Modelo principal')}
-                className="w-full bg-newBgColorInner border border-newTableBorder rounded-[8px] h-[42px] px-[16px]"
-                value={form.model}
+            <SearchableModelSelect
+              value={form.model}
+              options={modelOptions}
+              allowCustom={
+                !!form.options.baseURL ||
+                form.provider === 'openai-compatible' ||
+                form.provider === 'omni'
+              }
+              placeholder={t(
+                'ai_provider_model_id',
+                'ID exato do modelo no provedor'
+              )}
+              disabled={isLocked}
+              onChange={(v) => {
+                updateField('model', v);
+                updateOption('reasoningEffort', undefined);
+              }}
+            />
+            {form.options.baseURL && (
+              <Button
+                loading={loadingModels}
                 disabled={isLocked}
-                placeholder={t(
-                  'ai_provider_model_id',
-                  'ID exato do modelo no provedor'
-                )}
-                onChange={(e) => updateField('model', e.target.value)}
-              />
-            ) : kind === 'VIDEO' && form.provider === 'kieai' ? (
-              // Para VIDEO+kieai o backend NAO tem fallback aceitavel: a
-              // chamada precisa de um model exato (Seedance vs Veo tem
-              // payloads diferentes). Escondemos a opcao vazia "Default
-              // do provedor" pra forcar selecao explicita; o form ja vem
-              // pre-selecionado com 'veo3_lite' (ver pickInitialModel).
-              <SearchableModelSelect
-                value={form.model}
-                options={modelOptions}
-                placeholder={t(
-                  'ai_provider_video_pick_model',
-                  'Selecione um modelo'
-                )}
-                disabled={isLocked}
-                onChange={(v) => updateField('model', v)}
-              />
-            ) : (
-              <SearchableModelSelect
-                value={form.model}
-                options={modelOptions}
-                placeholder={t(
-                  'ai_provider_model_default',
-                  'Default do provedor'
-                )}
-                emptyOptionLabel={t(
-                  'ai_provider_model_default',
-                  'Default do provedor'
-                )}
-                disabled={isLocked}
-                onChange={(v) => updateField('model', v)}
-              />
+                onClick={async () => {
+                  setLoadingModels(true);
+                  try {
+                    const response = await fetch(buildUrl('/models'), {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        provider: form.provider,
+                        apiKey:
+                          form.apiKey && form.apiKey !== SENTINEL
+                            ? form.apiKey
+                            : SENTINEL,
+                        options: sanitizeOptions(
+                          kind,
+                          form.provider,
+                          form.options
+                        ),
+                        model: form.model || undefined,
+                      }),
+                    });
+                    if (!response.ok) throw new Error();
+                    const data = await response.json();
+                    setRemoteModels(data.models);
+                  } catch {
+                    toaster.show(
+                      t(
+                        'ai_provider_models_failed',
+                        'Não foi possível carregar os modelos. Confira a URL e a chave.'
+                      ),
+                      'warning'
+                    );
+                  } finally {
+                    setLoadingModels(false);
+                  }
+                }}
+              >
+                {t('ai_provider_load_models', 'Carregar modelos')}
+              </Button>
             )}
           </FieldRow>
           {/* Fallback so faz sentido para TEXT (mesmo provider, varios modelos
@@ -890,6 +920,64 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
             </FieldRow>
           )}
         </>
+      )}
+
+      {form.provider && (
+        <FieldRow
+          label={t('ai_provider_reasoning_effort', 'Esforço de raciocínio')}
+        >
+          <SelectInput
+            value={
+              modelReasoningPreset(form.model) || !effortSupported
+                ? ''
+                : form.options.reasoningEffort ?? ''
+            }
+            disabled={
+              isLocked || !!modelReasoningPreset(form.model) || !effortSupported
+            }
+            onChange={(v) => updateOption('reasoningEffort', v || undefined)}
+          >
+            <option value="">
+              {t('ai_provider_default', 'Padrão do modelo')}
+            </option>
+            {(
+              models.find((m) => m.id === form.model)?.reasoning?.efforts ?? [
+                'low',
+                'medium',
+                'high',
+              ]
+            ).map((e) => (
+              <option key={e} value={e}>
+                {e}
+              </option>
+            ))}
+          </SelectInput>
+        </FieldRow>
+      )}
+      {kind === 'WEB_SEARCH' && form.provider === 'omni' && (
+        <FieldRow
+          label={t(
+            'ai_provider_fetch_engine',
+            'Provedor de leitura de páginas'
+          )}
+        >
+          <SelectInput
+            value={form.options.fetchProvider || ''}
+            disabled={isLocked}
+            onChange={(v) => updateOption('fetchProvider', v || undefined)}
+          >
+            <option value="">
+              {t('ai_provider_default', 'Padrão do modelo')}
+            </option>
+            {['firecrawl', 'jina-reader', 'tavily-search', 'tinyfish'].map(
+              (v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              )
+            )}
+          </SelectInput>
+        </FieldRow>
       )}
 
       {form.provider && (
@@ -1071,22 +1159,6 @@ const DynamicOptions: React.FC<{
             }}
           />
         </FieldRow>
-        <FieldRow
-          label={t('ai_provider_reasoning_effort', 'Esforço de raciocínio')}
-        >
-          <SelectInput
-            value={options.reasoningEffort ?? ''}
-            disabled={disabled}
-            onChange={(v) => onChange('reasoningEffort', v || undefined)}
-          >
-            <option value="">
-              {t('ai_provider_default', 'Default do modelo')}
-            </option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </SelectInput>
-        </FieldRow>
       </>
     );
   }
@@ -1123,7 +1195,7 @@ const DynamicOptions: React.FC<{
         </FieldRow>
       );
     }
-    if (provider === 'openai') {
+    if (['openai', 'openai-compatible'].includes(provider)) {
       return (
         <FieldRow label={t('ai_provider_image_quality', 'Qualidade')}>
           <div className="flex gap-[8px]">
@@ -1324,11 +1396,6 @@ function sanitizeOptions(
   const out: Record<string, any> = {};
   for (const [key, value] of Object.entries(options)) {
     if (value === undefined || value === null || value === '') continue;
-    if (
-      key === 'baseURL' &&
-      (kind !== 'TEXT' || !['openai', 'openai-compatible'].includes(provider))
-    )
-      continue;
     if (key === 'baseURL') {
       out[key] = String(value).trim().replace(/\/+$/, '');
       continue;
@@ -1341,7 +1408,11 @@ function sanitizeOptions(
     }
     if (kind === 'IMAGE') {
       if (key === 'imageSize' && provider !== 'openrouter') continue;
-      if (key === 'quality' && provider !== 'openai') continue;
+      if (
+        key === 'quality' &&
+        !['openai', 'openai-compatible'].includes(provider)
+      )
+        continue;
     }
     if (kind === 'WEB_SEARCH' && key === 'maxResults') {
       const num = Number(value);

@@ -1,3 +1,6 @@
+import { ssrfSafeFetch } from '../dtos/webhooks/ssrf.safe.dispatcher';
+import { TextOptionsSchema } from './ai-credential.schemas';
+import { isSafePublicHttpsUrl } from '../dtos/webhooks/webhook.url.validator';
 import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { AiProviderResolverService } from './ai-provider-resolver.service';
@@ -179,6 +182,14 @@ export class AiVideoService {
       profileId
     );
 
+    if (credential.provider === 'omni') {
+      return this.generateOmni(
+        credential,
+        input,
+        await this.maybeEnrichPrompt(organizationId, input, profileId)
+      );
+    }
+
     if (credential.provider !== 'kieai') {
       throw new HttpException(
         `Provider sem suporte para video: ${credential.provider}. Apenas 'kieai' e suportado.`,
@@ -216,6 +227,76 @@ export class AiVideoService {
       `Modelo de video desconhecido em credencial: ${model}.`,
       400
     );
+  }
+
+  private endpoint(credential: ResolvedAiCredential, defaultUrl: string) {
+    const baseURL = (credential.options as VideoOptions | null)?.baseURL;
+    return baseURL
+      ? TextOptionsSchema.parse({ baseURL }).baseURL +
+          defaultUrl.slice(KIE_BASE_URL.length)
+      : defaultUrl;
+  }
+
+  private async generateOmni(
+    credential: ResolvedAiCredential,
+    input: GenerateVideoInput,
+    prompt: string
+  ): Promise<GeneratedVideo> {
+    const options = (credential.options || {}) as VideoOptions;
+    const baseURL = TextOptionsSchema.parse({
+      baseURL: options.baseURL,
+    }).baseURL;
+    if (!baseURL || !credential.model)
+      throw new HttpException('Configure URL e modelo de vídeo.', 412);
+    try {
+      const response = await ssrfSafeFetch(baseURL + '/videos/generations', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${credential.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: credential.model,
+          prompt,
+          aspect_ratio: input.aspectRatio || DEFAULT_ASPECT_RATIO,
+          duration: options.durationSeconds || DEFAULT_DURATION,
+          resolution: options.resolution || DEFAULT_RESOLUTION,
+          ...(options.audio !== undefined ? { audio: options.audio } : {}),
+          ...(input.mode === 'I2V'
+            ? {
+                image: input.referenceImageUrl,
+                image_url: input.referenceImageUrl,
+              }
+            : {}),
+          response_format: 'url',
+        }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(600000),
+      });
+      if (!response.ok) throw new Error('Video provider unavailable');
+      const data = await response.json();
+      const item = data?.data?.[0];
+      const url = item?.b64_json
+        ? `data:video/mp4;base64,${item.b64_json}`
+        : item?.url;
+      if (
+        typeof url !== 'string' ||
+        (!item?.b64_json && !(await isSafePublicHttpsUrl(url)))
+      )
+        throw new Error('Invalid video');
+      return {
+        url,
+        provider: credential.provider,
+        model: credential.model,
+        taskId: typeof data.id === 'string' ? data.id : 'omni-video',
+        credentialId: credential.id,
+      };
+    } catch {
+      throw new HttpException(
+        'Não foi possível gerar o vídeo. Confira URL, modelo, chave e disponibilidade no provedor.',
+        412
+      );
+    }
   }
 
   private async maybeEnrichPrompt(
@@ -281,12 +362,12 @@ export class AiVideoService {
     };
 
     const taskId = await this.postCreate(
-      SEEDANCE_CREATE_URL,
+      this.endpoint(credential, SEEDANCE_CREATE_URL),
       credential.apiKey,
       body
     );
     const url = await this.pollUntilDone(
-      SEEDANCE_INFO_URL,
+      this.endpoint(credential, SEEDANCE_INFO_URL),
       taskId,
       credential.apiKey
     );
@@ -321,12 +402,12 @@ export class AiVideoService {
     }
 
     const taskId = await this.postCreate(
-      VEO_CREATE_URL,
+      this.endpoint(credential, VEO_CREATE_URL),
       credential.apiKey,
       body
     );
     const url = await this.pollUntilDone(
-      VEO_INFO_URL,
+      this.endpoint(credential, VEO_INFO_URL),
       taskId,
       credential.apiKey
     );
@@ -349,8 +430,9 @@ export class AiVideoService {
   ): Promise<string> {
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await ssrfSafeFetch(url, {
         method: 'POST',
+        redirect: 'error',
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
@@ -426,8 +508,9 @@ export class AiVideoService {
 
       let res: Response;
       try {
-        res = await fetch(url, {
+        res = await ssrfSafeFetch(url, {
           headers: { Authorization: `Bearer ${apiKey}` },
+          redirect: 'error',
           signal: AbortSignal.timeout(KIE_REQUEST_TIMEOUT_MS),
         });
       } catch (e) {

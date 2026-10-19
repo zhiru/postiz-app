@@ -1,3 +1,4 @@
+import { modelReasoningPreset } from '@gitroom/helpers/utils/ai.model';
 import { ssrfSafeFetch } from '../dtos/webhooks/ssrf.safe.dispatcher';
 import { HttpException, Injectable } from '@nestjs/common';
 import { createOpenAI } from '@ai-sdk/openai';
@@ -7,12 +8,46 @@ import { ImageOptions, TextOptions } from './ai-credential.schemas';
 import { ResolvedAiCredential } from './ai-credential.service';
 import { AiProviderResolverService } from './ai-provider-resolver.service';
 
-const compatibleFetch: typeof fetch = (input, init) =>
-  ssrfSafeFetch(input, {
-    ...init,
-    redirect: 'error',
-    signal: init?.signal ?? AbortSignal.timeout(60000),
-  });
+export function reasoningFetch(
+  credential: Pick<ResolvedAiCredential, 'provider' | 'options'>
+): typeof fetch {
+  return (input, init) => {
+    let body = init?.body;
+    if (typeof body === 'string') {
+      const data = JSON.parse(body);
+      const preset = modelReasoningPreset(data.model);
+      const effort = credential.options?.reasoningEffort;
+      if (preset) {
+        delete data.reasoning_effort;
+        if (data.reasoning) {
+          delete data.reasoning.effort;
+        }
+      } else if (effort) {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+            ? input.href
+            : input.url;
+        if (
+          credential.provider === 'openrouter' ||
+          url.includes('/responses')
+        ) {
+          data.reasoning = { ...data.reasoning, effort };
+        } else {
+          data.reasoning_effort = effort;
+        }
+      }
+      body = JSON.stringify(data);
+    }
+    return ssrfSafeFetch(input, {
+      ...init,
+      body,
+      redirect: 'error',
+      signal: init?.signal ?? AbortSignal.timeout(60000),
+    });
+  };
+}
 
 const DEFAULT_TEXT_MODELS: Record<string, string> = {
   openrouter: 'openai/gpt-5.5',
@@ -141,6 +176,7 @@ export class AiClientFactory {
     apiKey: string;
     baseURL?: string;
     model: string;
+    options?: TextOptions;
   }> {
     const credential = await this._resolver.resolve(
       organizationId,
@@ -155,7 +191,10 @@ export class AiClientFactory {
         return {
           provider: 'openrouter',
           apiKey: credential.apiKey,
-          baseURL: 'https://openrouter.ai/api/v1',
+          baseURL:
+            (credential.options?.baseURL as string) ||
+            'https://openrouter.ai/api/v1',
+          options: (credential.options as TextOptions) || {},
           model,
         };
       case 'openai':
@@ -164,6 +203,7 @@ export class AiClientFactory {
           provider: credential.provider,
           apiKey: credential.apiKey,
           baseURL: (credential.options?.baseURL as string) || undefined,
+          options: (credential.options as TextOptions) || {},
           model,
         };
       default:
@@ -197,9 +237,10 @@ export class AiClientFactory {
     const client = new OpenAI({
       apiKey: cfg.apiKey,
       baseURL: cfg.baseURL,
-      ...(cfg.baseURL && cfg.provider !== 'openrouter'
-        ? { fetch: compatibleFetch }
-        : {}),
+      fetch: reasoningFetch({
+        provider: cfg.provider,
+        options: cfg.options || {},
+      }),
     });
     const beta = (client as any).beta;
     if (beta && !beta.chat) {
@@ -231,7 +272,13 @@ export class AiClientFactory {
 
     switch (credential.provider) {
       case 'openrouter': {
-        const provider = createOpenRouter({ apiKey: credential.apiKey });
+        const provider = createOpenRouter({
+          apiKey: credential.apiKey,
+          ...(credential.options?.baseURL
+            ? { baseURL: credential.options.baseURL as string }
+            : {}),
+          fetch: reasoningFetch(credential),
+        });
         return provider(modelId);
       }
       case 'openai':
@@ -239,7 +286,8 @@ export class AiClientFactory {
         const baseURL = credential.options?.baseURL as string | undefined;
         const provider = createOpenAI({
           apiKey: credential.apiKey,
-          ...(baseURL ? { baseURL, fetch: compatibleFetch } : {}),
+          ...(baseURL ? { baseURL } : {}),
+          fetch: reasoningFetch(credential),
         });
         return baseURL ? provider.chat(modelId) : provider(modelId);
       }
@@ -269,7 +317,13 @@ export class AiClientFactory {
 
     switch (credential.provider) {
       case 'openrouter': {
-        const provider = createOpenRouter({ apiKey: credential.apiKey });
+        const provider = createOpenRouter({
+          apiKey: credential.apiKey,
+          ...(credential.options?.baseURL
+            ? { baseURL: credential.options.baseURL as string }
+            : {}),
+          fetch: reasoningFetch(credential),
+        });
         return (provider as any)(modelId);
       }
       case 'openai': {

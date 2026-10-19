@@ -438,4 +438,26 @@ describe('AiImageService', () => {
       }
     });
   });
+  it('uses a configured image endpoint without overriding a preset reasoning tier', async () => {
+    resolver.resolve.mockResolvedValue(
+      credentialFor({
+        provider: 'openai-compatible',
+        model: 'cx/image-high',
+        options: {
+          baseURL: 'https://omni.example.com/v1',
+          reasoningEffort: 'low',
+        },
+      }) as any
+    );
+    globalThis.fetch = jest.fn(
+      async () =>
+        new Response(JSON.stringify({ data: [{ b64_json: 'image-test' }] }))
+    ) as any;
+    const result = await service.generate('org-1', 'test image', 'profile-1');
+    expect(result.base64).toBe('image-test');
+    const [url, init] = (globalThis.fetch as jest.Mock).mock.calls[0];
+    expect(url).toBe('https://omni.example.com/v1/images/generations');
+    expect(init.redirect).toBe('error');
+    expect(JSON.parse(init.body)).not.toHaveProperty('reasoning_effort');
+  });
 });
