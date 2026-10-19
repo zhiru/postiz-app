@@ -1,10 +1,14 @@
 'use client';
 
-import { FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
-import { useIntegrationPosts } from '@gitroom/frontend/components/automations/hooks/use-flows';
+import {
+  readIntegrationMediaResponse,
+  useIntegrationPosts,
+} from '@gitroom/frontend/components/automations/hooks/use-flows';
+import { Button } from '@gitroom/react/form/button';
 import { useRouter } from 'next/navigation';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { WizardPhonePreview } from '@gitroom/frontend/components/automations/wizard-phone-preview.component';
@@ -100,6 +104,8 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
   const [modalPosts, setModalPosts] = useState<any[]>([]);
   const [modalNextCursor, setModalNextCursor] = useState<string | null>(null);
   const [modalLoadingMore, setModalLoadingMore] = useState(false);
+  const [modalError, setModalError] = useState(false);
+  const modalRequestId = useRef(0);
 
   // Pre-fill form when editing
   useEffect(() => {
@@ -175,7 +181,9 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
 
   const instagramIntegrations = useMemo(() => {
     if (!Array.isArray(integrations)) return [];
-    return integrations.filter((i: any) => i.identifier === 'instagram');
+    return integrations.filter((i: any) =>
+      ['instagram', 'instagram-standalone'].includes(i.identifier)
+    );
   }, [integrations]);
 
   const selectedIntegration = useMemo(
@@ -183,9 +191,13 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
     [instagramIntegrations, integrationId]
   );
 
-  const { data: posts, isLoading: postsLoading } = useIntegrationPosts(
-    integrationId || null
-  );
+  const {
+    data: posts,
+    error: postsError,
+    isLoading: postsLoading,
+    isValidating: postsValidating,
+    mutate: mutatePosts,
+  } = useIntegrationPosts(integrationId || null);
 
   const togglePost = (postId: string) => {
     setSelectedPostIds((prev) =>
@@ -195,40 +207,36 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
     );
   };
 
-  // Initialize modal posts from SWR data when modal opens
-  useEffect(() => {
-    if (showAllPostsModal && Array.isArray(posts) && posts.length > 0 && modalPosts.length === 0) {
-      setModalPosts(posts as any[]);
-      // Fetch first page with cursor info
-      fetchApi(`/flows/integrations/${integrationId}/posts?limit=25`)
-        .then(r => r.json())
-        .then(data => {
-          setModalPosts(data.posts ?? data ?? []);
-          setModalNextCursor(data.nextCursor ?? null);
-        })
-        .catch(() => setModalPosts(posts as any[]));
+  const loadModalPosts = useCallback(async (cursor: string | null = null) => {
+    const requestId = ++modalRequestId.current;
+    setModalLoadingMore(true);
+    setModalError(false);
+    try {
+      const response = await fetchApi(
+        `/flows/integrations/${integrationId}/posts?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+      );
+      const { items, nextCursor } = await readIntegrationMediaResponse(response, 'posts');
+      if (requestId !== modalRequestId.current) return;
+      setModalPosts(prev => cursor ? [...prev, ...items] : items);
+      setModalNextCursor(nextCursor);
+    } catch {
+      if (requestId === modalRequestId.current) setModalError(true);
+    } finally {
+      if (requestId === modalRequestId.current) setModalLoadingMore(false);
     }
-    if (!showAllPostsModal) {
+  }, [integrationId, fetchApi]);
+
+  useEffect(() => {
+    if (showAllPostsModal) {
+      void loadModalPosts();
+    } else {
       setModalPosts([]);
       setModalNextCursor(null);
-    }
-  }, [showAllPostsModal]);
-
-  const loadMoreModalPosts = useCallback(async () => {
-    if (!modalNextCursor || modalLoadingMore) return;
-    setModalLoadingMore(true);
-    try {
-      const data = await fetchApi(
-        `/flows/integrations/${integrationId}/posts?limit=25&cursor=${modalNextCursor}`
-      ).then(r => r.json());
-      setModalPosts(prev => [...prev, ...(data.posts ?? [])]);
-      setModalNextCursor(data.nextCursor ?? null);
-    } catch {
-      // ignore
-    } finally {
+      setModalError(false);
       setModalLoadingMore(false);
     }
-  }, [modalNextCursor, modalLoadingMore, integrationId, fetchApi]);
+    return () => { modalRequestId.current += 1; };
+  }, [showAllPostsModal, loadModalPosts]);
 
   const selectedPost = useMemo(() => {
     if (!Array.isArray(posts) || selectedPostIds.length === 0) return null;
@@ -419,7 +427,23 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
                 {/* Post grid — shown when specific is selected */}
                 {postMode === 'specific' && integrationId && (
                   <div className="mt-[12px]">
-                    {postsLoading ? (
+                    {postsError ? (
+                      <div role="alert" className="space-y-[8px] text-[12px] text-newTextColor">
+                        <p>{t('instagram_posts_load_failed', 'Could not load Instagram posts. Check the account connection and try again.')}</p>
+                        <Button
+                          secondary
+                          loading={postsValidating}
+                          disabled={postsValidating}
+                          className="rounded-[6px] text-[12px]"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void mutatePosts().catch(() => undefined);
+                          }}
+                        >
+                          {t('try_again', 'Try Again')}
+                        </Button>
+                      </div>
+                    ) : postsLoading ? (
                       <p className="text-[12px] text-customColor18">{t('loading_posts', 'Loading posts...')}</p>
                     ) : !posts?.length ? (
                       <p className="text-[12px] text-customColor18">{t('no_posts_found', 'No posts found.')}</p>
@@ -888,6 +912,13 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
             </div>
             {/* Posts grid */}
             <div className="flex-1 overflow-y-auto p-[16px]">
+              {!modalError && modalPosts.length === 0 && (
+                <p className="text-[12px] text-newTableText">
+                  {modalLoadingMore
+                    ? t('loading_posts', 'Loading posts...')
+                    : t('no_posts_found', 'No posts found.')}
+                </p>
+              )}
               <div className="grid grid-cols-3 gap-[10px]">
                 {modalPosts.map((post: any) => {
                   const isSelected = selectedPostIds.includes(post.id);
@@ -938,11 +969,25 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
                   );
                 })}
               </div>
+              {modalError && (
+                <div role="alert" className="mt-[16px] space-y-[8px] text-[12px] text-newTextColor">
+                  <p>{t('instagram_posts_load_failed', 'Could not load Instagram posts. Check the account connection and try again.')}</p>
+                  <Button
+                    secondary
+                    loading={modalLoadingMore}
+                    disabled={modalLoadingMore}
+                    className="rounded-[6px] text-[12px]"
+                    onClick={() => { void loadModalPosts(modalNextCursor); }}
+                  >
+                    {t('try_again', 'Try Again')}
+                  </Button>
+                </div>
+              )}
               {/* Load more */}
-              {modalNextCursor && (
+              {modalNextCursor && !modalError && (
                 <div className="mt-[16px] flex justify-center">
                   <button
-                    onClick={loadMoreModalPosts}
+                    onClick={() => { void loadModalPosts(modalNextCursor); }}
                     disabled={modalLoadingMore}
                     className="rounded-[6px] border border-fifth bg-btnSimple px-[20px] py-[8px] text-[13px] text-textColor hover:bg-boxHover disabled:opacity-50"
                   >

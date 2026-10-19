@@ -9,6 +9,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ### Corrigido
 
+- Migração vincula configurações legadas ao perfil Default após sua criação e preserva preferências alteradas pelo usuário nos reinícios.
+- Assistentes de automação interpretam conexões antigas do Instagram, exibem falhas de consulta com opção de tentar novamente e usam a ativação normal de webhooks sem remover assinaturas existentes do Chatwoot.
 - Reconexão preserva o refresh token existente quando o provedor não devolve outro e limita a atualização de tokens compartilhados à organização e ao perfil corretos.
 
 ### Adicionado

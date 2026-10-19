@@ -5,6 +5,7 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { checkPublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/validators/is-public-https-url.validator';
 import { FlowsRepository } from '@gitroom/nestjs-libraries/database/prisma/flows/flows.repository';
@@ -184,7 +185,7 @@ export class FlowsService {
     if (!integration) {
       return { ok: false, error: 'Integracao nao encontrada' };
     }
-    if (integration.providerIdentifier !== 'instagram') {
+    if (!['instagram', 'instagram-standalone'].includes(integration.providerIdentifier)) {
       return {
         ok: false,
         error: 'Apenas contas do Instagram suportam automacoes no momento',
@@ -327,40 +328,44 @@ export class FlowsService {
     return { ok: true };
   }
 
-  private pickAppCandidate(creds: Record<string, string> | null): {
+  private pickAppCandidate(
+    creds: Record<string, string> | null,
+    preferredHost?: string
+  ): {
     appId: string;
     appSecret: string;
     primaryHost: 'graph.instagram.com' | 'graph.facebook.com';
   } | null {
+    const candidates: Array<{
+      appId: string;
+      appSecret: string;
+      primaryHost: 'graph.instagram.com' | 'graph.facebook.com';
+    }> = [];
     if (creds?.instagramAppId && creds?.instagramAppSecret) {
-      return {
-        appId: creds.instagramAppId,
-        appSecret: creds.instagramAppSecret,
+      candidates.push({
+        appId: creds.instagramAppId, appSecret: creds.instagramAppSecret,
         primaryHost: 'graph.instagram.com',
-      };
+      });
     }
     if (creds?.clientId && creds?.clientSecret) {
-      return {
-        appId: creds.clientId,
-        appSecret: creds.clientSecret,
+      candidates.push({
+        appId: creds.clientId, appSecret: creds.clientSecret,
         primaryHost: 'graph.facebook.com',
-      };
+      });
     }
     if (process.env.INSTAGRAM_APP_ID && process.env.INSTAGRAM_APP_SECRET) {
-      return {
-        appId: process.env.INSTAGRAM_APP_ID,
-        appSecret: process.env.INSTAGRAM_APP_SECRET,
+      candidates.push({
+        appId: process.env.INSTAGRAM_APP_ID, appSecret: process.env.INSTAGRAM_APP_SECRET,
         primaryHost: 'graph.instagram.com',
-      };
+      });
     }
     if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) {
-      return {
-        appId: process.env.FACEBOOK_APP_ID,
-        appSecret: process.env.FACEBOOK_APP_SECRET,
+      candidates.push({
+        appId: process.env.FACEBOOK_APP_ID, appSecret: process.env.FACEBOOK_APP_SECRET,
         primaryHost: 'graph.facebook.com',
-      };
+      });
     }
-    return null;
+    return candidates.find((candidate) => candidate.primaryHost === preferredHost) ?? candidates[0] ?? null;
   }
 
   private evaluateIgSubscription(
@@ -533,96 +538,46 @@ export class FlowsService {
     return this._flowsRepository.updateFlowStatus(orgId, id, status, profileId);
   }
 
-  private async ensureWebhookSubscription(
-    orgId: string,
-    integrationId: string
-  ) {
+  private async ensureWebhookSubscription(orgId: string, integrationId: string) {
     try {
-      const integration = await this._integrationService.getIntegrationById(
-        orgId,
-        integrationId
-      );
-      if (!integration || integration.providerIdentifier !== 'instagram') {
-        return;
-      }
-      integration.token = decryptIntegrationToken(
-        this._encryption,
-        integration.token
-      );
-
-      const provider = this._integrationManager.getSocialIntegration(
-        'instagram'
-      ) as unknown as InstagramProvider;
+      const integration = await this._integrationService.getIntegrationById(orgId, integrationId);
+      if (!integration || !['instagram', 'instagram-standalone'].includes(integration.providerIdentifier)) return;
+      integration.token = decryptIntegrationToken(this._encryption, integration.token);
+      const provider = this._integrationManager.getSocialIntegration('instagram') as unknown as InstagramProvider;
       if (!provider) {
-        this._logger.warn(
-          'Instagram provider not found, skipping webhook subscription'
-        );
+        this._logger.warn('Instagram provider not found, skipping webhook subscription');
         return;
       }
-
-      await provider.ensureWebhookSubscription(
-        integration.token,
-        integration.internalId
+      const route = await resolveIgRoute(integration, this._instagramMessaging);
+      const credentials = await this._credentialService.getRawShared(
+        orgId, 'facebook', integration.profileId ?? undefined
       );
-
-      this._logger.log(
-        `Webhook subscription ensured for integration ${integrationId}`
+      const app = this.pickAppCandidate(credentials, route.host);
+      if (!app) {
+        this._logger.warn('Meta app credentials are unavailable; subscription was not changed');
+        return;
+      }
+      const subscribed = await provider.ensureWebhookSubscription(
+        route.token, integration.internalId, route.host, app.appId
       );
-    } catch (err) {
-      // Don't block flow activation if webhook subscription fails
-      // The webhook may already be configured manually
-      this._logger.warn(
-        `Webhook subscription failed for integration ${integrationId}: ${
-          err instanceof Error ? err.message : 'Unknown error'
-        }`
-      );
+      if (!subscribed) {
+        this._logger.warn('Instagram account webhook subscription was not confirmed');
+        return;
+      }
+      this._logger.log('Instagram account webhook subscription confirmed');
+    } catch {
+      // Preserve manually configured webhook setups if the API cannot confirm them.
+      this._logger.warn('Instagram account webhook subscription could not be confirmed');
     }
   }
 
   async getInstagramPosts(orgId: string, flowId: string, profileId?: string) {
     const flow = await this._flowsRepository.getFlow(orgId, flowId, profileId);
-    if (!flow) {
-      throw new BadRequestException('Automacao nao encontrada');
-    }
-
-    const integration = await this._integrationService.getIntegrationById(
-      orgId,
-      flow.integrationId
+    if (!flow) throw new BadRequestException('Automacao nao encontrada');
+    const result = await this.getInstagramPostsByIntegration(
+      orgId, flow.integrationId, undefined, 25, profileId
     );
-    if (!integration || integration.providerIdentifier !== 'instagram') {
-      return [];
-    }
-    integration.token = decryptIntegrationToken(
-      this._encryption,
-      integration.token
-    );
-
-    const provider = this._integrationManager.getSocialIntegration(
-      'instagram'
-    ) as unknown as InstagramProvider;
-    if (!provider) {
-      return [];
-    }
-
-    try {
-      const route = await resolveIgRoute(
-        integration as any,
-        this._instagramMessaging
-      );
-      const result = await provider.getRecentMedia(
-        integration.internalId,
-        route.token,
-        route.host
-      );
-      return result.posts;
-    } catch (err) {
-      this._logger.warn(
-        `Failed to fetch Instagram posts: ${
-          err instanceof Error ? err.message : 'Unknown error'
-        }`
-      );
-      return [];
-    }
+    return result.posts;
   }
 
   async quickUpdateFlow(
@@ -724,7 +679,7 @@ export class FlowsService {
     // promote it to ACTIVE so the user doesn't need to remember to activate
     // it manually. Flows already ACTIVE or PAUSED keep their current status.
     if (current.status === FlowStatus.DRAFT) {
-      await this._flowsRepository.updateFlowStatus(
+      await this.updateFlowStatus(
         orgId,
         id,
         FlowStatus.ACTIVE,
@@ -843,7 +798,7 @@ export class FlowsService {
     );
 
     // Auto-activate new flows created via wizard
-    await this._flowsRepository.updateFlowStatus(
+    await this.updateFlowStatus(
       orgId,
       flow.id,
       FlowStatus.ACTIVE,
@@ -1004,89 +959,48 @@ export class FlowsService {
     orgId: string,
     integrationId: string,
     cursor?: string,
-    limit = 25
+    limit = 25,
+    profileId?: string
   ) {
-    const integration = await this._integrationService.getIntegrationById(
-      orgId,
-      integrationId
-    );
-    if (!integration || integration.providerIdentifier !== 'instagram') {
-      return { posts: [], nextCursor: null };
+    const integration = await this.assertIntegrationAccess(orgId, integrationId, profileId);
+    if (!['instagram', 'instagram-standalone'].includes(integration.providerIdentifier)) {
+      throw new BadRequestException('A integracao precisa ser uma conta do Instagram');
     }
-    integration.token = decryptIntegrationToken(
-      this._encryption,
-      integration.token
-    );
-
-    const provider = this._integrationManager.getSocialIntegration(
-      'instagram'
-    ) as unknown as InstagramProvider;
-    if (!provider) {
-      return { posts: [], nextCursor: null };
-    }
+    const provider = this._integrationManager.getSocialIntegration('instagram') as unknown as InstagramProvider;
+    if (!provider) throw new ServiceUnavailableException('Instagram media is temporarily unavailable');
 
     try {
-      // Roteia host/token conforme o tipo de conexao da integracao (IG Login
-      // -> graph.instagram.com; Facebook Login -> graph.facebook.com). Nunca
-      // hardcodar o host: apps Instagram-only nao respondem em graph.facebook.com.
-      const route = await resolveIgRoute(
-        integration as any,
-        this._instagramMessaging
-      );
-      return await provider.getRecentMedia(
-        integration.internalId,
-        route.token,
-        route.host,
-        limit,
-        cursor
-      );
-    } catch (err) {
-      this._logger.warn(
-        `Failed to fetch Instagram posts: ${
-          err instanceof Error ? err.message : 'Unknown error'
-        }`
-      );
-      return { posts: [], nextCursor: null };
+      integration.token = decryptIntegrationToken(this._encryption, integration.token);
+      const route = await resolveIgRoute(integration, this._instagramMessaging);
+      // Facebook media reads accept the user half of the stored page___user pair.
+      const token = route.source === 'page-access-token' ? integration.token : route.token;
+      return await provider.getRecentMedia(integration.internalId, token, route.host, limit, cursor);
+    } catch {
+      this._logger.warn('Failed to fetch Instagram posts');
+      throw new ServiceUnavailableException('Could not load Instagram posts. Check the channel connection and try again.');
     }
   }
 
-  async getInstagramStoriesByIntegration(orgId: string, integrationId: string) {
-    const integration = await this._integrationService.getIntegrationById(
-      orgId,
-      integrationId
-    );
-    if (!integration || integration.providerIdentifier !== 'instagram') {
-      return { stories: [] };
+  async getInstagramStoriesByIntegration(
+    orgId: string,
+    integrationId: string,
+    profileId?: string
+  ) {
+    const integration = await this.assertIntegrationAccess(orgId, integrationId, profileId);
+    if (!['instagram', 'instagram-standalone'].includes(integration.providerIdentifier)) {
+      throw new BadRequestException('A integracao precisa ser uma conta do Instagram');
     }
-    integration.token = decryptIntegrationToken(
-      this._encryption,
-      integration.token
-    );
-
-    const provider = this._integrationManager.getSocialIntegration(
-      'instagram'
-    ) as unknown as InstagramProvider;
-    if (!provider) {
-      return { stories: [] };
-    }
+    const provider = this._integrationManager.getSocialIntegration('instagram') as unknown as InstagramProvider;
+    if (!provider) throw new ServiceUnavailableException('Instagram media is temporarily unavailable');
 
     try {
-      const route = await resolveIgRoute(
-        integration as any,
-        this._instagramMessaging
-      );
-      return await provider.getRecentStories(
-        integration.internalId,
-        route.token,
-        route.host
-      );
-    } catch (err) {
-      this._logger.warn(
-        `Failed to fetch Instagram stories: ${
-          err instanceof Error ? err.message : 'Unknown error'
-        }`
-      );
-      return { stories: [] };
+      integration.token = decryptIntegrationToken(this._encryption, integration.token);
+      const route = await resolveIgRoute(integration, this._instagramMessaging);
+      const token = route.source === 'page-access-token' ? integration.token : route.token;
+      return await provider.getRecentStories(integration.internalId, token, route.host);
+    } catch {
+      this._logger.warn('Failed to fetch Instagram stories');
+      throw new ServiceUnavailableException('Could not load Instagram stories. Check the channel connection and try again.');
     }
   }
 

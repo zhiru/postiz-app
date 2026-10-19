@@ -80,3 +80,23 @@ as tabelas novas para tentar reverter uma instalação em funcionamento.
 Esses testes não substituem a validação das permissões da Meta e da entrega de
 mensagens em uma conta real. A integração não ativa regras nem envia mensagens
 em produção por conta própria.
+
+## Ensaio com a instalação Aireset em 18/10/2026
+
+- Uma cópia isolada do banco real recebeu a migração, preservando as 1.214
+  postagens e os três canais. O perfil Default foi criado e recebeu seus dados.
+- Duas passagens completas do histórico consultaram a Meta com as conexões
+  existentes: 52 requisições GET, nenhum novo registro, nenhuma identidade
+  duplicada e nenhuma alteração nas publicações nativas.
+- Login, calendário mensal, detalhe somente leitura de importados, relatório,
+  criação de perfil vazio e troca de perfil foram conferidos no navegador.
+  O perfil vazio não mostrou canais nem postagens do perfil Default.
+- Um comentário real entre as contas autorizadas foi encaminhado ao fluxo no
+  ambiente isolado. A Meta confirmou uma resposta pública e uma DM, exibidas
+  no Instagram. Reprocessar o comentário manteve uma execução e duas entregas.
+  Após pausar pela interface, o evento não gerou novas execuções ou envios.
+- O aplicativo compartilhado da Meta já entrega os webhooks ao Chatwoot.
+  Esse callback não foi alterado. O recebimento automático pelo Postiz exige
+  encaminhamento autorizado desses eventos; o ensaio acima não comprova essa
+  etapa de transporte. Não substituir o destino existente sem preservar o
+  atendimento do Chatwoot.

@@ -55,13 +55,30 @@ export const useFlowExecution = (flowId: string, executionId: string | null) => 
   );
 };
 
+export const readIntegrationMediaResponse = async (
+  response: Response,
+  field: 'posts' | 'stories'
+) => {
+  if (!response.ok) throw new Error('Unable to load Instagram media');
+  const data = await response.json();
+  const items = Array.isArray(data) ? data : data?.[field];
+  const nextCursor = Array.isArray(data) ? null : data?.nextCursor ?? null;
+  if (
+    !Array.isArray(items) ||
+    items.some((item) => !item || typeof item.id !== 'string') ||
+    (nextCursor !== null && typeof nextCursor !== 'string')
+  ) {
+    throw new Error('Invalid Instagram media response');
+  }
+  return { items, nextCursor };
+};
+
 export const useIntegrationPosts = (integrationId: string | null) => {
   const fetch = useFetch();
   const load = useCallback(
     async (path: string) => {
-      const data = await (await fetch(path)).json();
-      // API returns { posts, nextCursor } — unwrap posts for grid usage
-      return Array.isArray(data) ? data : (data?.posts ?? []);
+      const { items } = await readIntegrationMediaResponse(await fetch(path), 'posts');
+      return items;
     },
     [fetch]
   );
@@ -76,8 +93,8 @@ export const useIntegrationStories = (integrationId: string | null) => {
   const fetch = useFetch();
   const load = useCallback(
     async (path: string) => {
-      const data = await (await fetch(path)).json();
-      return Array.isArray(data) ? data : (data?.stories ?? []);
+      const { items } = await readIntegrationMediaResponse(await fetch(path), 'stories');
+      return items;
     },
     [fetch]
   );

@@ -3,11 +3,17 @@ import { ProfileSeedService } from './profile.seed.module';
 describe('ProfileSeedService', () => {
   let service: ProfileSeedService;
   let executeRawUnsafe: jest.Mock;
+  let organizationFindMany: jest.Mock;
+  let profileCreate: jest.Mock;
 
   beforeEach(() => {
     executeRawUnsafe = jest.fn().mockResolvedValue(0);
+    organizationFindMany = jest.fn().mockResolvedValue([]);
+    profileCreate = jest.fn().mockResolvedValue({ id: 'default-profile' });
     service = new ProfileSeedService({
       $executeRawUnsafe: executeRawUnsafe,
+      organization: { findMany: organizationFindMany },
+      profile: { create: profileCreate },
     } as any);
   });
 
@@ -55,14 +61,33 @@ describe('ProfileSeedService', () => {
       expect(markerIndex).toBeGreaterThan(editorIndex);
     });
 
-    it('continua criando o perfil default para orgs sem perfil', async () => {
+    it('copies legacy preferences only while creating the missing Default profile', async () => {
+      organizationFindMany.mockResolvedValue([
+        { id: 'org', shortlink: 'YES', lateApiKey: 'enc:v1:legacy-fake' },
+      ]);
+
       await service.onModuleInit();
 
-      const defaultInsert = allSql().find(
-        (sql) =>
-          sql.includes('INSERT INTO "Profile"') && sql.includes(`'Default'`)
-      );
-      expect(defaultInsert).toBeDefined();
+      expect(organizationFindMany).toHaveBeenCalledWith({
+        where: { profiles: { none: { isDefault: true, deletedAt: null } } },
+        select: { id: true, shortlink: true, lateApiKey: true },
+      });
+      expect(profileCreate).toHaveBeenCalledWith({
+        data: {
+          name: 'Default',
+          slug: 'default',
+          organizationId: 'org',
+          isDefault: true,
+          shortlink: 'YES',
+          lateApiKey: 'enc:v1:legacy-fake',
+        },
+      });
+    });
+
+    it('does not write preferences for organizations with an existing Default', async () => {
+      await service.onModuleInit();
+
+      expect(profileCreate).not.toHaveBeenCalled();
     });
 
     it('nao propaga erro quando a tabela Profile ainda nao existe', async () => {

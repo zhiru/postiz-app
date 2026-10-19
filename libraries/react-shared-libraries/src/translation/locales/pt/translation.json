@@ -1786,6 +1786,8 @@
   "trigger_posts_selected": "{count} post(s) selecionado(s)",
   "trigger_posts_all": "Todos os posts",
   "loading_posts": "Carregando posts...",
+  "instagram_posts_load_failed": "Não foi possível carregar as publicações do Instagram. Verifique a conexão da conta e tente novamente.",
+  "instagram_stories_load_failed": "Não foi possível carregar os stories do Instagram. Verifique a conexão da conta e tente novamente.",
   "no_posts_found": "Nenhum post do Instagram encontrado. Reconecte a conta ou crie posts antes.",
   "no_caption": "(sem legenda)",
   "show_history": "Histórico",

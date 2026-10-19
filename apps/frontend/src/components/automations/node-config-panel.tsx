@@ -4,6 +4,8 @@ import { FC, useCallback, useState, useEffect } from 'react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
+import { Button } from '@gitroom/react/form/button';
+import { readIntegrationMediaResponse } from '@gitroom/frontend/components/automations/hooks/use-flows';
 import { AdAliasesField } from '@gitroom/frontend/components/automations/ad-aliases-field.component';
 import { CommaSeparatedKeywordsInput } from '@gitroom/frontend/components/automations/comma-separated-keywords-input.component';
 
@@ -40,8 +42,8 @@ const useFlowPosts = (flowId: string, enabled: boolean) => {
   return useSWR<InstagramPost[]>(
     enabled ? `/flows/${flowId}/posts` : null,
     async (url: string) => {
-      const res = await fetch(url);
-      return res.json();
+      const { items } = await readIntegrationMediaResponse(await fetch(url), 'posts');
+      return items;
     }
   );
 };
@@ -140,10 +142,13 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
   const inputWrapperClass =
     'bg-newBgColorInner border border-newTableBorder rounded-[8px]';
 
-  const { data: posts, isLoading: postsLoading } = useFlowPosts(
-    flowId,
-    node.type === 'trigger'
-  );
+  const {
+    data: posts,
+    error: postsError,
+    isLoading: postsLoading,
+    isValidating: postsValidating,
+    mutate: mutatePosts,
+  } = useFlowPosts(flowId, node.type === 'trigger');
 
   const fetchApi = useFetch();
   const { data: flowSummary } = useSWR<{ integrationId: string }>(
@@ -296,12 +301,26 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
             {/* Specific selectors */}
             {currentMode === 'specific' && triggerType === 'comment_on_post' && (
               <>
-                {postsLoading && (
+                {postsError && (
+                  <div role="alert" className="mb-[12px] space-y-[8px] text-[12px] text-newTextColor">
+                    <p>{t('instagram_posts_load_failed', 'Could not load Instagram posts. Check the account connection and try again.')}</p>
+                    <Button
+                      secondary
+                      loading={postsValidating}
+                      disabled={postsValidating}
+                      className="rounded-[6px] text-[12px]"
+                      onClick={() => { void mutatePosts().catch(() => undefined); }}
+                    >
+                      {t('try_again', 'Try Again')}
+                    </Button>
+                  </div>
+                )}
+                {!postsError && postsLoading && (
                   <p className="text-[12px] text-customColor18">
                     {t('loading_posts', 'Carregando posts...')}
                   </p>
                 )}
-                {!postsLoading && (!posts || posts.length === 0) && (
+                {!postsError && !postsLoading && (!posts || posts.length === 0) && (
                   <p className="text-[12px] text-customColor18">
                     {t(
                       'no_posts_found',
@@ -309,7 +328,7 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
                     )}
                   </p>
                 )}
-                {!postsLoading && posts && posts.length > 0 && (
+                {!postsError && !postsLoading && posts && posts.length > 0 && (
                   <div className="max-h-[320px] overflow-y-auto space-y-[8px] mb-[12px]">
                     {posts.map((post) => {
                       const isSelected = selectedPostIds.includes(post.id);

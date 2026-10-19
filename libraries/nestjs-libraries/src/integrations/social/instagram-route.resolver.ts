@@ -77,7 +77,7 @@ export async function resolveIgRoute(
   }
 
   return {
-    token: integration.token,
+    token: integration.token.split('___')[0],
     host: FB_LOGIN_GRAPH,
     useIgGraph: false,
     source: 'page-access-token',

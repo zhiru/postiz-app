@@ -5,6 +5,7 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import { useIntegrationStories } from '@gitroom/frontend/components/automations/hooks/use-flows';
+import { Button } from '@gitroom/react/form/button';
 import { useRouter } from 'next/navigation';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { WizardPhonePreview } from '@gitroom/frontend/components/automations/wizard-phone-preview.component';
@@ -135,7 +136,9 @@ export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
 
   const instagramIntegrations = useMemo(() => {
     if (!Array.isArray(integrations)) return [];
-    return integrations.filter((i: any) => i.identifier === 'instagram');
+    return integrations.filter((i: any) =>
+      ['instagram', 'instagram-standalone'].includes(i.identifier)
+    );
   }, [integrations]);
 
   const selectedIntegration = useMemo(
@@ -143,9 +146,13 @@ export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
     [instagramIntegrations, integrationId]
   );
 
-  const { data: stories, isLoading: storiesLoading } = useIntegrationStories(
-    storyMode === 'specific' ? integrationId || null : null
-  );
+  const {
+    data: stories,
+    error: storiesError,
+    isLoading: storiesLoading,
+    isValidating: storiesValidating,
+    mutate: mutateStories,
+  } = useIntegrationStories(storyMode === 'specific' ? integrationId || null : null);
 
   const selectedStory = useMemo(() => {
     if (!Array.isArray(stories) || selectedStoryIds.length === 0) return null;
@@ -425,6 +432,19 @@ export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
                         'Selecione uma conta do Instagram primeiro'
                       )}
                     </p>
+                  ) : storiesError ? (
+                    <div role="alert" className="space-y-[8px] text-[12px] text-newTextColor">
+                      <p>{t('instagram_stories_load_failed', 'Could not load Instagram stories. Check the account connection and try again.')}</p>
+                      <Button
+                        secondary
+                        loading={storiesValidating}
+                        disabled={storiesValidating}
+                        className="rounded-[6px] text-[12px]"
+                        onClick={() => { void mutateStories().catch(() => undefined); }}
+                      >
+                        {t('try_again', 'Try Again')}
+                      </Button>
+                    </div>
                   ) : storiesLoading ? (
                     <p className="text-[11px] text-customColor18">
                       {t('loading_stories', 'Carregando stories...')}

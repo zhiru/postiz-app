@@ -99,6 +99,7 @@ export class FlowsController {
   @Get('/integrations/:integrationId/posts')
   async getIntegrationPosts(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @Param('integrationId') integrationId: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string
@@ -107,18 +108,21 @@ export class FlowsController {
       org.id,
       integrationId,
       cursor,
-      limit ? parseInt(limit, 10) : 25
+      limit ? parseInt(limit, 10) : 25,
+      profile?.id
     );
   }
 
   @Get('/integrations/:integrationId/stories')
   async getIntegrationStories(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @Param('integrationId') integrationId: string
   ) {
     return this._flowsService.getInstagramStoriesByIntegration(
       org.id,
-      integrationId
+      integrationId,
+      profile?.id
     );
   }
 

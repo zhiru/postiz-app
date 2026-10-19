@@ -1786,6 +1786,8 @@
   "trigger_posts_selected": "{count} post(s) selected",
   "trigger_posts_all": "All posts",
   "loading_posts": "Loading posts...",
+  "instagram_posts_load_failed": "Could not load Instagram posts. Check the account connection and try again.",
+  "instagram_stories_load_failed": "Could not load Instagram stories. Check the account connection and try again.",
   "no_posts_found": "No Instagram posts found. Reconnect the account or create posts first.",
   "no_caption": "(no caption)",
   "show_history": "History",

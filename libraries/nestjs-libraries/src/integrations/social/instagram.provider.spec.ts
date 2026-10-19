@@ -369,3 +369,503 @@ describe('InstagramProvider.handleErrors', () => {
     });
   });
 });
+
+describe('InstagramProvider recent media readers', () => {
+  const media = {
+    id: 'media-1',
+    media_type: 'IMAGE',
+    caption: 'Caption',
+    media_url: 'https://cdn.example/photo.jpg',
+    timestamp: '2026-10-18T12:00:00+0000',
+  };
+  const response = (body: unknown, status = 200) =>
+    ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+    } as Response);
+  let provider: InstagramProvider;
+  let request: jest.SpyInstance;
+
+  beforeEach(() => {
+    provider = new InstagramProvider();
+    request = jest.spyOn(global, 'fetch');
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  const readers = [
+    { method: 'getRecentMedia', edge: 'media' },
+    { method: 'getRecentStories', edge: 'stories' },
+  ] as const;
+
+  describe.each(readers)('$method', ({ method, edge }) => {
+    it.each([
+      ['graph.facebook.com', 'page-token___user-token', 'user-token'],
+      ['graph.facebook.com', 'page-token___', 'page-token'],
+      ['graph.instagram.com', 'ig-token', 'ig-token'],
+    ])('uses the correct token on %s', async (host, token, expectedToken) => {
+      request.mockResolvedValue(response({ data: [media] }));
+
+      const result = await provider[method]('ig-account', token, host);
+
+      expect(request).toHaveBeenCalledTimes(1);
+      const [input, options] = request.mock.calls[0];
+      const url = new URL(String(input));
+      expect(url.hostname).toBe(host);
+      expect(url.pathname).toBe(`/v25.0/ig-account/${edge}`);
+      expect(url.searchParams.get('access_token')).toBe(expectedToken);
+      expect(url.searchParams.get('fields')).toContain('media_type');
+      expect(options).toMatchObject({ redirect: 'error' });
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+      expect(options.dispatcher).toBeDefined();
+      expect('posts' in result ? result.posts : result.stories).toEqual([
+        {
+          id: 'media-1',
+          mediaType: 'IMAGE',
+          caption: 'Caption',
+          mediaUrl: media.media_url,
+          timestamp: media.timestamp,
+        },
+      ]);
+      expect(JSON.stringify(result)).not.toContain('token');
+    });
+
+    it('keeps an explicitly empty data page valid', async () => {
+      request.mockResolvedValue(response({ data: [] }));
+      const result = await provider[method]('ig-account', 'secret-token');
+      expect('posts' in result ? result.posts : result.stories).toEqual([]);
+    });
+
+    it.each([
+      ['HTTP', { data: [] }, 403],
+      [
+        'Graph',
+        { data: [], error: { message: 'secret-token provider-body' } },
+        200,
+      ],
+      ['missing data', { unexpected: 'secret-token provider-body' }, 200],
+      ['non-array data', { data: {} }, 200],
+      ['null item', { data: [null] }, 200],
+      ['missing identity', { data: [{ media_type: 'IMAGE' }] }, 200],
+    ])('rejects %s without leaking provider data', async (_, body, status) => {
+      request.mockResolvedValue(response(body, status as number));
+      await expect(
+        provider[method]('ig-account', 'secret-token')
+      ).rejects.toEqual(new Error(`Could not retrieve Instagram ${edge}`));
+      expect(request).toHaveBeenCalledTimes(1);
+    });
+
+    it('sanitizes network and JSON parse failures without retrying', async () => {
+      request.mockRejectedValueOnce(new Error('secret-token provider-body'));
+      await expect(
+        provider[method]('ig-account', 'secret-token')
+      ).rejects.toEqual(new Error(`Could not retrieve Instagram ${edge}`));
+      request.mockResolvedValueOnce({
+        ok: true,
+        json: async () => {
+          throw new Error('secret-token provider-body');
+        },
+      } as any);
+      await expect(
+        provider[method]('ig-account', 'secret-token')
+      ).rejects.toEqual(new Error(`Could not retrieve Instagram ${edge}`));
+      expect(request).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('encodes media cursors and does not follow paging next URLs', async () => {
+    request.mockResolvedValue(
+      response({
+        data: [],
+        paging: {
+          next: 'https://do-not-follow.invalid/?access_token=secret',
+          cursors: { after: 'next-safe' },
+        },
+      })
+    );
+    const cursor = 'cursor+/=&access_token=evil';
+    const result = await provider.getRecentMedia(
+      'ig-account',
+      'page___user',
+      'graph.facebook.com',
+      50,
+      cursor
+    );
+    const url = new URL(String(request.mock.calls[0][0]));
+    expect(url.searchParams.get('after')).toBe(cursor);
+    expect(url.searchParams.get('access_token')).toBe('user');
+    expect(url.searchParams.getAll('access_token')).toEqual(['user']);
+    expect(url.searchParams.get('limit')).toBe('50');
+    expect(result.nextCursor).toBe('next-safe');
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose a terminal cursor when paging.next is absent', async () => {
+    request.mockResolvedValue(
+      response({ data: [], paging: { cursors: { after: 'terminal' } } })
+    );
+    await expect(
+      provider.getRecentMedia('ig-account', 'token')
+    ).resolves.toEqual({ posts: [], nextCursor: null });
+  });
+
+  it.each([undefined, '', 42, 'same'])(
+    'rejects an invalid or repeated next cursor %s',
+    async (cursor) => {
+      request.mockResolvedValue(
+        response({
+          data: [],
+          paging: { next: 'ignored', cursors: { after: cursor } },
+        })
+      );
+      await expect(
+        provider.getRecentMedia('ig-account', 'token', undefined, 25, 'same')
+      ).rejects.toThrow('Could not retrieve Instagram media');
+    }
+  );
+});
+
+describe('InstagramProvider webhook account subscriptions', () => {
+  const response = (body: unknown, status = 200) =>
+    ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+    } as Response);
+  let provider: InstagramProvider;
+  let request: jest.SpyInstance;
+  let pageLookup: jest.SpyInstance;
+
+  beforeEach(() => {
+    provider = new InstagramProvider();
+    request = jest.spyOn(global, 'fetch');
+    pageLookup = jest
+      .spyOn(provider, 'getPageIdForIgAccount')
+      .mockResolvedValue('page-id');
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each([
+    ['graph.facebook.com', 'page-id', 'feed,messages'],
+    ['graph.instagram.com', 'ig-id', 'comments,messages'],
+  ])(
+    'subscribes the correct object and fields for %s',
+    async (host, objectId, fields) => {
+      request
+        .mockResolvedValueOnce(response({ data: [] }))
+        .mockResolvedValueOnce(response({ success: true }));
+      await expect(
+        provider.ensureWebhookSubscription(
+          'page-token___user-token',
+          'ig-id',
+          host,
+          'app-id'
+        )
+      ).resolves.toBe(true);
+      expect(request).toHaveBeenCalledTimes(2);
+      const [input, options] = request.mock.calls[1];
+      const url = new URL(String(input));
+      expect(url.hostname).toBe(host);
+      expect(url.pathname).toBe(`/v25.0/${objectId}/subscribed_apps`);
+      expect(url.searchParams.get('subscribed_fields')).toBe(fields);
+      expect(url.searchParams.get('access_token')).toBe('page-token');
+      expect(options).toMatchObject({ method: 'POST', redirect: 'error' });
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+      expect(options.dispatcher).toBeDefined();
+      if (host === 'graph.facebook.com') {
+        expect(pageLookup).toHaveBeenCalledWith('page-token', 'ig-id', host);
+      } else {
+        expect(pageLookup).not.toHaveBeenCalled();
+      }
+      expect(String(input)).not.toContain('callback');
+      expect(String(input)).not.toContain('verify_token');
+    }
+  );
+
+  it.each(['graph.facebook.com', 'graph.instagram.com'])(
+    'checks subscription state on the correct object for %s',
+    async (host) => {
+      request.mockResolvedValue(
+        response({ data: [{ id: 'app-id', subscribed_fields: ['messages'] }] })
+      );
+      await expect(
+        provider.checkWebhookSubscription(
+          'ig-id',
+          'page-token___user-token',
+          host,
+          'app-id'
+        )
+      ).resolves.toEqual({ subscribed: true, fields: ['messages'] });
+      const url = new URL(String(request.mock.calls[0][0]));
+      expect(url.pathname).toBe(
+        `/v25.0/${
+          host === 'graph.facebook.com' ? 'page-id' : 'ig-id'
+        }/subscribed_apps`
+      );
+      expect(url.searchParams.get('access_token')).toBe('page-token');
+      expect(request.mock.calls[0][1]).toMatchObject({ redirect: 'error' });
+    }
+  );
+
+  it('does not report a missing Facebook Page as an unsubscribed Instagram account', async () => {
+    pageLookup.mockResolvedValue(null);
+    await expect(
+      provider.checkWebhookSubscription('ig-id', 'token', undefined, 'app-id')
+    ).rejects.toEqual(
+      new Error('Could not check Instagram webhook subscription')
+    );
+    await expect(
+      provider.ensureWebhookSubscription('token', 'ig-id', undefined, 'app-id')
+    ).rejects.toEqual(new Error('Could not subscribe to Instagram webhooks'));
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('keeps a valid empty Page subscription list empty', async () => {
+    request.mockResolvedValue(response({ data: [] }));
+    await expect(
+      provider.checkWebhookSubscription('ig-id', 'token', undefined, 'app-id')
+    ).resolves.toEqual({ subscribed: false, fields: [] });
+  });
+
+  it.each([
+    ['HTTP', { success: true }, 403],
+    ['Graph', { error: { message: 'secret-token provider-body' } }, 200],
+    ['malformed', { unexpected: 'secret-token provider-body' }, 200],
+    ['rejected', { success: false }, 200],
+  ])(
+    'rejects %s subscription failures without retry or provider data',
+    async (_, body, status) => {
+      request
+        .mockResolvedValueOnce(response({ data: [] }))
+        .mockResolvedValueOnce(response(body, status as number));
+      await expect(
+        provider.ensureWebhookSubscription(
+          'secret-token',
+          'ig-id',
+          'graph.instagram.com',
+          'app-id'
+        )
+      ).rejects.toEqual(new Error('Could not subscribe to Instagram webhooks'));
+      expect(request).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it('does not retry an uncertain subscription result', async () => {
+    request
+      .mockResolvedValueOnce(response({ data: [] }))
+      .mockRejectedValueOnce(new Error('secret-token timeout provider-body'));
+    await expect(
+      provider.ensureWebhookSubscription(
+        'secret-token',
+        'ig-id',
+        'graph.instagram.com',
+        'app-id'
+      )
+    ).rejects.toEqual(new Error('Could not subscribe to Instagram webhooks'));
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['HTTP', { data: [] }, 403],
+    [
+      'Graph',
+      { data: [], error: { message: 'secret-token provider-body' } },
+      200,
+    ],
+    ['missing data', {}, 200],
+    [
+      'invalid fields',
+      { data: [{ id: 'app-id', subscribed_fields: 'comments' }] },
+      200,
+    ],
+    ['unknown fields', { data: [{ id: 'app-id' }] }, 200],
+  ])(
+    'rejects %s check failures without provider data',
+    async (_, body, status) => {
+      request.mockResolvedValue(response(body, status as number));
+      await expect(
+        provider.checkWebhookSubscription(
+          'ig-id',
+          'secret-token',
+          'graph.instagram.com',
+          'app-id'
+        )
+      ).rejects.toEqual(
+        new Error('Could not check Instagram webhook subscription')
+      );
+      expect(request).toHaveBeenCalledTimes(1);
+    }
+  );
+});
+
+describe('InstagramProvider shared app subscription preservation', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('unions the existing Chatwoot fields before subscribing without touching callbacks', async () => {
+    const provider = new InstagramProvider();
+    jest.spyOn(provider, 'getPageIdForIgAccount').mockResolvedValue('page-id');
+    const existing = ['messages', 'message_reads', 'messaging_postbacks'];
+    const request = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [{ id: 'app-id', subscribed_fields: existing }],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response);
+
+    await expect(
+      provider.ensureWebhookSubscription(
+        'page-token',
+        'ig-id',
+        undefined,
+        'app-id'
+      )
+    ).resolves.toBe(true);
+
+    expect(request).toHaveBeenCalledTimes(2);
+    const read = new URL(String(request.mock.calls[0][0]));
+    expect(read.searchParams.get('fields')).toBe('id,subscribed_fields');
+    const mutation = new URL(String(request.mock.calls[1][0]));
+    expect(mutation.searchParams.get('subscribed_fields')?.split(',')).toEqual([
+      ...existing,
+      'feed',
+    ]);
+    expect(mutation.searchParams.has('callback_url')).toBe(false);
+    expect(mutation.searchParams.has('verify_token')).toBe(false);
+  });
+
+  it('does not mutate a shared app subscription that already has the required fields', async () => {
+    const provider = new InstagramProvider();
+    jest.spyOn(provider, 'getPageIdForIgAccount').mockResolvedValue('page-id');
+    const request = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            id: 'app-id',
+            subscribed_fields: ['feed', 'messages', 'messaging_postbacks'],
+          },
+        ],
+      }),
+    } as Response);
+
+    await expect(
+      provider.ensureWebhookSubscription(
+        'page-token',
+        'ig-id',
+        undefined,
+        'app-id'
+      )
+    ).resolves.toBe(true);
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][1]?.method).not.toBe('POST');
+  });
+
+  it('does not mutate when existing fields cannot be read safely', async () => {
+    const provider = new InstagramProvider();
+    jest.spyOn(provider, 'getPageIdForIgAccount').mockResolvedValue('page-id');
+    const request = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: { message: 'provider-body' } }),
+    } as Response);
+
+    await expect(
+      provider.ensureWebhookSubscription(
+        'page-token',
+        'ig-id',
+        undefined,
+        'app-id'
+      )
+    ).rejects.toEqual(new Error('Could not subscribe to Instagram webhooks'));
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][1]?.method).not.toBe('POST');
+  });
+});
+
+describe('InstagramProvider subscription app identity', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('does not consider a different app sufficient or copy its fields', async () => {
+    const provider = new InstagramProvider();
+    jest.spyOn(provider, 'getPageIdForIgAccount').mockResolvedValue('page-id');
+    const request = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              id: 'other-app',
+              subscribed_fields: ['feed', 'messages', 'leadgen'],
+            },
+            {
+              id: 'app-id',
+              subscribed_fields: ['messages', 'messaging_postbacks'],
+            },
+          ],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response);
+
+    await expect(
+      provider.ensureWebhookSubscription(
+        'page-token',
+        'ig-id',
+        undefined,
+        'app-id'
+      )
+    ).resolves.toBe(true);
+
+    expect(request).toHaveBeenCalledTimes(2);
+    const mutation = new URL(String(request.mock.calls[1][0]));
+    expect(mutation.searchParams.get('subscribed_fields')?.split(',')).toEqual([
+      'messages',
+      'messaging_postbacks',
+      'feed',
+    ]);
+  });
+
+  it('fails closed when the app identity is unavailable', async () => {
+    const request = jest
+      .spyOn(global, 'fetch')
+      .mockRejectedValue(new Error('Network disabled in test'));
+    const provider = new InstagramProvider();
+    jest.spyOn(provider, 'getPageIdForIgAccount').mockResolvedValue('page-id');
+    await expect(
+      provider.ensureWebhookSubscription('page-token', 'ig-id')
+    ).rejects.toEqual(new Error('Could not subscribe to Instagram webhooks'));
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('does not reset fields when the current app may be on a subsequent page', async () => {
+    const provider = new InstagramProvider();
+    jest.spyOn(provider, 'getPageIdForIgAccount').mockResolvedValue('page-id');
+    const request = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{ id: 'other-app', subscribed_fields: ['messages'] }],
+        paging: { next: 'https://do-not-follow.invalid/' },
+      }),
+    } as Response);
+
+    await expect(
+      provider.ensureWebhookSubscription(
+        'page-token',
+        'ig-id',
+        undefined,
+        'app-id'
+      )
+    ).rejects.toEqual(new Error('Could not subscribe to Instagram webhooks'));
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+});

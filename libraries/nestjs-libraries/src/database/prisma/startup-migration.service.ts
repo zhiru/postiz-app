@@ -1,10 +1,10 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 import { RepostService } from './repost/repost.service';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 
 @Injectable()
-export class StartupMigrationService implements OnModuleInit {
+export class StartupMigrationService implements OnApplicationBootstrap {
   private readonly logger = new Logger(StartupMigrationService.name);
 
   constructor(
@@ -13,7 +13,7 @@ export class StartupMigrationService implements OnModuleInit {
     private readonly refreshIntegrationService: RefreshIntegrationService
   ) {}
 
-  async onModuleInit() {
+  async onApplicationBootstrap() {
     await this.migrateProfileScope();
     // Provider changes are explicit opt-in when adopting an existing instance.
     if (process.env.MIGRATE_LATE_TO_ZERNIO === 'true')
@@ -162,79 +162,26 @@ export class StartupMigrationService implements OnModuleInit {
    */
   private async migrateProfileScope() {
     try {
-      const needsMigration = await this.prisma.providerCredential.count({
-        where: { profileId: null },
+      // ProfileSeedService finishes in onModuleInit before these bootstrap hooks.
+      const defaults = await this.prisma.profile.findMany({
+        where: { isDefault: true, deletedAt: null },
+        select: { id: true, organizationId: true },
       });
-
-      if (needsMigration === 0) {
-        return;
-      }
-
-      this.logger.log(
-        `Found ${needsMigration} credentials without profile. Running profile scope migration...`
-      );
+      if (!defaults.length) return;
 
       await this.prisma.$transaction(async (tx) => {
-        // 1. ProviderCredential → default profile
-        await tx.$executeRawUnsafe(`
-          UPDATE "ProviderCredential" pc
-          SET "profileId" = p.id
-          FROM "Profile" p
-          WHERE p."organizationId" = pc."organizationId"
-          AND p."isDefault" = true AND p."deletedAt" IS NULL
-          AND pc."profileId" IS NULL
-        `);
-
-        // 2. Webhooks → default profile
-        await tx.$executeRawUnsafe(`
-          UPDATE "Webhooks" w
-          SET "profileId" = p.id
-          FROM "Profile" p
-          WHERE p."organizationId" = w."organizationId"
-          AND p."isDefault" = true AND p."deletedAt" IS NULL
-          AND w."profileId" IS NULL
-        `);
-
-        // 3. AutoPost → default profile
-        await tx.$executeRawUnsafe(`
-          UPDATE "AutoPost" ap
-          SET "profileId" = p.id
-          FROM "Profile" p
-          WHERE p."organizationId" = ap."organizationId"
-          AND p."isDefault" = true AND p."deletedAt" IS NULL
-          AND ap."profileId" IS NULL
-        `);
-
-        // 4. Sets → default profile
-        await tx.$executeRawUnsafe(`
-          UPDATE "Sets" s
-          SET "profileId" = p.id
-          FROM "Profile" p
-          WHERE p."organizationId" = s."organizationId"
-          AND p."isDefault" = true AND p."deletedAt" IS NULL
-          AND s."profileId" IS NULL
-        `);
-
-        // 5. Late API key: org → default profile
-        await tx.$executeRawUnsafe(`
-          UPDATE "Profile" p
-          SET "lateApiKey" = o."lateApiKey"
-          FROM "Organization" o
-          WHERE p."organizationId" = o.id
-          AND p."isDefault" = true AND p."deletedAt" IS NULL
-          AND o."lateApiKey" IS NOT NULL
-          AND p."lateApiKey" IS NULL
-        `);
-
-        // 6. Shortlink preference: org → default profile
-        await tx.$executeRawUnsafe(`
-          UPDATE "Profile" p
-          SET "shortlink" = o."shortlink"
-          FROM "Organization" o
-          WHERE p."organizationId" = o.id
-          AND p."isDefault" = true AND p."deletedAt" IS NULL
-          AND p."shortlink" = 'ASK'
-        `);
+        for (const profile of defaults) {
+          const where: { organizationId: string; profileId: null } = {
+            organizationId: profile.organizationId,
+            profileId: null,
+          };
+          const data = { profileId: profile.id };
+          // Credential rows can be absent on upgrade; each legacy family still needs its scope.
+          await tx.providerCredential.updateMany({ where, data });
+          await tx.webhooks.updateMany({ where, data });
+          await tx.autoPost.updateMany({ where, data });
+          await tx.sets.updateMany({ where, data });
+        }
       });
 
       this.logger.log('Profile scope migration completed successfully.');

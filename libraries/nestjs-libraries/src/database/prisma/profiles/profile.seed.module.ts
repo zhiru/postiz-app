@@ -35,22 +35,26 @@ export class ProfileSeedService implements OnModuleInit {
     }
 
     // 1. Create a default Profile for each Organization that does not yet have one
-    const defaultsCreated = await this.prisma.$executeRawUnsafe(`
-      INSERT INTO "Profile" ("id", "name", "slug", "organizationId", "isDefault", "createdAt", "updatedAt")
-      SELECT
-        gen_random_uuid(),
-        'Default',
-        'default',
-        o."id",
-        true,
-        NOW(),
-        NOW()
-      FROM "Organization" o
-      WHERE NOT EXISTS (
-        SELECT 1 FROM "Profile" p
-        WHERE p."organizationId" = o."id" AND p."isDefault" = true AND p."deletedAt" IS NULL
-      )
-    `);
+    const organizationsWithoutDefault = await this.prisma.organization.findMany(
+      {
+        where: { profiles: { none: { isDefault: true, deletedAt: null } } },
+        select: { id: true, shortlink: true, lateApiKey: true },
+      }
+    );
+    for (const organization of organizationsWithoutDefault) {
+      await this.prisma.profile.create({
+        data: {
+          name: 'Default',
+          slug: 'default',
+          organizationId: organization.id,
+          isDefault: true,
+          // Copy legacy preferences once; subsequent restarts preserve profile edits.
+          shortlink: organization.shortlink,
+          lateApiKey: organization.lateApiKey,
+        },
+      });
+    }
+    const defaultsCreated = organizationsWithoutDefault.length;
 
     if (defaultsCreated > 0) {
       this.logger.log(

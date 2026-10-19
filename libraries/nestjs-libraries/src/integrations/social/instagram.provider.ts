@@ -1079,58 +1079,109 @@ export class InstagramProvider
   async subscribeToWebhooks(
     igAccountId: string,
     pageAccessToken: string,
-    type = 'graph.facebook.com'
+    type = 'graph.facebook.com',
+    appId?: string
   ): Promise<boolean> {
-    // For Instagram webhooks (comments, messages), subscribe the IG Business
-    // account directly with instagram-specific fields.
-    const response = await this.fetch(
-      `${metaGraphUrl(
-        type
-      )}/${igAccountId}/subscribed_apps?subscribed_fields=comments,messages&access_token=${pageAccessToken}`,
-      { method: 'POST' }
-    );
-
-    const body = await response.json();
-    if (body.error) {
-      throw new Error(
-        `Webhook subscription failed: ${
-          body.error.message || JSON.stringify(body.error)
-        }`
+    try {
+      if (!appId) throw new Error();
+      const token = pageAccessToken.split('___')[0];
+      const requiredFields =
+        type === 'graph.instagram.com'
+          ? ['comments', 'messages']
+          : ['feed', 'messages'];
+      const current = await this.checkWebhookSubscription(
+        igAccountId,
+        token,
+        type,
+        appId
       );
+      if (requiredFields.every((field) => current.fields.includes(field)))
+        return true;
+      const accountId =
+        type === 'graph.instagram.com'
+          ? igAccountId
+          : await this.getPageIdForIgAccount(token, igAccountId, type);
+      if (!accountId) throw new Error();
+      const params = new URLSearchParams({
+        // A shared app can serve Chatwoot too; never replace its existing fields.
+        subscribed_fields: [
+          ...new Set([...current.fields, ...requiredFields]),
+        ].join(','),
+        access_token: token,
+      });
+      const response = await ssrfSafeFetch(
+        `${metaGraphUrl(type)}/${encodeURIComponent(
+          accountId
+        )}/subscribed_apps?${params}`,
+        {
+          method: 'POST',
+          signal: AbortSignal.timeout(25000),
+          redirect: 'error',
+        }
+      );
+      if (!response.ok) throw new Error();
+      const body = await response.json();
+      if (body?.error || body?.success !== true) throw new Error();
+      return true;
+    } catch {
+      throw new Error('Could not subscribe to Instagram webhooks');
     }
-
-    return body.success === true;
   }
 
   async checkWebhookSubscription(
     igAccountId: string,
     pageAccessToken: string,
-    type = 'graph.facebook.com'
+    type = 'graph.facebook.com',
+    appId?: string
   ): Promise<{ subscribed: boolean; fields: string[] }> {
-    // Non-destructive check: reads the current subscription state for this
-    // IG account and returns the subscribed fields. In the Meta Use Cases
-    // model the subscription is configured in the Dashboard — this endpoint
-    // reflects that state.
-    const response = await this.fetch(
-      `${metaGraphUrl(
-        type
-      )}/${igAccountId}/subscribed_apps?access_token=${pageAccessToken}`
-    );
-    const body = await response.json();
-    if (body.error) {
-      throw new Error(
-        `Webhook check failed: ${
-          body.error.message || JSON.stringify(body.error)
-        }`
+    try {
+      if (!appId) throw new Error();
+      const token = pageAccessToken.split('___')[0];
+      const accountId =
+        type === 'graph.instagram.com'
+          ? igAccountId
+          : await this.getPageIdForIgAccount(token, igAccountId, type);
+      if (!accountId) throw new Error();
+      const params = new URLSearchParams({
+        fields: 'id,subscribed_fields',
+        access_token: token,
+      });
+      const response = await ssrfSafeFetch(
+        `${metaGraphUrl(type)}/${encodeURIComponent(
+          accountId
+        )}/subscribed_apps?${params}`,
+        { signal: AbortSignal.timeout(25000), redirect: 'error' }
       );
+      if (!response.ok) throw new Error();
+      const body = await response.json();
+      if (
+        body?.error ||
+        !Array.isArray(body?.data) ||
+        body.data.some((app: any) => typeof app?.id !== 'string' || !app.id)
+      ) {
+        throw new Error();
+      }
+      const apps = body.data.filter((app: any) => app.id === appId);
+      // Never overwrite unknown fields if this app is on a later result page.
+      if (body.paging?.next && !apps.length) throw new Error();
+      if (
+        apps.some(
+          (app: any) =>
+            !Array.isArray(app.subscribed_fields) ||
+            app.subscribed_fields.some(
+              (field: any) => typeof field !== 'string' || !field
+            )
+        )
+      ) {
+        throw new Error();
+      }
+      const fields: string[] = apps.flatMap(
+        (app: any) => app.subscribed_fields
+      );
+      return { subscribed: apps.length > 0, fields };
+    } catch {
+      throw new Error('Could not check Instagram webhook subscription');
     }
-    const apps: Array<{ subscribed_fields?: string[] }> = Array.isArray(
-      body.data
-    )
-      ? body.data
-      : [];
-    const fields = apps.flatMap((app) => app.subscribed_fields || []);
-    return { subscribed: apps.length > 0, fields };
   }
 
   async getPageIdForIgAccount(
@@ -1157,10 +1208,11 @@ export class InstagramProvider
   async ensureWebhookSubscription(
     pageAccessToken: string,
     igAccountId: string,
-    type = 'graph.facebook.com'
+    type = 'graph.facebook.com',
+    appId?: string
   ): Promise<boolean> {
-    // Instagram webhooks are subscribed directly on the IG account, not the Page.
-    return this.subscribeToWebhooks(igAccountId, pageAccessToken, type);
+    // Facebook Login uses the linked Page; Instagram Login uses the IG account.
+    return this.subscribeToWebhooks(igAccountId, pageAccessToken, type, appId);
   }
 
   async getMediaMetadata(
@@ -1249,30 +1301,59 @@ export class InstagramProvider
     }>;
     nextCursor: string | null;
   }> {
-    const fields =
-      'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp';
-    const cursor = after ? `&after=${after}` : '';
-    const response = await fetch(
-      `${metaGraphUrl(
-        type
-      )}/${igAccountId}/media?fields=${fields}&limit=${limit}&access_token=${accessToken}${cursor}`
-    );
-    const body = await response.json();
-    if (!response.ok || !body.data) {
-      return { posts: [], nextCursor: null };
+    try {
+      const [pageToken, userToken] = accessToken.split('___');
+      const params = new URLSearchParams({
+        fields:
+          'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp',
+        limit: String(limit),
+        access_token: userToken || pageToken,
+        ...(after ? { after } : {}),
+      });
+      const response = await ssrfSafeFetch(
+        `${metaGraphUrl(type)}/${encodeURIComponent(
+          igAccountId
+        )}/media?${params}`,
+        { signal: AbortSignal.timeout(25000), redirect: 'error' }
+      );
+      if (!response.ok) throw new Error();
+      const body = await response.json();
+      if (
+        body?.error ||
+        !Array.isArray(body?.data) ||
+        body.data.some(
+          (item: any) =>
+            !item ||
+            typeof item.id !== 'string' ||
+            !item.id ||
+            typeof item.media_type !== 'string' ||
+            !item.media_type
+        )
+      ) {
+        throw new Error();
+      }
+      const nextCursor = body.paging?.next ? body.paging?.cursors?.after : null;
+      if (
+        body.paging?.next &&
+        (typeof nextCursor !== 'string' || !nextCursor || nextCursor === after)
+      ) {
+        throw new Error();
+      }
+      return {
+        posts: body.data.map((m: any) => ({
+          id: m.id,
+          caption: m.caption,
+          mediaType: m.media_type,
+          mediaUrl: m.media_url,
+          thumbnailUrl: m.thumbnail_url,
+          permalink: m.permalink,
+          timestamp: m.timestamp,
+        })),
+        nextCursor,
+      };
+    } catch {
+      throw new Error('Could not retrieve Instagram media');
     }
-    return {
-      posts: body.data.map((m: any) => ({
-        id: m.id,
-        caption: m.caption,
-        mediaType: m.media_type,
-        mediaUrl: m.media_url,
-        thumbnailUrl: m.thumbnail_url,
-        permalink: m.permalink,
-        timestamp: m.timestamp,
-      })),
-      nextCursor: body.paging?.cursors?.after ?? null,
-    };
   }
 
   async getRecentStories(
@@ -1291,28 +1372,49 @@ export class InstagramProvider
     }>;
   }> {
     // Instagram Graph API only exposes active stories (last 24h) via this edge.
-    const fields =
-      'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp';
-    const response = await fetch(
-      `${metaGraphUrl(
-        type
-      )}/${igAccountId}/stories?fields=${fields}&access_token=${accessToken}`
-    );
-    const body = await response.json();
-    if (!response.ok || !body.data) {
-      return { stories: [] };
+    try {
+      const [pageToken, userToken] = accessToken.split('___');
+      const params = new URLSearchParams({
+        fields:
+          'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp',
+        access_token: userToken || pageToken,
+      });
+      const response = await ssrfSafeFetch(
+        `${metaGraphUrl(type)}/${encodeURIComponent(
+          igAccountId
+        )}/stories?${params}`,
+        { signal: AbortSignal.timeout(25000), redirect: 'error' }
+      );
+      if (!response.ok) throw new Error();
+      const body = await response.json();
+      if (
+        body?.error ||
+        !Array.isArray(body?.data) ||
+        body.data.some(
+          (item: any) =>
+            !item ||
+            typeof item.id !== 'string' ||
+            !item.id ||
+            typeof item.media_type !== 'string' ||
+            !item.media_type
+        )
+      ) {
+        throw new Error();
+      }
+      return {
+        stories: body.data.map((m: any) => ({
+          id: m.id,
+          caption: m.caption,
+          mediaType: m.media_type,
+          mediaUrl: m.media_url,
+          thumbnailUrl: m.thumbnail_url,
+          permalink: m.permalink,
+          timestamp: m.timestamp,
+        })),
+      };
+    } catch {
+      throw new Error('Could not retrieve Instagram stories');
     }
-    return {
-      stories: body.data.map((m: any) => ({
-        id: m.id,
-        caption: m.caption,
-        mediaType: m.media_type,
-        mediaUrl: m.media_url,
-        thumbnailUrl: m.thumbnail_url,
-        permalink: m.permalink,
-        timestamp: m.timestamp,
-      })),
-    };
   }
 
   canImportPublishedPost(settings: Record<string, unknown>) {
