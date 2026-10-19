@@ -7,6 +7,10 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+### Corrigido
+
+- Reconexão preserva o refresh token existente quando o provedor não devolve outro e limita a atualização de tokens compartilhados à organização e ao perfil corretos.
+
 ### Adicionado
 
 - Integração da base Robô MultiPost com as melhorias Aireset: preserva sincronização do histórico do Instagram, recorrência, relatórios, comentários, webhooks e administração. Migração aditiva e validação de preservação dos dados legados.

@@ -355,7 +355,7 @@ export class IntegrationRepository {
         profile: username,
         providerIdentifier: provider,
         token: encToken,
-        refreshToken: encRefreshToken,
+        ...(refreshToken ? { refreshToken: encRefreshToken } : {}),
         tokenEncrypted,
         ...(expiresIn
           ? { tokenExpiration: new Date(Date.now() + expiresIn * 1000) }
@@ -386,10 +386,12 @@ export class IntegrationRepository {
             not: upsert.id,
           },
           rootInternalId: rootId,
+          organizationId: org,
+          ...(profileId ? { profileId } : {}),
         },
         data: {
           token: encToken,
-          refreshToken: encRefreshToken,
+          ...(refreshToken ? { refreshToken: encRefreshToken } : {}),
           tokenEncrypted,
           refreshNeeded: false,
           refreshError: null,
