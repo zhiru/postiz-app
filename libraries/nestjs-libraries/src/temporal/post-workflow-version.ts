@@ -1,4 +1,7 @@
-export type PostWorkflowName = 'postWorkflowV102' | 'postWorkflowV112';
+export type PostWorkflowName =
+  | 'postWorkflowV102'
+  | 'postWorkflowV113'
+  | 'postWorkflowV114';
 
 type PostWorkflowTarget = {
   integrationId: string;
@@ -36,6 +39,6 @@ export const selectPostWorkflowVersion = (
   return enabledForAll ||
     enabledIntegrations.has(target.integrationId) ||
     enabledProviders.has(target.providerIdentifier)
-    ? 'postWorkflowV112'
-    : 'postWorkflowV102';
+    ? 'postWorkflowV114'
+    : 'postWorkflowV113';
 };

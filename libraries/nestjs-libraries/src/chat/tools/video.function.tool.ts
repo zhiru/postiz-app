@@ -17,11 +17,33 @@ export class VideoFunctionTool implements AgentToolInterface {
   run() {
     return createTool({
       id: 'videoFunctionTool',
-      description: `Sometimes when we want to generate videos we might need to get some additional information like voice_id, etc`,
+      description: `Runs a helper function of a video generator, e.g. listing the generator's
+                    available voices and returning a voice_id to use in generateVideoTool's customParams.
+                    'identifier' and 'functionName' come from a generator's 'tools' entry returned by
+                    'generateVideoOptions'. Returns whatever the helper function returns, or throws
+                    "Function not found" if no generator exposes that identifier/functionName pair.`,
+      mcp: {
+        annotations: {
+          title: 'Video Function Helper',
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
       inputSchema: z.object({
-        identifier: z.string(),
-        functionName: z.string(),
+        identifier: z
+          .string()
+          .describe(
+            "The video generator's identifier, from a 'tools' entry returned by generateVideoOptions"
+          ),
+        functionName: z
+          .string()
+          .describe(
+            "The helper function's name, from the same 'tools' entry returned by generateVideoOptions"
+          ),
       }),
+      outputSchema: z.object({}).passthrough(),
       execute: async (input: any, options: any) => {
         checkAuth(input, options);
         const videos = this._videoManagerService.getAllVideos();
@@ -32,7 +54,7 @@ export class VideoFunctionTool implements AgentToolInterface {
         );
 
         if (!findVideo) {
-          return { error: 'Function not found' };
+          throw new Error('Function not found');
         }
 
         const func = await this._moduleRef

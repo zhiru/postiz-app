@@ -112,6 +112,7 @@ export const AddProviderButton: FC<{
 export const UrlModal: FC<{
   gotoUrl(url: string): void;
 }> = (props) => {
+  const { closeCurrent: close } = useModals();
   const { gotoUrl } = props;
   const methods = useForm({
     mode: 'onChange',
@@ -212,13 +213,15 @@ export const CustomVariables: FC<{
   });
   const submit = useCallback(
     async (data: FieldValues) => {
-      const { url } = await (
-        await fetch(
-          `/integrations/social/${identifier}${
-            onboarding ? '?onboarding=true' : ''
-          }`
-        )
-      ).json();
+      const response = await fetch(
+        `/integrations/social/${identifier}${
+          onboarding ? '?onboarding=true' : ''
+        }`
+      );
+      if (response.status === 402) {
+        return;
+      }
+      const { url } = await response.json();
       modals.closeAll();
       gotoUrl(
         `/integrations/social/${identifier}?state=${url}&code=${Buffer.from(
@@ -348,10 +351,16 @@ const ChromeExtensionWarning: FC<{
           )}
         </li>
         <li>
-          {t('extension_warning_cookies', 'We will store your cookies securely to facilitate the connection.')}
+          {t(
+            'extension_warning_cookies',
+            'We will store your cookies securely to facilitate the connection.'
+          )}
         </li>
         <li>
-          {t('extension_warning_responsibility', 'Postiz does not take responsibility for any issues arising or account termination due to the use of this method.')}
+          {t(
+            'extension_warning_responsibility',
+            'Postiz does not take responsibility for any issues arising or account termination due to the use of this method.'
+          )}
         </li>
       </ul>
       <div className="flex gap-[10px] mt-[8px]">
@@ -407,8 +416,9 @@ export const AddProviderComponent: FC<{
   invite: boolean;
   update?: () => void;
   onboarding?: boolean;
+  isMobile?: boolean;
 }> = (props) => {
-  const { update, social, article, onboarding } = props;
+  const { update, social, article, onboarding, isMobile } = props;
   const { isGeneral, extensionId } = useVariables();
   const toaster = useToaster();
   const router = useRouter();
@@ -474,44 +484,62 @@ export const AddProviderComponent: FC<{
           const { component: Web3Providers } = web3List.find(
             (item) => item.identifier === identifier
           )!;
-          const { url } = await (
-            await fetch(
-              `/integrations/social/${identifier}${
-                onboarding ? '?onboarding=true' : ''
-              }`
-            )
-          ).json();
+          const response = await fetch(
+            `/integrations/social/${identifier}${
+              onboarding ? '?onboarding=true' : ''
+            }`
+          );
+          if (response.status === 402) {
+            return;
+          }
+          const { url } = await response.json();
           modal.openModal({
             title: `Add ${capitalize(identifier)}`,
             withCloseButton: true,
+            ...(isMobile ? { removeLayout: true, fullScreen: true } : {}),
             classNames: {
               modal: 'bg-transparent text-textColor',
             },
             children: (
-              <Web3Providers
-                onComplete={(code, newState) => {
-                  window.location.href = `/integrations/social/${identifier}?code=${code}&state=${newState}${
-                    onboarding ? '&onboarding=true' : ''
-                  }`;
-                }}
-                nonce={url}
-              />
+              <div
+                {...(isMobile ? { className: 'h-full bg-black p-[20px]' } : {})}
+              >
+                <Web3Providers
+                  onComplete={(code, newState) => {
+                    window.location.href = `/integrations/social/${identifier}?code=${encodeURIComponent(
+                      code
+                    )}&state=${newState}${
+                      onboarding ? '&onboarding=true' : ''
+                    }`;
+                  }}
+                  nonce={url}
+                />
+              </div>
             ),
           });
           return;
         };
         const gotoIntegration = async (externalUrl?: string) => {
+          // Mobile WebView: reuse the existing `externalUrl` param to
+          // carry the `postiz://` deep link so the backend redirects
+          // back to the iOS/Android app after OAuth completes, instead
+          // of the default web redirect.
           const params = [
-            externalUrl ? `externalUrl=${externalUrl}` : '',
+            `externalUrl=${encodeURIComponent(externalUrl)}`,
             onboardingParam,
+            isMobile
+              ? `redirectUrl=${encodeURIComponent('postiz://integrations')}`
+              : '',
           ]
             .filter(Boolean)
             .join('&');
-          const { url, err } = await (
-            await fetch(
-              `/integrations/social/${identifier}${params ? `?${params}` : ''}`
-            )
-          ).json();
+          const response = await fetch(
+            `/integrations/social/${identifier}${params ? `?${params}` : ''}`
+          );
+          if (response.status === 402) {
+            return;
+          }
+          const { url, err } = await response.json();
           if (err) {
             toaster.show(
               t(
@@ -525,11 +553,31 @@ export const AddProviderComponent: FC<{
 
           if (invite) {
             toaster.show(
-              t('invite_link_copied', 'Invite link copied to clipboard, link will be available for 1 hour'),
+              t(
+                'invite_link_copied',
+                'Invite link copied to clipboard, link will be available for 1 hour'
+              ),
               'success'
             );
             modal.closeAll();
             copy(url);
+            return;
+          }
+
+          if (isMobile) {
+            // In the mobile WebView the OAuth provider (Google, Facebook,
+            // etc.) typically refuses in-WebView sign-in. Post the URL
+            // out to React Native so it can open the system browser;
+            // `window.open`/`location.href` aren't reliable here because
+            // RN WebView doesn't always route them through the native
+            // navigation intercept. The backend redirects back to the
+            // app via `postiz://` once OAuth completes.
+            const rn = (window as any).ReactNativeWebView;
+            if (rn && typeof rn.postMessage === 'function') {
+              rn.postMessage(JSON.stringify({ type: 'open-external', url }));
+              return;
+            }
+            window.open(url, '_blank');
             return;
           }
 
@@ -560,7 +608,11 @@ export const AddProviderComponent: FC<{
           if (!confirmed) {
             return;
           }
-          if (!extensionId || !chrome?.runtime?.sendMessage) {
+          if (
+            !extensionId ||
+            typeof chrome === 'undefined' ||
+            !chrome?.runtime?.sendMessage
+          ) {
             modal.openModal({
               title: t('extension_not_available_title', 'Extension Not Found'),
               withCloseButton: true,
@@ -617,13 +669,15 @@ export const AddProviderComponent: FC<{
               );
               return;
             }
-            const { url } = await (
-              await fetch(
-                `/integrations/social/${identifier}${
-                  onboarding ? '?onboarding=true' : ''
-                }`
-              )
-            ).json();
+            const response = await fetch(
+              `/integrations/social/${identifier}${
+                onboarding ? '?onboarding=true' : ''
+              }`
+            );
+            if (response.status === 402) {
+              return;
+            }
+            const { url } = await response.json();
             modal.closeAll();
             window.location.href = `/integrations/social/${identifier}?state=${url}&code=${Buffer.from(
               JSON.stringify(cookieResponse.cookies)
@@ -643,6 +697,7 @@ export const AddProviderComponent: FC<{
           modal.openModal({
             title: t('label_url', 'URL'),
             withCloseButton: true,
+            ...(isMobile ? { removeLayout: true, fullScreen: true } : {}),
             classNames: {
               modal: 'bg-transparent text-textColor',
             },
@@ -654,16 +709,21 @@ export const AddProviderComponent: FC<{
           modal.openModal({
             title: t('add_provider_title', 'Add Provider'),
             withCloseButton: true,
+            ...(isMobile ? { removeLayout: true, fullScreen: true } : {}),
             classNames: {
               modal: 'bg-transparent text-textColor',
             },
             children: (
-              <CustomVariables
-                identifier={identifier}
-                gotoUrl={(url: string) => router.push(url)}
-                variables={customFields}
-                onboarding={onboarding}
-              />
+              <div
+                {...(isMobile ? { className: 'h-full bg-black p-[20px]' } : {})}
+              >
+                <CustomVariables
+                  identifier={identifier}
+                  gotoUrl={(url: string) => router.push(url)}
+                  variables={customFields}
+                  onboarding={onboarding}
+                />
+              </div>
             ),
           });
           return;
@@ -680,8 +740,10 @@ export const AddProviderComponent: FC<{
       <div className="flex flex-col">
         <div
           className={clsx(
-            'grid grid-cols-5 gap-[10px] justify-items-center justify-center',
-            onboarding ? 'grid-cols-9' : 'grid-cols-5'
+            isMobile && 'gap-[20px] flex flex-col',
+            !isMobile &&
+              'grid grid-cols-5 gap-[10px] justify-items-center justify-center mobile:!grid-cols-3',
+            isMobile ? {} : onboarding ? 'grid-cols-9' : 'grid-cols-5'
           )}
         >
           {social
@@ -711,12 +773,18 @@ export const AddProviderComponent: FC<{
                 {...(!!item.toolTip
                   ? {
                       'data-tooltip-id': 'tooltip',
-                      'data-tooltip-content': t(`tooltip_${item.identifier}`, item.toolTip),
+                      'data-tooltip-content': t(
+                        `tooltip_${item.identifier}`,
+                        item.toolTip
+                      ),
                     }
                   : {})}
-                className={
-                  'w-full h-[100px] text-[14px] p-[10px] rounded-[8px] bg-newTableHeader text-textColor relative justify-center items-center flex flex-col gap-[10px] cursor-pointer'
-                }
+                className={clsx(
+                  isMobile
+                    ? 'flex-row h-[72px] p-[16px]'
+                    : 'flex-col p-[10px] h-[100px] justify-center mobile:text-[13px] mobile:leading-[1.2]',
+                  'w-full text-[14px] rounded-[8px] bg-newTableHeader text-textColor relative items-center flex gap-[10px] cursor-pointer'
+                )}
               >
                 <div>
                   {item.identifier === 'youtube' ? (
@@ -732,9 +800,14 @@ export const AddProviderComponent: FC<{
                     />
                   )}
                 </div>
-                <div className="whitespace-pre-wrap text-center">
+                <div
+                  className={clsx(
+                    isMobile ? '' : 'whitespace-pre-wrap',
+                    'text-center'
+                  )}
+                >
                   {item.name}
-                  {!!item.toolTip && (
+                  {!!item.toolTip && !isMobile && (
                     <svg
                       width="15"
                       height="15"

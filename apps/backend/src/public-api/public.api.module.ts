@@ -12,6 +12,7 @@ import { PublicIntegrationsController } from '@gitroom/backend/public-api/routes
 import { PublicProfilesController } from '@gitroom/backend/public-api/routes/v1/public.profiles.controller';
 import { PublicFlowsController } from '@gitroom/backend/public-api/routes/v1/public.flows.controller';
 import { PublicAuthMiddleware } from '@gitroom/backend/services/auth/public.auth.middleware';
+import { SuperAdminGuard } from '@gitroom/backend/services/auth/super.admin.guard';
 
 const authenticatedController = [
   PublicIntegrationsController,
@@ -20,7 +21,7 @@ const authenticatedController = [
 ];
 @Module({
   imports: [UploadModule],
-  controllers: [...authenticatedController],
+  controllers: process.env.MCP_ONLY ? [] : [...authenticatedController],
   providers: [
     AuthService,
     StripeService,
@@ -30,6 +31,7 @@ const authenticatedController = [
     PermissionsService,
     CodesService,
     IntegrationManager,
+    SuperAdminGuard,
   ],
   get exports() {
     return [...this.imports, ...this.providers];

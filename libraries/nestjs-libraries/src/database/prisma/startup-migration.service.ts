@@ -15,7 +15,9 @@ export class StartupMigrationService implements OnModuleInit {
 
   async onModuleInit() {
     await this.migrateProfileScope();
-    await this.migrateLateToZernio();
+    // Provider changes are explicit opt-in when adopting an existing instance.
+    if (process.env.MIGRATE_LATE_TO_ZERNIO === 'true')
+      await this.migrateLateToZernio();
     await this.backfillRepostDestinations();
     await this.cleanupExpiredUnmatchedComments();
     await this.cleanupExpiredStatusEvents();

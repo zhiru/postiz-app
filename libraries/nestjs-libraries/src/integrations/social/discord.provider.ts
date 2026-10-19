@@ -10,17 +10,26 @@ import { Integration } from '@prisma/client';
 import { DiscordDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/discord.dto';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import FormDataUpload from 'form-data';
 
 export class DiscordProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 5; // Discord has generous rate limits for webhook posting
+  override maxConcurrentJob = 5;
+
   identifier = 'discord';
+
   name = 'Discord';
+
   isBetweenSteps = false;
+
   editor = 'markdown' as const;
+
   scopes = ['identify', 'guilds'];
+
   maxLength() {
     return 1980;
   }
+
   dto = DiscordDto;
 
   async refreshToken(refreshToken: string): Promise<AuthTokenDetails> {
@@ -60,15 +69,16 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
       username: '',
     };
   }
+
   async generateAuthUrl() {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     return {
       url: `https://discord.com/oauth2/authorize?client_id=${
         process.env.DISCORD_CLIENT_ID
       }&permissions=377957124096&response_type=code&redirect_uri=${encodeURIComponent(
         `${process.env.FRONTEND_URL}/integrations/social/discord`
       )}&integration_type=0&scope=bot+identify+guilds&state=${state}`,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -144,42 +154,11 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
     const [firstPost] = postDetails;
     const channel = firstPost.settings.channel;
 
-    const form = new FormData();
-    form.append(
-      'payload_json',
-      JSON.stringify({
-        content: firstPost.message.replace(/\[\[\[(@.*?)]]]/g, (match, p1) => {
-          return `<${p1}>`;
-        }),
-        attachments: firstPost.media?.map((p, index) => ({
-          id: index,
-          description: `Picture ${index}`,
-          filename: p.path.split('/').pop(),
-        })),
-      })
+    const data = await this.sendMessageWithMedia(
+      channel,
+      firstPost.message,
+      firstPost.media
     );
-
-    let index = 0;
-    for (const media of firstPost.media || []) {
-      const loadMedia = await ssrfSafeFetch(media.path);
-
-      form.append(
-        `files[${index}]`,
-        await loadMedia.blob(),
-        media.path.split('/').pop()
-      );
-      index++;
-    }
-
-    const data = await (
-      await this.fetch(`https://discord.com/api/channels/${channel}/messages`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN_ID}`,
-        },
-        body: form,
-      })
-    ).json();
 
     return [
       {
@@ -227,48 +206,11 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
       threadChannel = threadId;
     }
 
-    const form = new FormData();
-    form.append(
-      'payload_json',
-      JSON.stringify({
-        content: commentPost.message.replace(
-          /\[\[\[(@.*?)]]]/g,
-          (match, p1) => {
-            return `<${p1}>`;
-          }
-        ),
-        attachments: commentPost.media?.map((p, index) => ({
-          id: index,
-          description: `Picture ${index}`,
-          filename: p.path.split('/').pop(),
-        })),
-      })
+    const data = await this.sendMessageWithMedia(
+      threadChannel,
+      commentPost.message,
+      commentPost.media
     );
-
-    let index = 0;
-    for (const media of commentPost.media || []) {
-      const loadMedia = await ssrfSafeFetch(media.path);
-
-      form.append(
-        `files[${index}]`,
-        await loadMedia.blob(),
-        media.path.split('/').pop()
-      );
-      index++;
-    }
-
-    const data = await (
-      await this.fetch(
-        `https://discord.com/api/channels/${threadChannel}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN_ID}`,
-          },
-          body: form,
-        }
-      )
-    ).json();
 
     return [
       {
@@ -411,5 +353,52 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
     }
 
     return undefined;
+  }
+
+  private async sendMessageWithMedia(
+    channel: string,
+    message: string,
+    media: PostDetails['media']
+  ) {
+    return this.runStreamedUpload(async () => {
+      const form = new FormDataUpload();
+      form.append(
+        'payload_json',
+        JSON.stringify({
+          content: message.replace(/\[\[\[(@.*?)]]]/g, (match, p1) => {
+            return `<${p1}>`;
+          }),
+          attachments: media?.map((p, index) => ({
+            id: index,
+            description: `Picture ${index}`,
+            filename: p.path.split('/').pop(),
+          })),
+        })
+      );
+
+      let index = 0;
+      for (const item of media || []) {
+        const fileSize = await this.mediaSize(item.path, this.identifier);
+        const stream = await this.mediaStream(item.path, this.identifier);
+        form.append(`files[${index}]`, stream, {
+          filename: item.path.split('/').pop(),
+          knownLength: fileSize,
+        });
+        index++;
+      }
+
+      const { data } = await this.getSsrfSafeAxios().post(
+        `https://discord.com/api/channels/${channel}/messages`,
+        form,
+        {
+          headers: {
+            ...form.getHeaders(),
+            Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN_ID}`,
+          },
+        }
+      );
+
+      return data;
+    }, this.identifier);
   }
 }

@@ -13,7 +13,7 @@ interface AnalyticsDataItem {
   percentageChange?: number;
 }
 
-const TrendIndicator: FC<{ value: number; average?: boolean }> = ({
+export const TrendIndicator: FC<{ value: number; average?: boolean }> = ({
   value,
   average,
 }) => {

@@ -79,7 +79,10 @@ export class IgWebhookController {
 
   @Post('/')
   @HttpCode(HttpStatus.OK)
-  async handleWebhook(@Req() req: RawBodyRequest<Request>) {
+  async handleWebhook(
+    @Req() req: RawBodyRequest<Request>,
+    @Res({ passthrough: true }) response?: Response
+  ) {
     const body = req.body;
     this._logger.log(
       `IG webhook received: object=${body?.object} entries=${
@@ -106,6 +109,7 @@ export class IgWebhookController {
     const ownersByEntryId = await this.resolveEntryOwners(entries);
     const scope = await this.verifySignature(req, ownersByEntryId);
 
+    let shouldRetry = false;
     for (const entry of entries) {
       const igAccountId = entry.id;
 
@@ -114,7 +118,12 @@ export class IgWebhookController {
       if (Array.isArray(entry.messaging)) {
         if (this.isEntryAllowed(scope, ownersByEntryId, igAccountId)) {
           for (const event of entry.messaging) {
-            await this.processMessagingEvent(igAccountId, event, scope);
+            const result = await this.processMessagingEvent(
+              igAccountId,
+              event,
+              scope
+            );
+            if (result && result.retry) shouldRetry = true;
           }
         } else {
           this._logger.warn(
@@ -139,7 +148,12 @@ export class IgWebhookController {
             change.value &&
             this.isEntryAllowed(scope, ownersByEntryId, igAccountId)
           ) {
-            await this.processMessagingEvent(igAccountId, change.value, scope);
+            const result = await this.processMessagingEvent(
+              igAccountId,
+              change.value,
+              scope
+            );
+            if (result && result.retry) shouldRetry = true;
           }
           continue;
         }
@@ -196,7 +210,8 @@ export class IgWebhookController {
       }
     }
 
-    return { status: 'ok' };
+    if (shouldRetry) response?.status(HttpStatus.SERVICE_UNAVAILABLE);
+    return { status: shouldRetry ? 'retry' : 'ok' };
   }
 
   private async processMessagingEvent(
@@ -221,8 +236,7 @@ export class IgWebhookController {
     if (event?.postback?.payload) {
       const payload: string = event.postback.payload;
       if (typeof payload === 'string' && payload.startsWith('pb_')) {
-        const metaMid: string | undefined =
-          event?.postback?.mid || event?.mid;
+        const metaMid: string | undefined = event?.postback?.mid || event?.mid;
         this._logger.log(
           `IG webhook postback received sender=${senderId} payload=${payload}`
         );
@@ -231,7 +245,7 @@ export class IgWebhookController {
         // o HMAC do proprio payload (pb_...) e usa o organizationId da linha
         // PendingPostback no banco, nunca campos do webhook. Nao "corrigir" isso
         // para um loop por integracao — a protecao ja e suficiente.
-        await this._flowsService.handlePostbackClick({
+        return this._flowsService.handlePostbackClick({
           payload,
           metaMid,
           senderIgsid: senderId,
@@ -251,7 +265,8 @@ export class IgWebhookController {
       const storyMention = message.attachments.find(
         (a: any) => a?.type === 'story_mention'
       );
-      igStoryId = storyMention?.payload?.story?.id || storyMention?.payload?.url;
+      igStoryId =
+        storyMention?.payload?.story?.id || storyMention?.payload?.url;
     }
 
     // Case 2: reaction event directly targeting a story
@@ -268,7 +283,9 @@ export class IgWebhookController {
       message?.mid || reactionEvent?.mid || event?.timestamp?.toString();
     if (!igMessageId) {
       this._logger.warn(
-        `IG webhook: story reply missing message id payload=${JSON.stringify(event)}`
+        `IG webhook: story reply missing message id payload=${JSON.stringify(
+          event
+        )}`
       );
       return;
     }
@@ -373,7 +390,11 @@ export class IgWebhookController {
         integration.deletedAt
       ) {
         this._logger.log(
-          `IG webhook: skipping integration ${integration.id} (provider=${integration.providerIdentifier} disabled=${integration.disabled} deleted=${!!integration.deletedAt})`
+          `IG webhook: skipping integration ${integration.id} (provider=${
+            integration.providerIdentifier
+          } disabled=${
+            integration.disabled
+          } deleted=${!!integration.deletedAt})`
         );
         continue;
       }
@@ -428,10 +449,7 @@ export class IgWebhookController {
     return owners;
   }
 
-  private isOrgAllowed(
-    scope: SignatureScope,
-    organizationId: string
-  ): boolean {
+  private isOrgAllowed(scope: SignatureScope, organizationId: string): boolean {
     return scope.kind === 'global' || scope.orgIds.has(organizationId);
   }
 
@@ -519,7 +537,11 @@ export class IgWebhookController {
     const isProd = process.env.NODE_ENV === 'production';
 
     this._logger.log(
-      `IG webhook signature check: hasSignature=${!!signature} hasRawBody=${hasRawBody} rawBodyLen=${rawBodyStr.length} envSecrets=${envSecrets.length} credSecrets=${credGroups.size} ownerOrgs=${ownerOrgIds.size}`
+      `IG webhook signature check: hasSignature=${!!signature} hasRawBody=${hasRawBody} rawBodyLen=${
+        rawBodyStr.length
+      } envSecrets=${envSecrets.length} credSecrets=${
+        credGroups.size
+      } ownerOrgs=${ownerOrgIds.size}`
     );
 
     if (totalSecrets === 0) {
@@ -595,7 +617,11 @@ export class IgWebhookController {
     }
 
     this._logger.warn(
-      `IG webhook: signature mismatch. Tried ${triedSources.length} source(s): [${triedSources.join(', ')}]. Instagram API with Instagram Login uses a SEPARATE app secret from the Facebook App Secret — set INSTAGRAM_APP_SECRET or instagramAppSecret in the owning workspace credential.`
+      `IG webhook: signature mismatch. Tried ${
+        triedSources.length
+      } source(s): [${triedSources.join(
+        ', '
+      )}]. Instagram API with Instagram Login uses a SEPARATE app secret from the Facebook App Secret — set INSTAGRAM_APP_SECRET or instagramAppSecret in the owning workspace credential.`
     );
     throw new ForbiddenException('Invalid signature');
   }

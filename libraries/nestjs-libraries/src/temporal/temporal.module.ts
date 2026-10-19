@@ -2,6 +2,22 @@ import type { Type } from '@nestjs/common';
 import { TemporalModule } from 'nestjs-temporal-core';
 import type { WorkerDefinition } from 'nestjs-temporal-core';
 import { socialIntegrationList } from '@gitroom/nestjs-libraries/integrations/integration.manager';
+import { emailQueues } from '@gitroom/nestjs-libraries/temporal/email.queues';
+
+// Providers this server should run workers for (comma-separated, e.g.
+// "twitter,instagram,linkedin"). Unset => all providers start (the
+// backwards-compatible default). Lets a RAM-constrained self-host skip the
+// idle long-pollers for providers it never configured.
+function parseActiveProviders(): Set<string> | null {
+  const raw = process.env.POSTIZ_ACTIVE_PROVIDERS;
+  if (!raw || !raw.trim()) return null;
+  return new Set(
+    raw
+      .split(',')
+      .map((p) => p.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
 
 type TemporalWorkerSource = {
   identifier: string;
@@ -50,7 +66,10 @@ export const buildTemporalWorkers = ({
 
   const divider = parseConcurrencyDivider(concurrencyDivider);
 
-  return [{ identifier: 'main', maxConcurrentJob: undefined }, ...integrations]
+  const providerWorkers: TemporalWorkerDefinition[] = [
+    { identifier: 'main', maxConcurrentJob: undefined },
+    ...integrations,
+  ]
     .filter(({ identifier }) => !identifier.includes('-'))
     .map((integration) => ({
       integration,
@@ -80,6 +99,19 @@ export const buildTemporalWorkers = ({
         },
       };
     });
+
+  const emailWorkers: TemporalWorkerDefinition[] = Object.values(emailQueues)
+    .filter(({ taskQueue }) => !excludedQueues.has(taskQueue))
+    .map(({ taskQueue, perSecond }) => ({
+      taskQueue,
+      activityClasses,
+      autoStart: true,
+      workerOptions: {
+        maxConcurrentActivityTaskExecutions: 10,
+        maxTaskQueueActivitiesPerSecond: perSecond,
+      },
+    }));
+  return [...providerWorkers, ...emailWorkers];
 };
 
 export const getTemporalModule = (
@@ -108,6 +140,7 @@ export const getTemporalModule = (
 
   return TemporalModule.register({
     isGlobal: true,
+    allowConnectionFailure: false,
     connection: {
       address: process.env.TEMPORAL_ADDRESS || 'localhost:7233',
       ...(process.env.TEMPORAL_TLS === 'true' ? { tls: true } : {}),

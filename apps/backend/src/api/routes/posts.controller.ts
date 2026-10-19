@@ -32,6 +32,12 @@ import {
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { AllowViewer } from '@gitroom/nestjs-libraries/services/auth/profile-access/profile-access.decorators';
 import { getOrgRole } from '@gitroom/nestjs-libraries/user/org.role';
+import { PostValidationException } from '@gitroom/backend/api/routes/posts.validation.exception';
+import {
+  CreatePublicCommentDto,
+  ResolveCommentDto,
+} from '@gitroom/nestjs-libraries/dtos/comments/add.comment.dto';
+import { RealIP } from 'nestjs-real-ip';
 
 @ApiTags('Posts')
 @Controller('/posts')
@@ -46,25 +52,41 @@ export class PostsController {
   @Get('/:id/statistics')
   async getStatistics(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id: string
   ) {
+    await this.assertPostScope(org.id, id, profile?.id);
     return this._postsService.getStatistics(org.id, id);
   }
 
   @Get('/:id/missing')
   async getMissingContent(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id: string
   ) {
+    await this.assertPostScope(org.id, id, profile?.id);
     return this._postsService.getMissingContent(org.id, id);
+  }
+
+  @Get('/:id/release-url')
+  async getReleaseURL(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string
+  ) {
+    await this.assertPostScope(org.id, id, profile?.id);
+    return this._postsService.getReleaseURL(org.id, id);
   }
 
   @Put('/:id/release-id')
   async updateReleaseId(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id: string,
     @Body('releaseId') releaseId: string
   ) {
+    await this.assertPostScope(org.id, id, profile?.id);
     return this._postsService.updateReleaseId(org.id, id, releaseId);
   }
 
@@ -82,6 +104,29 @@ export class PostsController {
     @GetUserFromRequest() user: User,
     @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id: string,
+    @Body() body: CreatePublicCommentDto,
+    @RealIP() ip: string
+  ) {
+    return this._postsService.createPublicComment(id, body, user.id, ip, org.id, profile?.id);
+  }
+
+  @Put('/comments/:commentId/resolve')
+  async resolveComment(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('commentId') commentId: string,
+    @Body() body: ResolveCommentDto
+  ) {
+    return this._postsService.resolveComment(org.id, commentId, body.resolved, profile?.id);
+  }
+
+  @Post('/:id/review-comments')
+  @AllowViewer()
+  async createReviewComment(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string,
     @Body()
     body: { comment?: string; kind?: 'COMMENT' | 'APPROVAL' | 'CHANGE_REQUEST' }
   ) {
@@ -93,8 +138,8 @@ export class PostsController {
     });
   }
 
-  @Get('/:id/comments')
-  async getComments(
+  @Get('/:id/review-comments')
+  async getReviewComments(
     @GetOrgFromRequest() org: Organization,
     @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id: string
@@ -109,6 +154,7 @@ export class PostsController {
   @Post('/:id/review-links')
   async createReviewLink(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @GetUserFromRequest() user: User,
     @Param('id') id: string,
     @Body()
@@ -118,6 +164,7 @@ export class PostsController {
       allowApprove?: boolean;
     }
   ) {
+    await this.assertPostScope(org.id, id, profile?.id);
     return this._reviewLinksService.createForPost({
       postId: id,
       orgId: org.id,
@@ -131,8 +178,10 @@ export class PostsController {
   @Get('/:id/review-links')
   async listReviewLinks(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id: string
   ) {
+    await this.assertPostScope(org.id, id, profile?.id);
     return {
       reviewLinks: await this._reviewLinksService.listForPost(id, org.id),
     };
@@ -141,9 +190,27 @@ export class PostsController {
   @Delete('/:id/review-links/:linkId')
   async revokeReviewLink(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string,
     @Param('linkId') linkId: string
   ) {
+    await this.assertPostScope(org.id, id, profile?.id);
+    const links = await this._reviewLinksService.listForPost(id, org.id);
+    if (!links.some((link) => link.id === linkId)) throw new HttpException('Review link not found', 404);
     return this._reviewLinksService.revoke(linkId, org.id);
+  }
+
+  @Get('/:id/comments')
+  async getComments(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string
+  ) {
+    const scope = await this._postsService.getPostProfileScope(org.id, id);
+    if (!scope || (getOrgRole(org) === 'USER' && scope.profileId !== profile?.id)) {
+      throw new HttpException('Post not found', 404);
+    }
+    return { comments: await this._postsService.getComments(id) };
   }
 
   @Get('/tags')
@@ -220,9 +287,10 @@ export class PostsController {
   @Get('/old')
   oldPosts(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @Query('date') date: string
   ) {
-    return this._postsService.getOldPosts(org.id, date);
+    return this._postsService.getOldPosts(org.id, date, profile?.id);
   }
 
   @Get('/group/:group/debug-export')
@@ -238,13 +306,25 @@ export class PostsController {
   }
 
   @Get('/group/:group')
-  getPostsByGroup(@GetOrgFromRequest() org: Organization, @Param('group') group: string) {
-    return this._postsService.getPostsByGroup(org.id, group);
+  getPostsByGroup(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('group') group: string
+  ) {
+    return this._postsService.getPostsByGroup(org.id, group, profile?.id);
   }
 
   @Get('/:id')
   getPost(@GetOrgFromRequest() org: Organization, @Param('id') id: string) {
     return this._postsService.getPost(org.id, id);
+  }
+
+  @Post('/valid')
+  async validatePosts(
+    @GetOrgFromRequest() org: Organization,
+    @Body() rawBody: any
+  ) {
+    return this._postsService.validatePosts(org.id, rawBody?.posts || []);
   }
 
   @Post('/')
@@ -254,9 +334,45 @@ export class PostsController {
     @GetProfileFromRequest() profile: Profile | null,
     @Body() rawBody: any
   ) {
-    console.log(JSON.stringify(rawBody, null, 2));
+    // Server-side validation — never trust the client to have validated.
+    const validation = await this._postsService.validatePosts(
+      org.id,
+      rawBody?.posts || []
+    );
+
+    const fail = (item: (typeof validation)[number], error: string) => {
+      throw new PostValidationException({
+        provider: item.identifier,
+        name: item.name,
+        error,
+      });
+    };
+
+    for (const item of validation) {
+      if (item.emptyContent) {
+        fail(
+          item,
+          'Your post should have at least one character or one image.'
+        );
+      }
+    }
+
+    if (rawBody?.type !== 'draft') {
+      for (const item of validation) {
+        if (!item.valid) {
+          fail(item, item.settingsError || 'Please fix your settings');
+        }
+        if (item.errors !== true) {
+          fail(item, item.errors as string);
+        }
+        if (item.tooLong) {
+          fail(item, 'post is too long, please fix it');
+        }
+      }
+    }
+
     const body = await this._postsService.mapTypeToPost(rawBody, org.id);
-    return this._postsService.createPost(org.id, body, profile?.id);
+    return this._postsService.createPost(org.id, body, 'WEB', false, profile?.id);
   }
 
   @Post('/generator/draft')
@@ -311,17 +427,12 @@ export class PostsController {
     @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id: string,
     @Body('date') date: string,
+    // 'update' is the safe default: clients that don't send an action must
+    // never requeue (and thereby republish) a post by accident
     @Body('action') action: 'schedule' | 'update' = 'update',
-    @Body('republish') republish: boolean = false
+    @Body('republish') republish = false
   ) {
-    return this._postsService.changeDate(
-      org.id,
-      id,
-      date,
-      action,
-      profile?.id,
-      republish
-    );
+    return this._postsService.changeDate(org.id, id, date, action, republish, profile?.id);
   }
 
   @Post('/separate-posts')
@@ -337,4 +448,10 @@ export class PostsController {
       profile?.id
     );
   }
+  private async assertPostScope(orgId: string, postId: string, profileId?: string) {
+    if (!profileId) return;
+    const scope = await this._postsService.getPostProfileScope(orgId, postId);
+    if (!scope || scope.profileId !== profileId) throw new HttpException('Post not found', 404);
+  }
+
 }

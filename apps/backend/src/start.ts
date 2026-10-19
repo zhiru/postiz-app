@@ -1,0 +1,163 @@
+import compression from 'compression';
+
+import { loadSwagger } from '@gitroom/helpers/swagger/load.swagger';
+import { json } from 'express';
+import { Runtime } from '@temporalio/worker';
+Runtime.install({ shutdownSignals: [] });
+
+process.env.TZ = 'UTC';
+
+import cookieParser from 'cookie-parser';
+import { PrismaClient } from '@prisma/client';
+import { Logger, ValidationPipe } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+
+import { SubscriptionExceptionFilter } from '@gitroom/backend/services/auth/permissions/subscription.exception';
+import { PostValidationExceptionFilter } from '@gitroom/backend/api/routes/posts.validation.exception';
+import { HttpExceptionFilter } from '@gitroom/nestjs-libraries/services/exception.filter';
+import { ConfigurationChecker } from '@gitroom/helpers/configuration/configuration.checker';
+import { startMcp } from '@gitroom/nestjs-libraries/chat/start.mcp';
+
+async function start() {
+  const app = await NestFactory.create(AppModule, {
+    rawBody: true,
+    cors: {
+      ...(!process.env.NOT_SECURED ? { credentials: true } : {}),
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'auth',
+        'showorg',
+        'showprofile',
+        'impersonate',
+        'x-postiz-org',
+        'x-postiz-include-deleted',
+        'x-copilotkit-runtime-client-gql-version',
+      ],
+      exposedHeaders: [
+        'reload',
+        'onboarding',
+        'activate',
+        'x-copilotkit-runtime-client-gql-version',
+        ...(process.env.NOT_SECURED ? ['auth', 'showorg', 'impersonate'] : []),
+      ],
+      origin: [
+        process.env.FRONTEND_URL,
+        'http://localhost:6274',
+        ...(process.env.MAIN_URL ? [process.env.MAIN_URL] : []),
+        // Optional: the Canva app calls the public API from its iframe origin
+        // (browsers send it lowercase, e.g. https://app-aabbcc.canva-apps.com)
+        ...(process.env.CANVA_APP_ORIGIN
+          ? [
+              process.env.CANVA_APP_ORIGIN.trim()
+                .replace(/\/+$/, '')
+                .toLowerCase(),
+            ]
+          : []),
+      ],
+    },
+  });
+
+  await startMcp(app);
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true,
+    })
+  );
+
+  app.getHttpAdapter().getInstance().set('query parser', 'extended');
+
+  app.use(['/copilot', '/posts'], (req: any, res: any, next: any) => {
+    json({ limit: '50mb' })(req, res, next);
+  });
+
+  app.use(cookieParser());
+  app.use(compression());
+  app.useGlobalFilters(new SubscriptionExceptionFilter());
+  app.useGlobalFilters(new PostValidationExceptionFilter());
+  app.useGlobalFilters(new HttpExceptionFilter());
+
+  loadSwagger(app);
+  await migrateOrphanRecordsToDefaultProfile();
+
+  const port = process.env.PORT || 3000;
+
+  try {
+    await app.listen(port);
+    console.log('Backend started successfully on port ' + port);
+
+    checkConfiguration(); // Do this last, so that users will see obvious issues at the end of the startup log without having to scroll up.
+
+    Logger.log(`🚀 Backend is running on: http://localhost:${port}`);
+  } catch (e) {
+    Logger.error(`Backend failed to start on port ${port}`, e);
+    // exit so pm2 restarts it, otherwise it stays "online" without a port
+    process.exit(1);
+  }
+}
+
+async function migrateOrphanRecordsToDefaultProfile() {
+  const prisma = new PrismaClient();
+  try {
+    // Find all organizations that have profiles
+    const orgsWithProfiles = await prisma.profile.findMany({
+      where: { isDefault: true },
+      select: { id: true, organizationId: true },
+    });
+
+    if (!orgsWithProfiles.length) {
+      return;
+    }
+
+    for (const defaultProfile of orgsWithProfiles) {
+      // Assign orphan posts to default profile
+      const postsUpdated = await prisma.post.updateMany({
+        where: {
+          organizationId: defaultProfile.organizationId,
+          profileId: null,
+        },
+        data: { profileId: defaultProfile.id },
+      });
+
+      // Assign orphan media to default profile
+      const mediaUpdated = await prisma.media.updateMany({
+        where: {
+          organizationId: defaultProfile.organizationId,
+          profileId: null,
+        },
+        data: { profileId: defaultProfile.id },
+      });
+
+      if (postsUpdated.count > 0 || mediaUpdated.count > 0) {
+        Logger.log(
+          `Migrated ${postsUpdated.count} posts and ${mediaUpdated.count} media to default profile for org ${defaultProfile.organizationId}`,
+          'ProfileMigration'
+        );
+      }
+    }
+  } catch (err) {
+    Logger.warn('Profile migration skipped (non-critical): ' + (err as Error).message, 'ProfileMigration');
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+function checkConfiguration() {
+  const checker = new ConfigurationChecker();
+  checker.readEnvFromProcess();
+  checker.check();
+
+  if (checker.hasIssues()) {
+    for (const issue of checker.getIssues()) {
+      Logger.warn(issue, 'Configuration issue');
+    }
+
+    Logger.warn('Configuration issues found: ' + checker.getIssuesCount());
+  } else {
+    Logger.log('Configuration check completed without any issues');
+  }
+}
+
+start();

@@ -8,6 +8,7 @@ import { ProfileService } from '@gitroom/nestjs-libraries/database/prisma/profil
 import { getCookieUrlFromDomain } from '@gitroom/helpers/subdomain/subdomain.management';
 import { HttpForbiddenException } from '@gitroom/nestjs-libraries/services/exception.filter';
 import { MastraService } from '@gitroom/nestjs-libraries/chat/mastra.service';
+import { setSentryUserContext } from '@gitroom/nestjs-libraries/sentry/initialize.sentry';
 
 export const removeAuth = (res: Response) => {
   res.cookie('auth', '', {
@@ -90,6 +91,12 @@ export class AuthMiddleware implements NestMiddleware {
             user.id,
             loadImpersonate.organization.users[0]?.role
           );
+          setSentryUserContext({
+            userId: user.id,
+            email: user.email,
+            orgId: loadImpersonate.organization.id,
+            paymentId: loadImpersonate.organization.paymentId,
+          });
           next();
           return;
         }
@@ -100,7 +107,9 @@ export class AuthMiddleware implements NestMiddleware {
         await this._organizationService.getOrgsByUserId(user.id)
       ).filter((f) => !f.users[0].disabled);
       const setOrg =
-        organization.find((org) => org.id === orgHeader) || organization[0];
+        organization.find((org) => org.id === orgHeader) ||
+        organization.find((org) => org.subscription) ||
+        organization[0];
 
       // Usuario sem nenhuma organizacao (estado invalido): nega de forma limpa
       // em vez de estourar TypeError ao acessar setOrg.apiKey abaixo. O array
@@ -127,6 +136,12 @@ export class AuthMiddleware implements NestMiddleware {
         user.id,
         setOrg.users[0]?.role
       );
+      setSentryUserContext({
+        userId: user.id,
+        email: user.email,
+        orgId: setOrg.id,
+        paymentId: setOrg.paymentId,
+      });
     } catch (err) {
       throw new HttpForbiddenException();
     }

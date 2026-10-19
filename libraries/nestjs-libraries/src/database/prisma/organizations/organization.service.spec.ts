@@ -1,3 +1,7 @@
+jest.mock('@gitroom/nestjs-libraries/database/prisma/integrations/integration.repository', () => ({ IntegrationRepository: class {} }));
+jest.mock('@gitroom/nestjs-libraries/database/prisma/profiles/profile.service', () => ({ ProfileService: class {} }));
+jest.mock('@gitroom/nestjs-libraries/database/prisma/notifications/notification.service', () => ({ NotificationService: class {} }));
+jest.mock('bcrypt', () => ({ hashSync: jest.fn(), compareSync: jest.fn() }));
 import { OrganizationService } from './organization.service';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 
@@ -35,7 +39,8 @@ describe('OrganizationService', () => {
     service = new OrganizationService(
       repo as any,
       notifications as any,
-      profiles as any
+      profiles as any,
+      {} as any
     );
   });
 

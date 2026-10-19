@@ -3,82 +3,173 @@
 import { useState, useCallback } from 'react';
 import { useSWRConfig } from 'swr';
 import { useUser } from '../layout/user.context';
-import { useCurrentProfile } from '@gitroom/frontend/hooks/use-current-profile.hook';
 import copy from 'copy-to-clipboard';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useDecisionModal } from '@gitroom/frontend/components/layout/new-modal';
-import { DeveloperComponent } from '@gitroom/frontend/components/developer/developer.component';
+import { McpClientIcon } from '@gitroom/frontend/components/public-api/mcp.client.icons';
 import clsx from 'clsx';
+import { useCurrentProfile } from '@gitroom/frontend/hooks/use-current-profile.hook';
+import { DeveloperComponent } from '@gitroom/frontend/components/developer/developer.component';
 
-const mcpClients = [
+// Remote clients can't set headers, they get a URL to paste (hint = where)
+export const remoteMcpClients = {
+  Claude:
+    'In Claude go to Settings > Connectors > Add custom connector and paste this URL.',
+  ChatGPT:
+    'In ChatGPT go to Settings > Connectors > Create and paste this URL.',
+} as const;
+
+// Official one-click connectors listed in the assistants' directories, they
+// point at the public MCP server: the hosted Postiz (billingEnabled), or a
+// self-hosted install through "Use self-hosted" on its sign-in page.
+export const mcpConnectorUrls = {
+  Claude: 'https://claude.ai/directory/postiz',
+  ChatGPT:
+    'https://chatgpt.com/plugins/plugin_asdk_app_6aaaf1a529808191a2a15fde824bb013',
+  Cursor: 'https://cursor.com/marketplace/postiz',
+  'Grok Bot': 'https://x.ai/bot/plugin/58737848',
+} as const;
+
+// Clients with no MCP or CLI settings: you paste instructions into the chat,
+// the agent installs the CLI itself and asks you for the API key
+export const chatOnlyMcpClients = {
+  'Grok Bot':
+    'Install the Postiz CLI with `npm install -g postiz`, then install the Postiz skill with `npx skills add gitroomhq/postiz-agent`. Ask me for my Postiz API key and set it as the POSTIZ_API_KEY environment variable before using the CLI.',
+} as const;
+
+export const mcpClients = [
+  'OpenClaw',
+  'Hermes',
+  'NanoClaw',
   'Claude Code',
   'Cursor',
+  'Codex',
   'VS Code / Copilot',
   'Windsurf',
   'Amp',
-  'Codex',
   'Gemini CLI',
   'Warp',
 ] as const;
 
-type McpClient = (typeof mcpClients)[number];
+export type RemoteMcpClient = keyof typeof remoteMcpClients;
+export type ChatOnlyMcpClient = keyof typeof chatOnlyMcpClients;
+export type McpClient = (typeof mcpClients)[number];
+export type AnyMcpClient = RemoteMcpClient | ChatOnlyMcpClient | McpClient;
 
-const getMcpConfig = (
-  client: McpClient,
-  method: 'header' | 'path',
+// oauth: no API key, the client registers itself (DCR) and the user signs in to Postiz
+// apikey: the organization API key, as a Bearer header (or inside the URL for remote clients)
+export type McpAuth = 'oauth' | 'apikey';
+
+// Only the self-hosted docker images are built with a version
+export const isSelfHosted = !!process.env.NEXT_PUBLIC_VERSION;
+
+// The directory listings behind the "Official connector" tab
+const officialConnectorClients = [
+  'Claude',
+  'ChatGPT',
+  'Cursor',
+  'Grok Bot',
+] as const;
+
+export const getMcpOauthUrl = (mcpBase: string) =>
+  `${mcpBase}/mcp-oauth-dynamic`;
+
+export const isRemoteMcpClient = (client: string): client is RemoteMcpClient =>
+  client in remoteMcpClients;
+
+export const isChatOnlyMcpClient = (
+  client: string
+): client is ChatOnlyMcpClient => client in chatOnlyMcpClients;
+
+export const getMcpConfig = (
+  client: AnyMcpClient,
+  auth: McpAuth,
   mcpBase: string,
   apiKey: string
-): { config: string; hintKey: string; hintDefault: string } => {
-  const urlWithKey = `${mcpBase}/mcp/${apiKey}`;
+): { config: string; hint: string } => {
+  if (isChatOnlyMcpClient(client)) {
+    return {
+      config: chatOnlyMcpClients[client],
+      hint: 'Paste this into the chat. The agent will ask you for your API key.',
+    };
+  }
+  if (isRemoteMcpClient(client)) {
+    return {
+      config:
+        auth === 'oauth' ? getMcpOauthUrl(mcpBase) : `${mcpBase}/mcp/${apiKey}`,
+      hint: remoteMcpClients[client],
+    };
+  }
+
+  const oauthUrl = getMcpOauthUrl(mcpBase);
   const urlBase = `${mcpBase}/mcp`;
   const bearer = `Bearer ${apiKey}`;
 
   const json = (obj: object) => JSON.stringify(obj, null, 2);
 
-  if (method === 'path') {
+  if (auth === 'oauth') {
     switch (client) {
       case 'Claude Code':
         return {
-          config: `claude mcp add postiz --transport http "${urlWithKey}"`,
-          hintKey: 'mcp_hint_terminal', hintDefault: 'Execute este comando no seu terminal.',
+          config: `claude mcp add postiz --transport http "${oauthUrl}"`,
+          hint: 'Run this command in your terminal.',
         };
       case 'Cursor':
         return {
-          config: json({ mcpServers: { postiz: { url: urlWithKey } } }),
-          hintKey: 'mcp_hint_cursor', hintDefault: 'Adicione ao arquivo .cursor/mcp.json na raiz do projeto.',
+          config: json({ mcpServers: { postiz: { url: oauthUrl } } }),
+          hint: 'Add to .cursor/mcp.json in your project root.',
         };
       case 'VS Code / Copilot':
         return {
-          config: json({ servers: { postiz: { type: 'http', url: urlWithKey } } }),
-          hintKey: 'mcp_hint_vscode', hintDefault: 'Adicione ao arquivo .vscode/mcp.json na raiz do projeto.',
+          config: json({
+            servers: { postiz: { type: 'http', url: oauthUrl } },
+          }),
+          hint: 'Add to .vscode/mcp.json in your project root.',
         };
       case 'Windsurf':
         return {
-          config: json({ mcpServers: { postiz: { serverUrl: urlWithKey } } }),
-          hintKey: 'mcp_hint_windsurf', hintDefault: 'Adicione ao arquivo ~/.codeium/windsurf/mcp_config.json',
+          config: json({
+            mcpServers: { postiz: { serverUrl: oauthUrl } },
+          }),
+          hint: 'Add to ~/.codeium/windsurf/mcp_config.json',
         };
       case 'Amp':
         return {
-          config: `amp mcp add postiz ${urlWithKey}`,
-          hintKey: 'mcp_hint_terminal', hintDefault: 'Execute este comando no seu terminal.',
+          config: `amp mcp add postiz ${oauthUrl}`,
+          hint: 'Run this command in your terminal.',
         };
       case 'Codex':
         return {
-          config: `# ~/.codex/config.toml\n\n[mcp_servers.postiz]\nurl = "${urlWithKey}"`,
-          hintKey: 'mcp_hint_codex', hintDefault: 'Adicione ao arquivo ~/.codex/config.toml',
+          config: `# ~/.codex/config.toml\n\n[mcp_servers.postiz]\nurl = "${oauthUrl}"`,
+          hint: 'Add to ~/.codex/config.toml, then run: codex mcp login postiz',
         };
       case 'Gemini CLI':
         return {
-          config: json({ mcpServers: { postiz: { url: urlWithKey } } }),
-          hintKey: 'mcp_hint_gemini', hintDefault: 'Adicione ao arquivo ~/.gemini/settings.json',
+          config: json({ mcpServers: { postiz: { url: oauthUrl } } }),
+          hint: 'Add to ~/.gemini/settings.json',
         };
       case 'Warp':
         return {
-          config: json({ postiz: { url: urlWithKey } }),
-          hintKey: 'mcp_hint_warp', hintDefault: 'Configurações > MCP Servers > + Add, cole esta configuração.',
+          config: json({ postiz: { url: oauthUrl } }),
+          hint: 'Settings > MCP Servers > + Add, then paste this config.',
+        };
+      case 'Hermes':
+        return {
+          config: `# ~/.hermes/config.yaml\n\nmcp_servers:\n  postiz:\n    url: "${oauthUrl}"\n    auth: oauth`,
+          hint: 'Add to ~/.hermes/config.yaml, then run /reload-mcp in the chat.',
+        };
+      case 'OpenClaw':
+        return {
+          config: `openclaw mcp add postiz --url ${oauthUrl} --transport streamable-http --auth oauth && openclaw mcp login postiz`,
+          hint: 'Run this command in your terminal.',
+        };
+      case 'NanoClaw':
+        return {
+          config: `ncl groups config add-mcp-server --id <group-id> --name postiz --url ${oauthUrl}`,
+          hint: 'Run this in your terminal, replace <group-id> with the agent group that should get Postiz.',
         };
     }
   }
@@ -86,48 +177,103 @@ const getMcpConfig = (
   switch (client) {
     case 'Claude Code':
       return {
-        config: `claude mcp add postiz \\\n  --transport http \\\n  --header "Authorization: ${bearer}" \\\n  "${urlBase}"`,
-        hintKey: 'mcp_hint_terminal', hintDefault: 'Execute este comando no seu terminal.',
+        config: `claude mcp add --transport http postiz ${urlBase} --header "Authorization: ${bearer}"`,
+        hint: 'Run this command in your terminal.',
       };
     case 'Cursor':
       return {
-        config: json({ mcpServers: { postiz: { url: urlBase, headers: { Authorization: bearer } } } }),
-        hintKey: 'mcp_hint_cursor', hintDefault: 'Adicione ao arquivo .cursor/mcp.json na raiz do projeto.',
+        config: json({
+          mcpServers: {
+            postiz: { url: urlBase, headers: { Authorization: bearer } },
+          },
+        }),
+        hint: 'Add to .cursor/mcp.json in your project root.',
       };
     case 'VS Code / Copilot':
       return {
-        config: json({ servers: { postiz: { type: 'http', url: urlBase, headers: { Authorization: bearer } } } }),
-        hintKey: 'mcp_hint_vscode', hintDefault: 'Adicione ao arquivo .vscode/mcp.json na raiz do projeto.',
+        config: json({
+          servers: {
+            postiz: {
+              type: 'http',
+              url: urlBase,
+              headers: { Authorization: bearer },
+            },
+          },
+        }),
+        hint: 'Add to .vscode/mcp.json in your project root.',
       };
     case 'Windsurf':
       return {
-        config: json({ mcpServers: { postiz: { serverUrl: urlBase, headers: { Authorization: bearer } } } }),
-        hintKey: 'mcp_hint_windsurf', hintDefault: 'Adicione ao arquivo ~/.codeium/windsurf/mcp_config.json',
+        config: json({
+          mcpServers: {
+            postiz: {
+              serverUrl: urlBase,
+              headers: { Authorization: bearer },
+            },
+          },
+        }),
+        hint: 'Add to ~/.codeium/windsurf/mcp_config.json',
       };
     case 'Amp':
       return {
-        config: json({ 'amp.mcpServers': { postiz: { url: urlBase, headers: { Authorization: bearer } } } }),
-        hintKey: 'mcp_hint_amp', hintDefault: 'Adicione ao arquivo de configurações do Amp (settings.json).',
+        config: json({
+          'amp.mcpServers': {
+            postiz: { url: urlBase, headers: { Authorization: bearer } },
+          },
+        }),
+        hint: 'Add to your Amp settings.json',
       };
     case 'Codex':
       return {
         config: `# ~/.codex/config.toml\n\n[mcp_servers.postiz]\nurl = "${urlBase}"\nhttp_headers = { "Authorization" = "${bearer}" }`,
-        hintKey: 'mcp_hint_codex', hintDefault: 'Adicione ao arquivo ~/.codex/config.toml',
+        hint: 'Add to ~/.codex/config.toml',
       };
     case 'Gemini CLI':
       return {
-        config: json({ mcpServers: { postiz: { url: urlBase, headers: { Authorization: bearer } } } }),
-        hintKey: 'mcp_hint_gemini', hintDefault: 'Adicione ao arquivo ~/.gemini/settings.json',
+        config: json({
+          mcpServers: {
+            postiz: { url: urlBase, headers: { Authorization: bearer } },
+          },
+        }),
+        hint: 'Add to ~/.gemini/settings.json',
       };
     case 'Warp':
       return {
-        config: json({ postiz: { url: urlBase, headers: { Authorization: bearer } } }),
-        hintKey: 'mcp_hint_warp', hintDefault: 'Configurações > MCP Servers > + Add, cole esta configuração.',
+        config: json({
+          postiz: { url: urlBase, headers: { Authorization: bearer } },
+        }),
+        hint: 'Settings > MCP Servers > + Add, then paste this config.',
+      };
+    case 'Hermes':
+      return {
+        config: `# ~/.hermes/config.yaml\n\nmcp_servers:\n  postiz:\n    url: "${urlBase}"\n    headers:\n      Authorization: "${bearer}"`,
+        hint: 'Add to ~/.hermes/config.yaml, then run /reload-mcp in the chat.',
+      };
+    case 'OpenClaw':
+      return {
+        config: json({
+          mcp: {
+            servers: {
+              postiz: {
+                url: urlBase,
+                transport: 'streamable-http',
+                headers: { Authorization: bearer },
+              },
+            },
+          },
+        }),
+        hint: 'Add to ~/.openclaw/openclaw.json',
+      };
+    case 'NanoClaw':
+      // No headers flag, the key travels inside the URL like remote clients
+      return {
+        config: `ncl groups config add-mcp-server --id <group-id> --name postiz --url ${mcpBase}/mcp/${apiKey}`,
+        hint: 'Run this in your terminal, replace <group-id> with the agent group that should get Postiz.',
       };
   }
 };
 
-const CopyButton = ({
+export const CopyButton = ({
   text,
   label,
 }: {
@@ -162,64 +308,50 @@ const CopyButton = ({
   );
 };
 
-const ExternalLinkIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-    <polyline points="15 3 21 3 21 9" />
-    <line x1="10" y1="14" x2="21" y2="3" />
-  </svg>
-);
-
-const DocsLinkButton = ({
-  href,
-  label,
-  tooltip,
-}: {
-  href: string;
-  label: string;
-  tooltip?: string;
-}) => (
-  <a
-    className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
-    href={href}
-    target="_blank"
-    rel="noopener noreferrer"
-    {...(tooltip
-      ? { 'data-tooltip-id': 'tooltip', 'data-tooltip-content': tooltip }
-      : {})}
-  >
-    <ExternalLinkIcon />
-    {label}
-  </a>
-);
-
 const McpSection = ({
-  apiKey,
+  user,
   mcpBase,
 }: {
-  apiKey: string;
+  user: { publicApi: string };
   mcpBase: string;
 }) => {
   const t = useT();
-  const [activeClient, setActiveClient] = useState<McpClient>('Claude Code');
-  const [method, setMethod] = useState<'header' | 'path'>('header');
+  const { billingEnabled } = useVariables();
+  const [activeClient, setActiveClient] = useState<AnyMcpClient>('Claude');
+  const officialConnectors = billingEnabled || isSelfHosted;
+  // the directory connectors come first wherever they work
+  const tabs: Array<'official' | McpAuth> = officialConnectors
+    ? ['official', 'oauth', 'apikey']
+    : ['oauth', 'apikey'];
+  const [tab, setTab] = useState(tabs[0]);
+  const auth: McpAuth = tab === 'apikey' ? 'apikey' : 'oauth';
   const [revealed, setRevealed] = useState(false);
 
-  const { config, hintKey, hintDefault } = getMcpConfig(
+  const { config, hint } = getMcpConfig(
     activeClient,
-    method,
+    auth,
     mcpBase,
-    apiKey
+    user.publicApi
   );
-  const hint = t(hintKey, hintDefault);
 
-  const maskedConfig = revealed
-    ? config
-    : config.replace(new RegExp(apiKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '*'.repeat(apiKey.length));
+  const baseUrl = auth === 'oauth' ? getMcpOauthUrl(mcpBase) : `${mcpBase}/mcp`;
+
+  const chatOnly = isChatOnlyMcpClient(activeClient);
+
+  const maskedConfig =
+    revealed || auth === 'oauth' || chatOnly
+      ? config
+      : config.replace(
+          new RegExp(
+            user.publicApi.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+            'g'
+          ),
+          '*'.repeat(user.publicApi.length)
+        );
 
   return (
     <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">
-      <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px]">
+      <div className="bg-newBgColorInner px-[20px] mobile:px-[14px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px] mobile:flex-col">
         <div>
           <div className="text-[15px] font-[600]">
             {t('mcp_client_configuration', 'MCP Client Configuration')}
@@ -231,68 +363,426 @@ const McpSection = ({
             )}
           </div>
         </div>
-        <div className="flex gap-[6px] shrink-0 pt-[2px]">
-          <DocsLinkButton
+        <div className="flex flex-wrap gap-[6px] shrink-0 pt-[2px]">
+          {officialConnectors && (
+            <>
+              <a
+                className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+                href={mcpConnectorUrls.Claude}
+                target="_blank"
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                {t('add_to_claude', 'Add to Claude')}
+              </a>
+              <a
+                className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+                href={mcpConnectorUrls.ChatGPT}
+                target="_blank"
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                {t('add_to_chatgpt', 'Add to ChatGPT')}
+              </a>
+            </>
+          )}
+          <a
+            className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
             href="https://docs.postiz.com/mcp/introduction"
-            label={t('read_the_docs', 'Docs')}
-          />
+            target="_blank"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+            {t('read_the_docs', 'Docs')}
+          </a>
         </div>
       </div>
-      <div className="p-[20px] flex flex-col gap-[16px]">
-        <div className="flex flex-col gap-[6px]">
-          <div className="text-[13px] font-[600] text-customColor18">
-            {t('auth_method', 'Authentication')}
+      <div className="p-[20px] mobile:p-[14px] flex flex-col gap-[16px]">
+        {(tab === 'official' || !chatOnly) && (
+          <div className="flex flex-col gap-[6px]">
+            <div className="text-[13px] font-[600] text-customColor18">
+              {t('auth_method', 'Authentication')}
+            </div>
+            <div className="flex flex-wrap gap-[6px]">
+              {tabs.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={clsx(
+                    'cursor-pointer px-[14px] h-[36px] text-[13px] font-[500] rounded-[8px] transition-colors',
+                    tab === m
+                      ? 'bg-[#612BD3] text-white'
+                      : 'bg-btnSimple text-customColor18 hover:bg-boxHover hover:text-textColor'
+                  )}
+                  onClick={() => setTab(m)}
+                >
+                  {m === 'official'
+                    ? t('official_connector', 'Official connector')
+                    : m === 'oauth'
+                    ? t(
+                        'sign_in_no_api_key',
+                        'Sign in with Postiz (no API key)'
+                      )
+                    : t('api_key', 'API Key')}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex gap-[6px]">
-            {(['header', 'path'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                className={clsx(
-                  'cursor-pointer px-[14px] h-[36px] text-[13px] font-[500] rounded-[8px] transition-colors',
-                  method === m
-                    ? 'bg-[#612BD3] text-white'
-                    : 'bg-btnSimple text-customColor18 hover:bg-boxHover hover:text-textColor'
+        )}
+        {tab === 'official' ? (
+          <div className="flex flex-col gap-[8px]">
+            <div className="text-[12px] text-customColor18 font-[500]">
+              {isSelfHosted
+                ? t(
+                    'connector_self_hosted_description',
+                    'The official connector works with self-hosted Postiz too. When asked to sign in, choose "Use self-hosted" and enter {{url}} with your API key.',
+                    { url: mcpBase, interpolation: { escapeValue: false } }
+                  )
+                : t(
+                    'connector_onboarding_description',
+                    'The fastest way: add Postiz with one click, you will be asked to sign in'
+                  )}
+            </div>
+            <div className="flex flex-wrap gap-[8px]">
+              {officialConnectorClients.map((client) => (
+                <a
+                  key={client}
+                  className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[8px]"
+                  href={mcpConnectorUrls[client]}
+                  target="_blank"
+                >
+                  <McpClientIcon client={client} />
+                  {client === 'Claude'
+                    ? t('add_to_claude', 'Add to Claude')
+                    : client === 'ChatGPT'
+                    ? t('add_to_chatgpt', 'Add to ChatGPT')
+                    : client === 'Cursor'
+                    ? t('add_to_cursor', 'Add to Cursor')
+                    : t('add_to_grok_bot', 'Add to Grok Bot')}
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col gap-[6px]">
+              <div className="text-[13px] font-[600] text-customColor18">
+                {t('mcp_client', 'Client')}
+              </div>
+              <div className="flex flex-wrap gap-[6px]">
+                {[
+                  ...Object.keys(remoteMcpClients),
+                  ...mcpClients,
+                  ...Object.keys(chatOnlyMcpClients),
+                ].map((client) => (
+                  <button
+                    key={client}
+                    type="button"
+                    className={clsx(
+                      'cursor-pointer px-[14px] h-[36px] text-[13px] font-[500] rounded-[8px] transition-colors flex items-center gap-[8px]',
+                      activeClient === client
+                        ? 'bg-[#612BD3] text-white'
+                        : 'bg-btnSimple text-customColor18 hover:bg-boxHover hover:text-textColor'
+                    )}
+                    onClick={() => setActiveClient(client as AnyMcpClient)}
+                  >
+                    <McpClientIcon client={client} />
+                    {client}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col gap-[8px]">
+              <div className="text-[12px] text-customColor18 font-[500]">
+                {hint}
+                {auth === 'oauth' &&
+                  !chatOnly &&
+                  ` ${t(
+                    'oauth_sign_in_hint',
+                    'Your agent will open a browser window to sign in to Postiz.'
+                  )}`}
+              </div>
+              <pre className="bg-newBgColorInner border border-newBorder rounded-[8px] p-[16px] text-[13px] whitespace-pre-wrap break-all overflow-x-auto leading-[1.6]">
+                {maskedConfig}
+              </pre>
+              <div className="flex flex-wrap gap-[8px]">
+                {auth === 'apikey' && !chatOnly && (
+                  <button
+                    type="button"
+                    onClick={() => setRevealed(!revealed)}
+                    className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      {revealed ? (
+                        <>
+                          <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
+                          <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </>
+                      ) : (
+                        <>
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </>
+                      )}
+                    </svg>
+                    {revealed ? t('hide', 'Hide') : t('reveal', 'Reveal')}
+                  </button>
                 )}
-                onClick={() => setMethod(m)}
-              >
-                {m === 'header'
-                  ? t('authorization_header', 'Authorization Header')
-                  : t('api_key_in_url', 'API Key in URL')}
-              </button>
-            ))}
+                <CopyButton text={config} label={t('copy', 'Copy')} />
+                {!isRemoteMcpClient(activeClient) && !chatOnly && (
+                  <CopyButton
+                    text={baseUrl}
+                    label={t('copy_url', 'Copy URL')}
+                  />
+                )}
+                {activeClient === 'Claude' && officialConnectors && (
+                  <a
+                    className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+                    href={mcpConnectorUrls.Claude}
+                    target="_blank"
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    {t('add_to_claude', 'Add to Claude')}
+                  </a>
+                )}
+                {activeClient === 'ChatGPT' && officialConnectors && (
+                  <a
+                    className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+                    href={mcpConnectorUrls.ChatGPT}
+                    target="_blank"
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    {t('add_to_chatgpt', 'Add to ChatGPT')}
+                  </a>
+                )}
+                {activeClient === 'Grok Bot' && officialConnectors && (
+                  <a
+                    className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+                    href={mcpConnectorUrls['Grok Bot']}
+                    target="_blank"
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    {t('add_to_grok_bot', 'Add to Grok Bot')}
+                  </a>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export const localCliSteps = [
+  {
+    label: 'Install the CLI',
+    code: 'npm install -g postiz',
+  },
+  {
+    label: 'Run: postiz auth:login',
+    code: 'postiz auth:login',
+  },
+  {
+    label: 'Install the Postiz skill for your AI agent',
+    code: 'npx skills add gitroomhq/postiz-agent',
+  },
+] as const;
+
+const ciCliSteps = [
+  {
+    label: 'Install the CLI',
+    code: 'npm install -g postiz',
+  },
+  {
+    label: 'Set your API key as an environment variable',
+    code: 'export POSTIZ_API_KEY="{API_KEY}"',
+  },
+  {
+    label: 'Install the Postiz skill for your AI agent',
+    code: 'npx skills add gitroomhq/postiz-agent',
+  },
+] as const;
+
+const CliSection = ({ apiKey }: { apiKey: string }) => {
+  const t = useT();
+  const [mode, setMode] = useState<'local' | 'ci'>('local');
+  const [revealed, setRevealed] = useState(false);
+
+  const steps =
+    mode === 'local'
+      ? localCliSteps.map((step) => ({ ...step }))
+      : ciCliSteps.map((step) => ({
+          ...step,
+          code: step.code.replace('{API_KEY}', apiKey),
+        }));
+
+  const displaySteps =
+    mode === 'ci' && !revealed
+      ? steps.map((step) => ({
+          ...step,
+          code: step.code.replace(
+            new RegExp(apiKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
+            '*'.repeat(apiKey.length)
+          ),
+        }))
+      : steps;
+
+  return (
+    <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">
+      <div className="bg-newBgColorInner px-[20px] mobile:px-[14px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px] mobile:flex-col">
+        <div>
+          <div className="text-[15px] font-[600]">
+            {t('cli_and_skills', 'CLI & AI Skills')}
+          </div>
+          <div className="text-[13px] text-customColor18 mt-[2px]">
+            {t(
+              'cli_description',
+              'Use the Postiz CLI to automate posting from your terminal, or install the skill to let your AI agent schedule posts for you.'
+            )}
           </div>
         </div>
-        <div className="flex flex-col gap-[6px]">
-          <div className="text-[13px] font-[600] text-customColor18">
-            {t('mcp_client', 'Client')}
-          </div>
-          <div className="flex flex-wrap gap-[6px]">
-            {mcpClients.map((client) => (
-              <button
-                key={client}
-                type="button"
-                className={clsx(
-                  'cursor-pointer px-[14px] h-[36px] text-[13px] font-[500] rounded-[8px] transition-colors',
-                  activeClient === client
-                    ? 'bg-[#612BD3] text-white'
-                    : 'bg-btnSimple text-customColor18 hover:bg-boxHover hover:text-textColor'
-                )}
-                onClick={() => setActiveClient(client)}
-              >
-                {client}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-wrap gap-[6px] shrink-0 pt-[2px]">
+          <a
+            className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+            href="https://docs.postiz.com/cli/introduction"
+            target="_blank"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+            {t('read_the_docs', 'Docs')}
+          </a>
         </div>
-        <div className="flex flex-col gap-[8px]">
-          <div className="text-[12px] text-customColor18 font-[500]">
-            {hint}
+      </div>
+      <div className="p-[20px] mobile:p-[14px] flex flex-col gap-[16px]">
+        <div className="flex gap-[6px]">
+          {(['local', 'ci'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              className={clsx(
+                'cursor-pointer px-[14px] h-[36px] text-[13px] font-[500] rounded-[8px] transition-colors',
+                mode === m
+                  ? 'bg-[#612BD3] text-white'
+                  : 'bg-btnSimple text-customColor18 hover:bg-boxHover hover:text-textColor'
+              )}
+              onClick={() => setMode(m)}
+            >
+              {m === 'local'
+                ? t('locally', 'Locally')
+                : t('ci_remote_servers', 'CI / Remote servers')}
+            </button>
+          ))}
+        </div>
+        {displaySteps.map((step, i) => (
+          <div key={i} className="flex flex-col gap-[6px]">
+            <div className="text-[13px] font-[600] text-customColor18">
+              {i + 1}. {step.label}
+            </div>
+            <pre className="bg-newBgColorInner border border-newBorder rounded-[8px] p-[16px] text-[13px] whitespace-pre-wrap break-all overflow-x-auto leading-[1.6]">
+              {step.code}
+            </pre>
           </div>
-          <pre className="bg-newBgColorInner border border-newBorder rounded-[8px] p-[16px] text-[13px] whitespace-pre-wrap break-all overflow-x-auto leading-[1.6]">
-            {maskedConfig}
-          </pre>
-          <div className="flex gap-[8px]">
+        ))}
+        <div className="flex flex-wrap gap-[8px]">
+          {mode === 'ci' && (
             <button
               type="button"
               onClick={() => setRevealed(!revealed)}
@@ -323,16 +813,68 @@ const McpSection = ({
               </svg>
               {revealed ? t('hide', 'Hide') : t('reveal', 'Reveal')}
             </button>
-            <CopyButton text={config} label={t('copy', 'Copy')} />
-          </div>
+          )}
+          <CopyButton
+            text={steps.map((s) => s.code).join(' && ')}
+            label={t('copy_all', 'Copy All')}
+          />
         </div>
       </div>
     </div>
   );
 };
 
+const ExternalLinkIcon = () => (
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+    <polyline points="15 3 21 3 21 9" />
+    <line x1="10" y1="14" x2="21" y2="3" />
+  </svg>
+);
+
+const DocsLinkButton = ({
+  href,
+  label,
+  tooltip,
+}: {
+  href: string;
+  label: string;
+  tooltip?: string;
+}) => (
+  <a
+    className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    {...(tooltip
+      ? { 'data-tooltip-id': 'tooltip', 'data-tooltip-content': tooltip }
+      : {})}
+  >
+    <ExternalLinkIcon />
+    {label}
+  </a>
+);
+
 const RevealEyeIcon = ({ revealed }: { revealed: boolean }) => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
     {revealed ? (
       <>
         <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
@@ -349,116 +891,20 @@ const RevealEyeIcon = ({ revealed }: { revealed: boolean }) => (
 );
 
 const RotateIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
     <path d="M21.5 2v6h-6" />
     <path d="M21.34 15.57a10 10 0 11-.57-8.38L21.5 8" />
   </svg>
 );
-
-const CliSection = ({
-  apiKey,
-  backendUrl,
-}: {
-  apiKey: string;
-  backendUrl: string;
-}) => {
-  const t = useT();
-  const toaster = useToaster();
-  const [revealed, setRevealed] = useState(false);
-
-  const cliSteps = [
-    { label: t('cli_step_install', 'Instale o CLI'), code: 'npm install -g postiz' },
-    { label: t('cli_step_set_key', 'Configure sua chave de API'), code: 'export POSTIZ_API_KEY="{API_KEY}"' },
-    { label: t('cli_step_install_skill', 'Instale o skill do Postiz para seu agente de IA'), code: 'npx skills add gitroomhq/postiz-agent' },
-  ];
-
-  const steps = cliSteps.map((step) => ({
-    ...step,
-    code: step.code.replace('{API_KEY}', apiKey),
-  }));
-
-  const maskedSteps = steps.map((step) => ({
-    ...step,
-    code: revealed
-      ? step.code
-      : step.code.replace(
-          new RegExp(apiKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
-          '*'.repeat(apiKey.length)
-        ),
-  }));
-
-  return (
-    <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">
-      <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px]">
-        <div>
-          <div className="text-[15px] font-[600]">
-            {t('cli_and_skills', 'CLI & AI Skills')}
-          </div>
-          <div className="text-[13px] text-customColor18 mt-[2px]">
-            {t(
-              'cli_description',
-              'Use the Postiz CLI to automate posting from your terminal, or install the skill to let your AI agent schedule posts for you.'
-            )}
-          </div>
-        </div>
-        <div className="flex gap-[6px] shrink-0 pt-[2px]">
-          <DocsLinkButton
-            href="https://docs.postiz.com/cli/introduction"
-            label={t('read_the_docs', 'Docs')}
-          />
-        </div>
-      </div>
-      <div className="p-[20px] flex flex-col gap-[16px]">
-        {maskedSteps.map((step, i) => (
-          <div key={i} className="flex flex-col gap-[6px]">
-            <div className="text-[13px] font-[600] text-customColor18">
-              {i + 1}. {step.label}
-            </div>
-            <pre className="bg-newBgColorInner border border-newBorder rounded-[8px] p-[16px] text-[13px] whitespace-pre-wrap break-all overflow-x-auto leading-[1.6]">
-              {step.code}
-            </pre>
-          </div>
-        ))}
-        <div className="flex gap-[8px]">
-          <button
-            type="button"
-            onClick={() => setRevealed(!revealed)}
-            className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              {revealed ? (
-                <>
-                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
-                  <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
-                  <line x1="1" y1="1" x2="23" y2="23" />
-                </>
-              ) : (
-                <>
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </>
-              )}
-            </svg>
-            {revealed ? t('hide', 'Hide') : t('reveal', 'Reveal')}
-          </button>
-          <CopyButton
-            text={steps.map((s) => s.code).join(' && ')}
-            label={t('copy_all', 'Copy All')}
-          />
-        </div>
-      </div>
-    </div>
-  );
-};
 
 const ApiKeyCard = ({
   title,
@@ -485,14 +931,19 @@ const ApiKeyCard = ({
       <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px]">
         <div>
           <div className="text-[15px] font-[600]">{title}</div>
-          <div className="text-[13px] text-customColor18 mt-[2px]">{description}</div>
+          <div className="text-[13px] text-customColor18 mt-[2px]">
+            {description}
+          </div>
         </div>
         {docsUrl && (
           <div className="flex gap-[6px] shrink-0 pt-[2px]">
             <DocsLinkButton
               href={docsUrl}
               label={t('read_the_docs', 'Docs')}
-              tooltip={t('api_reference_tooltip', 'Documentação da API (Swagger)')}
+              tooltip={t(
+                'api_reference_tooltip',
+                'Documentação da API (Swagger)'
+              )}
             />
           </div>
         )}
@@ -504,19 +955,29 @@ const ApiKeyCard = ({
               apiKey
             ) : (
               <span className="flex items-center">
-                <span className="blur-sm select-none">{apiKey.slice(0, -5)}</span>
+                <span className="blur-sm select-none">
+                  {apiKey.slice(0, -5)}
+                </span>
                 <span>{apiKey.slice(-5)}</span>
               </span>
             )}
           </code>
         </div>
         <div className="flex gap-[8px]">
-          <button type="button" onClick={onReveal} className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]">
+          <button
+            type="button"
+            onClick={onReveal}
+            className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+          >
             <RevealEyeIcon revealed={reveal} />
             {reveal ? t('hide', 'Hide') : t('reveal', 'Reveal')}
           </button>
           <CopyButton text={apiKey} label={t('copy', 'Copy')} />
-          <button type="button" onClick={onRotate} className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]">
+          <button
+            type="button"
+            onClick={onRotate}
+            className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+          >
             <RotateIcon />
             {t('rotate_key', 'Rotate Key')}
           </button>
@@ -542,13 +1003,19 @@ const ProfileApiKeySection = ({ profileId }: { profileId: string }) => {
   const generateKey = useCallback(async () => {
     await fetch(`/profiles/${profileId}/api-key/rotate`, { method: 'POST' });
     await mutate('/user/self');
-    toaster.show(t('profile_api_key_generated', 'Profile API Key generated'), 'success');
+    toaster.show(
+      t('profile_api_key_generated', 'Profile API Key generated'),
+      'success'
+    );
   }, [fetch, mutate, profileId, t, toaster]);
 
   const rotateKey = useCallback(async () => {
     const approved = await decision.open({
       title: t('rotate_profile_api_key', 'Rotate Profile API Key?'),
-      description: t('rotate_profile_api_key_description', 'The old key will stop working immediately.'),
+      description: t(
+        'rotate_profile_api_key_description',
+        'The old key will stop working immediately.'
+      ),
       approveLabel: t('rotate', 'Rotate'),
       cancelLabel: t('cancel', 'Cancel'),
     });
@@ -556,7 +1023,10 @@ const ProfileApiKeySection = ({ profileId }: { profileId: string }) => {
     await fetch(`/profiles/${profileId}/api-key/rotate`, { method: 'POST' });
     await mutate('/user/self');
     setReveal(false);
-    toaster.show(t('profile_api_key_rotated', 'Profile API Key rotated'), 'success');
+    toaster.show(
+      t('profile_api_key_rotated', 'Profile API Key rotated'),
+      'success'
+    );
   }, [decision, fetch, mutate, profileId, t, toaster]);
 
   if (!user) return null;
@@ -566,19 +1036,33 @@ const ProfileApiKeySection = ({ profileId }: { profileId: string }) => {
       <div className="bg-newBgColorInnerInner rounded-[12px] border border-newBorder overflow-hidden">
         <div className="bg-newBgColorInner px-[20px] py-[14px] border-b border-newBorder flex items-start justify-between gap-[12px]">
           <div>
-            <div className="text-[15px] font-[600]">{t('profile_api_key', 'Profile API Key')}</div>
-            <div className="text-[13px] text-customColor18 mt-[2px]">{t('profile_api_key_description', 'Scoped access to this profile only.')}</div>
+            <div className="text-[15px] font-[600]">
+              {t('profile_api_key', 'Profile API Key')}
+            </div>
+            <div className="text-[13px] text-customColor18 mt-[2px]">
+              {t(
+                'profile_api_key_description',
+                'Scoped access to this profile only.'
+              )}
+            </div>
           </div>
           <div className="flex gap-[6px] shrink-0 pt-[2px]">
             <DocsLinkButton
               href={docsUrl}
               label={t('read_the_docs', 'Docs')}
-              tooltip={t('api_reference_tooltip', 'Documentação da API (Swagger)')}
+              tooltip={t(
+                'api_reference_tooltip',
+                'Documentação da API (Swagger)'
+              )}
             />
           </div>
         </div>
         <div className="p-[20px]">
-          <button type="button" onClick={generateKey} className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]">
+          <button
+            type="button"
+            onClick={generateKey}
+            className="cursor-pointer px-[16px] h-[36px] bg-[#612BD3] hover:bg-[#5520CB] text-white transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
+          >
             {t('generate_profile_api_key', 'Generate Key')}
           </button>
         </div>
@@ -589,7 +1073,10 @@ const ProfileApiKeySection = ({ profileId }: { profileId: string }) => {
   return (
     <ApiKeyCard
       title={t('profile_api_key', 'Profile API Key')}
-      description={t('profile_api_key_description', 'Scoped access to this profile only.')}
+      description={t(
+        'profile_api_key_description',
+        'Scoped access to this profile only.'
+      )}
       apiKey={user.profileApiKey}
       reveal={reveal}
       onReveal={() => setReveal(!reveal)}
@@ -623,7 +1110,20 @@ const AgentSkillSection = ({ backendUrl }: { backendUrl: string }) => {
             target="_blank"
             rel="noreferrer"
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
             {t('open', 'Abrir')}
           </a>
         </div>
@@ -633,7 +1133,10 @@ const AgentSkillSection = ({ backendUrl }: { backendUrl: string }) => {
           <code className="text-[14px] flex-1 truncate">{skillUrl}</code>
         </div>
         <div className="flex gap-[8px]">
-          <CopyButton text={skillUrl} label={t('copy_skill_link', 'Copiar link da skill')} />
+          <CopyButton
+            text={skillUrl}
+            label={t('copy_skill_link', 'Copiar link da skill')}
+          />
         </div>
       </div>
     </div>
@@ -667,7 +1170,10 @@ const PublicApiContent = () => {
     await fetch('/user/api-key/rotate', { method: 'POST' });
     await mutate('/user/self');
     setRevealOrg(false);
-    toaster.show(t('api_key_rotated', 'API Key rotated successfully'), 'success');
+    toaster.show(
+      t('api_key_rotated', 'API Key rotated successfully'),
+      'success'
+    );
   }, [decision, fetch, mutate, toaster]);
 
   if (!user || !user.publicApi) {
@@ -676,7 +1182,9 @@ const PublicApiContent = () => {
 
   const mcpBase = mcpUrl || backendUrl;
   const docsUrl = `${backendUrl}/docs`;
-  const activeKey = isDefault ? user.publicApi : (user.profileApiKey ?? user.publicApi);
+  const activeKey = isDefault
+    ? user.publicApi
+    : user.profileApiKey ?? user.publicApi;
 
   const wizardButton = (
     <button
@@ -689,7 +1197,16 @@ const PublicApiContent = () => {
       onClick={() => window.open(`${frontEndUrl}/modal/dark/all`, '_blank')}
       className="cursor-pointer px-[16px] h-[36px] bg-btnSimple hover:bg-boxHover transition-colors rounded-[8px] text-[13px] font-[600] flex items-center gap-[6px]"
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
         <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
         <polyline points="15 3 21 3 21 9" />
         <line x1="10" y1="14" x2="21" y2="3" />
@@ -701,19 +1218,34 @@ const PublicApiContent = () => {
   return (
     <div className="flex flex-col gap-[40px]">
       <div className="text-[14px] text-textColor leading-[1.7]">
-        {t('api_auth_note_line1', 'Use your API Key to automate your own account.')}
+        {t(
+          'api_auth_note_line1',
+          'Use your API Key to automate your own account.'
+        )}
         <br />
-        {t('api_auth_note_line2', 'If you are building a product that schedules posts on behalf of other Postiz users,')}
+        {t(
+          'api_auth_note_line2',
+          'If you are building a product that schedules posts on behalf of other Postiz users,'
+        )}
         <br />
-        {t('api_auth_note_line3', 'create an OAuth App under the "Apps" tab. Your users will authorize your app via OAuth2,')}
+        {t(
+          'api_auth_note_line3',
+          'create an OAuth App under the "Apps" tab. Your users will authorize your app via OAuth2,'
+        )}
         <br />
-        {t('api_auth_note_line4', 'and you will receive a pos_ prefixed token that works with the API, MCP, and CLI — just like an API Key.')}
+        {t(
+          'api_auth_note_line4',
+          'and you will receive a pos_ prefixed token that works with the API, MCP, and CLI — just like an API Key.'
+        )}
       </div>
 
       {isDefault && (
         <ApiKeyCard
           title={t('org_api_key', 'Organization API Key')}
-          description={t('org_api_key_description', 'Full access to all profiles.')}
+          description={t(
+            'org_api_key_description',
+            'Full access to all profiles.'
+          )}
           apiKey={user.publicApi}
           reveal={revealOrg}
           onReveal={() => setRevealOrg(!revealOrg)}
@@ -723,13 +1255,11 @@ const PublicApiContent = () => {
         />
       )}
 
-      {user.profileId && (
-        <ProfileApiKeySection profileId={user.profileId} />
-      )}
+      {user.profileId && <ProfileApiKeySection profileId={user.profileId} />}
 
       <AgentSkillSection backendUrl={backendUrl} />
-      <CliSection apiKey={activeKey} backendUrl={backendUrl} />
-      <McpSection apiKey={activeKey} mcpBase={mcpBase} />
+      <CliSection apiKey={activeKey} />
+      <McpSection user={{ ...user, publicApi: activeKey }} mcpBase={mcpBase} />
     </div>
   );
 };

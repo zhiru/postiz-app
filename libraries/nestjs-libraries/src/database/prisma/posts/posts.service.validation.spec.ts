@@ -1,3 +1,18 @@
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service',
+  () => ({ IntegrationService: class IntegrationServiceMock {} })
+);
+jest.mock('@gitroom/nestjs-libraries/ai/ai-text.service', () => ({
+  AiTextService: class AiTextServiceMock {},
+}));
+jest.mock('@gitroom/nestjs-libraries/openai/openai.service', () => ({
+  OpenaiService: class OpenaiServiceMock {},
+}));
+
+jest.mock('@gitroom/nestjs-libraries/upload/upload.factory', () => ({
+  UploadFactory: { createStorage: jest.fn().mockReturnValue({}) },
+}));
+
 jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
   IntegrationManager: class IntegrationManagerMock {},
 }));
@@ -58,6 +73,7 @@ const buildService = () => {
     null as any,
     null as any,
     null as any,
+    {} as any, // webhooksService
     null as any,
     {} as any,
     {} as any

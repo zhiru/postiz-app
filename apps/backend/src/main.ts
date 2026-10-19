@@ -1,162 +1,20 @@
 import { initializeSentry } from '@gitroom/nestjs-libraries/sentry/initialize.sentry';
 initializeSentry('backend', true);
-import compression from 'compression';
+// Settings saved in the panel have to be in process.env before the modules
+// that read them while being imported are loaded, so the rest of the app only
+// starts once they are applied.
+import { loadInstanceCredentials } from '@gitroom/nestjs-libraries/database/prisma/instance-credentials/instance.credentials.bootstrap';
 
-import { loadSwagger } from '@gitroom/helpers/swagger/load.swagger';
-import { json } from 'express';
-import { Runtime } from '@temporalio/worker';
-Runtime.install({ shutdownSignals: [] });
-
-process.env.TZ = 'UTC';
-
-import cookieParser from 'cookie-parser';
-import { Logger, ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-
-import { SubscriptionExceptionFilter } from '@gitroom/backend/services/auth/permissions/subscription.exception';
-import { HttpExceptionFilter } from '@gitroom/nestjs-libraries/services/exception.filter';
-import { ConfigurationChecker } from '@gitroom/helpers/configuration/configuration.checker';
-import { startMcp } from '@gitroom/nestjs-libraries/chat/start.mcp';
-import { PrismaClient } from '@prisma/client';
-
-async function start() {
-  const app = await NestFactory.create(AppModule, {
-    rawBody: true,
-    cors: {
-      ...(!process.env.NOT_SECURED ? { credentials: true } : {}),
-      allowedHeaders: [
-        'Content-Type',
-        'Authorization',
-        'x-copilotkit-runtime-client-gql-version',
-        // Headers customizados que o frontend (custom.fetch) envia em chamadas
-        // cross-origin (setup de dois subdominios: FRONTEND_URL x
-        // NEXT_PUBLIC_BACKEND_URL). Sem eles, o preflight CORS falha com
-        // "Failed to fetch" quando o browser tem cookies de sessao legiveis.
-        'auth',
-        'showorg',
-        'showprofile',
-        'impersonate',
-      ],
-      exposedHeaders: [
-        'reload',
-        'onboarding',
-        'activate',
-        'x-copilotkit-runtime-client-gql-version',
-        ...(process.env.NOT_SECURED ? ['auth', 'showorg', 'impersonate'] : []),
-      ],
-      origin: [
-        process.env.FRONTEND_URL,
-        'http://localhost:6274',
-        ...(process.env.MAIN_URL ? [process.env.MAIN_URL] : []),
-      ],
-    },
-  });
-
-  await startMcp(app);
-
-  app.useGlobalPipes(
-    new ValidationPipe({
-      transform: true,
-    })
-  );
-
-  // Express 5 (NestJS 11): o query parser padrao passou a ser 'simple' (sem
-  // objetos/arrays aninhados). Mantemos o 'extended' (qs) para preservar o
-  // comportamento das query strings que ja usavamos. `set` vive no Express
-  // puro (via http adapter), nao no wrapper INestApplication.
-  app.getHttpAdapter().getInstance().set('query parser', 'extended');
-
-  // Express 5: o wildcard '*' precisa ser nomeado. Como app.use casa por
-  // prefixo, '/copilot' ja cobre '/copilot/*'.
-  app.use(['/copilot', '/posts'], (req: any, res: any, next: any) => {
-    json({ limit: '50mb' })(req, res, next);
-  });
-
-  app.use(cookieParser());
-  app.use(compression());
-  app.useGlobalFilters(new SubscriptionExceptionFilter());
-  app.useGlobalFilters(new HttpExceptionFilter());
-
-  loadSwagger(app);
-
-  // Auto-migrate orphan records to default profile (idempotent)
-  await migrateOrphanRecordsToDefaultProfile();
-
-  const port = process.env.PORT || 3000;
-
-  try {
-    await app.listen(port);
-    console.log('Backend started successfully on port ' + port);
-
-    checkConfiguration(); // Do this last, so that users will see obvious issues at the end of the startup log without having to scroll up.
-
-    Logger.log(`🚀 Backend is running on: http://localhost:${port}`);
-  } catch (e) {
-    Logger.error(`Backend failed to start on port ${port}`, e);
-  }
-}
-
-async function migrateOrphanRecordsToDefaultProfile() {
-  const prisma = new PrismaClient();
-  try {
-    // Find all organizations that have profiles
-    const orgsWithProfiles = await prisma.profile.findMany({
-      where: { isDefault: true },
-      select: { id: true, organizationId: true },
-    });
-
-    if (!orgsWithProfiles.length) {
-      return;
+loadInstanceCredentials().then(() => {
+  // Providers append paths directly to these, so a trailing slash in the
+  // value (e.g. FRONTEND_URL=https://host.com/) produces a double slash in the
+  // OAuth redirect_uri and breaks Meta's exact redirect_uri matching, plus
+  // CORS origin matching in split-origin setups. Normalized after the panel
+  // settings are applied, since the panel can set these too.
+  for (const key of ['FRONTEND_URL', 'MAIN_URL', 'NEXT_PUBLIC_BACKEND_URL']) {
+    if (process.env[key]) {
+      process.env[key] = process.env[key]!.replace(/\/+$/, '');
     }
-
-    for (const defaultProfile of orgsWithProfiles) {
-      // Assign orphan posts to default profile
-      const postsUpdated = await prisma.post.updateMany({
-        where: {
-          organizationId: defaultProfile.organizationId,
-          profileId: null,
-        },
-        data: { profileId: defaultProfile.id },
-      });
-
-      // Assign orphan media to default profile
-      const mediaUpdated = await prisma.media.updateMany({
-        where: {
-          organizationId: defaultProfile.organizationId,
-          profileId: null,
-        },
-        data: { profileId: defaultProfile.id },
-      });
-
-      if (postsUpdated.count > 0 || mediaUpdated.count > 0) {
-        Logger.log(
-          `Migrated ${postsUpdated.count} posts and ${mediaUpdated.count} media to default profile for org ${defaultProfile.organizationId}`,
-          'ProfileMigration'
-        );
-      }
-    }
-  } catch (err) {
-    Logger.warn('Profile migration skipped (non-critical): ' + (err as Error).message, 'ProfileMigration');
-  } finally {
-    await prisma.$disconnect();
   }
-}
-
-function checkConfiguration() {
-  const checker = new ConfigurationChecker();
-  checker.readEnvFromProcess();
-  checker.check();
-
-  if (checker.hasIssues()) {
-    for (const issue of checker.getIssues()) {
-      Logger.warn(issue, 'Configuration issue');
-    }
-
-    Logger.warn('Configuration issues found: ' + checker.getIssuesCount());
-  } else {
-    Logger.log('Configuration check completed without any issues');
-  }
-}
-
-start();
+  return import('./start');
+});

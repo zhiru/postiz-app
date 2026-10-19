@@ -44,7 +44,7 @@ export default withProvider({
     if ((firstItem?.length ?? 0) === 0) {
       return 'Requires at least one media';
     }
-    if ((firstItem?.length ?? 0)  > 5) {
+    if ((firstItem?.length ?? 0) > 5) {
       return 'You can only have up to 5 media items';
     }
     if (isMp4 && firstItem?.length !== 2 && !isPicture) {

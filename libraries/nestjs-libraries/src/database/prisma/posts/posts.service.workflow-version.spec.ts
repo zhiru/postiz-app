@@ -1,3 +1,18 @@
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service',
+  () => ({ IntegrationService: class IntegrationServiceMock {} })
+);
+jest.mock('@gitroom/nestjs-libraries/ai/ai-text.service', () => ({
+  AiTextService: class AiTextServiceMock {},
+}));
+jest.mock('@gitroom/nestjs-libraries/openai/openai.service', () => ({
+  OpenaiService: class OpenaiServiceMock {},
+}));
+
+jest.mock('@gitroom/nestjs-libraries/upload/upload.factory', () => ({
+  UploadFactory: { createStorage: jest.fn().mockReturnValue({}) },
+}));
+
 jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
   IntegrationManager: class IntegrationManagerMock {},
 }));
@@ -51,12 +66,13 @@ const buildService = () => {
     null as any,
     temporalService as any,
     null as any,
+    {} as any, // webhooksService
     null as any,
     {} as any,
     {} as any
   );
 
-  return { service, start };
+  return { service, start, repository };
 };
 
 describe('PostsService - selecao do workflow de publicacao', () => {
@@ -79,7 +95,7 @@ describe('PostsService - selecao do workflow de publicacao', () => {
     restore('POST_WORKFLOW_V112_ALL', originalEnv.all);
   });
 
-  it('inicia V112 apenas para a integracao canario', async () => {
+  it('inicia V114 apenas para a integracao canario', async () => {
     process.env.POST_WORKFLOW_V112_INTEGRATION_IDS = 'integration-1';
     const { service, start } = buildService();
 
@@ -89,25 +105,43 @@ describe('PostsService - selecao do workflow de publicacao', () => {
     });
 
     expect(start).toHaveBeenCalledWith(
-      'postWorkflowV112',
+      'postWorkflowV114',
       expect.objectContaining({ workflowId: 'post_post-1' })
     );
   });
 
-  it('mantem V102 sem gate e para Zernio', async () => {
+  it('mantem Zernio em V102 mesmo com gate global', async () => {
     delete process.env.POST_WORKFLOW_V112_INTEGRATION_IDS;
     delete process.env.POST_WORKFLOW_V112_PROVIDERS;
     process.env.POST_WORKFLOW_V112_ALL = 'true';
     const { service, start } = buildService();
 
-    await service.startWorkflow('main', 'post-z', 'org-1', 'QUEUE', {
+    await service.startWorkflow('zernio', 'post-z', 'org-1', 'QUEUE', {
       id: 'integration-z',
       providerIdentifier: 'zernio-instagram',
     });
 
     expect(start).toHaveBeenCalledWith(
       'postWorkflowV102',
-      expect.objectContaining({ workflowId: 'post_post-z' })
+      expect.objectContaining({
+        workflowId: 'post_post-z',
+        args: [expect.objectContaining({ taskQueue: 'main' })],
+      })
+    );
+  });
+  it('usa V113 por padrao e evita consultar o post quando recebe a integracao', async () => {
+    delete process.env.POST_WORKFLOW_V112_INTEGRATION_IDS;
+    delete process.env.POST_WORKFLOW_V112_PROVIDERS;
+    delete process.env.POST_WORKFLOW_V112_ALL;
+    const { service, start, repository } = buildService();
+    await service.startWorkflow('instagram', 'post-default', 'org-1', 'QUEUE', {
+      id: 'channel',
+      providerIdentifier: 'instagram',
+    });
+    expect(repository.getPostById).not.toHaveBeenCalled();
+    expect(start).toHaveBeenCalledWith(
+      'postWorkflowV113',
+      expect.objectContaining({ workflowId: 'post_post-default' })
     );
   });
 });

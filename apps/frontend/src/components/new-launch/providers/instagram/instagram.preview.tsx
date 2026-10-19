@@ -36,6 +36,7 @@ export const InstagramPreview: FC<{
 
     const finalValue =
       `<strong class="text-[15px] font-[600]">${integration?.name} </strong>` +
+      `<span dir="auto">` +
       newContent
         .slice(start, end)
         .replace(/\[\[\[([.\s\S]*?)]]]/, (match, match1) => {
@@ -45,7 +46,7 @@ export const InstagramPreview: FC<{
       newContent.slice(end).replace(/\[\[\[([.\s\S]*?)]]]/, (match, match1) => {
         return `<span class="font-bold font-[arial]" style="color: #ae8afc">${match1}</span>`;
       }) +
-      `</mark>`;
+      `</mark></span>`;
 
     return { text: finalValue, images: p.image };
   });
@@ -84,6 +85,7 @@ export const InstagramPreview: FC<{
         />
       )}
       <div
+        dir="auto"
         className="text-[14px] font-[400] whitespace-pre-line"
         dangerouslySetInnerHTML={{
           __html: renderContent?.[0]?.text,
@@ -183,6 +185,7 @@ export const InstagramPreview: FC<{
                 <div className="flex flex-col gap-[6px] flex-1">
                   <div className="flex gap-[4px] py-[8px]">
                     <div
+                      dir="auto"
                       className="whitespace-pre-line text-[14px] font-[400] flex-1"
                       dangerouslySetInnerHTML={{
                         __html: value.text,

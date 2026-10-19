@@ -27,7 +27,7 @@ export function ssrfSafeLookup(
 ): void {
   if (net.isIP(hostname)) {
     const family = net.isIP(hostname);
-    if (isBlockedIp(hostname)) {
+    if (isBlockedIp(hostname, hostname)) {
       callback(new Error('Blocked IP'), '', 0);
       return;
     }
@@ -48,7 +48,7 @@ export function ssrfSafeLookup(
     }
 
     if (Array.isArray(address)) {
-      if (address.some((entry) => isBlockedIp(entry.address))) {
+      if (address.some((entry) => isBlockedIp(entry.address, hostname))) {
         callback(new Error('Blocked IP'), '', 0);
         return;
       }
@@ -57,7 +57,7 @@ export function ssrfSafeLookup(
       return;
     }
 
-    if (isBlockedIp(address)) {
+    if (isBlockedIp(address, hostname)) {
       callback(new Error('Blocked IP'), '', 0);
       return;
     }

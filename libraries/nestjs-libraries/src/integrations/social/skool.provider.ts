@@ -1,5 +1,5 @@
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import { SocialAbstract } from '../social.abstract';
+import { SocialAbstract, BadBody } from '../social.abstract';
 import {
   AuthTokenDetails,
   MediaContent,
@@ -12,15 +12,25 @@ import { Integration } from '@prisma/client';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 import { SkoolDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/skool.dto';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
-import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import {
+  ssrfSafeFetch,
+  getSsrfSafeDispatcher,
+} from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 
 export class SkoolProvider extends SocialAbstract implements SocialProvider {
   identifier = 'skool';
+
   name = 'Skool';
+
   isBetweenSteps = false;
+
   isChromeExtension = true;
+
   scopes = [] as string[];
+
   editor = 'normal' as const;
+
   dto = SkoolDto;
 
   extensionCookies = [
@@ -34,15 +44,15 @@ export class SkoolProvider extends SocialAbstract implements SocialProvider {
   } {
     const stored = integration.customInstanceDetails!;
     try {
-      // Formato atual: credenciais guardadas como JSON encriptado em repouso (AES).
+      // Current format: credentials stored as at-rest AES-encrypted JSON.
       return JSON.parse(AuthService.fixedDecryption(stored)) as {
         client_id: string;
         auth_token: string;
       };
     } catch {
-      // Formato legado: contas Skool conectadas antes da mudanca de formato
-      // guardavam as credenciais como JWT assinado. Lemos assim para que
-      // contas ja conectadas continuem funcionando sem reconectar.
+      // Legacy format: Skool accounts connected before the storage format was
+      // changed kept their credentials as a signed JWT. Read those as-is so
+      // already-connected accounts keep working without a reconnect.
       return AuthService.verifyJWT(stored) as {
         client_id: string;
         auth_token: string;
@@ -81,10 +91,10 @@ export class SkoolProvider extends SocialAbstract implements SocialProvider {
   }
 
   async generateAuthUrl() {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     return {
       url: state,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -217,10 +227,29 @@ export class SkoolProvider extends SocialAbstract implements SocialProvider {
     const fileIds: string[] = [];
 
     for (const item of media) {
-      const fileResponse = await ssrfSafeFetch(item.path);
-      const fileBuffer = await fileResponse.arrayBuffer();
+      // Size and type come from a HEAD request; the PUT below streams the
+      // bytes so the file is never buffered in memory.
+      const headResponse = await fetch(item.path, {
+        method: 'HEAD',
+        // identity encoding so content-length matches the bytes the GET streams
+        headers: { 'accept-encoding': 'identity' },
+        // @ts-ignore - undici-only option; blocks SSRF to internal IPs
+        dispatcher: getSsrfSafeDispatcher(),
+      });
       const contentType =
-        fileResponse.headers.get('content-type') || 'application/octet-stream';
+        headResponse.headers.get('content-type') || 'application/octet-stream';
+      const contentLength = Number(
+        headResponse.headers.get('content-length') || 0
+      );
+      if (!headResponse.ok || !contentLength) {
+        // A permanent condition - fail fast instead of letting Temporal retry
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          '{}',
+          'Could not determine the media size for upload'
+        );
+      }
       const fileName = item.path.split('/').pop() || 'file';
 
       const createFileResponse = await (
@@ -235,7 +264,7 @@ export class SkoolProvider extends SocialAbstract implements SocialProvider {
             body: JSON.stringify({
               file_name: fileName,
               content_type: contentType,
-              content_length: fileBuffer.byteLength,
+              content_length: contentLength,
               content_disposition: '',
               ref: '',
               owner_id: userId,
@@ -246,14 +275,35 @@ export class SkoolProvider extends SocialAbstract implements SocialProvider {
         )
       ).json();
 
-      await ssrfSafeFetch(createFileResponse.write_url, {
+      const fileResponse = await fetch(item.path, {
+        headers: { 'accept-encoding': 'identity' },
+        // @ts-ignore - undici-only option; blocks SSRF to internal IPs
+        dispatcher: getSsrfSafeDispatcher(),
+      });
+      if (!fileResponse.ok || !fileResponse.body) {
+        throw new Error(`Failed to fetch media: ${fileResponse.statusText}`);
+      }
+      const uploadResponse = await fetch(createFileResponse.write_url, {
         method: 'PUT',
         headers: {
           'Content-Type': createFileResponse.content_type,
+          'Content-Length': String(contentLength),
           'x-amz-acl': createFileResponse.acl,
         },
-        body: fileBuffer,
-      });
+        body: fileResponse.body,
+        // Required by undici when streaming a request body.
+        duplex: 'half',
+      } as any);
+      // A rejected PUT would otherwise publish the post with an empty
+      // attachment - the file id exists but no bytes were stored.
+      if (!uploadResponse.ok) {
+        throw new BadBody(
+          this.identifier,
+          await uploadResponse.text().catch(() => '{}'),
+          '{}',
+          'Failed to upload the media file'
+        );
+      }
 
       fileIds.push(createFileResponse.file.id);
     }

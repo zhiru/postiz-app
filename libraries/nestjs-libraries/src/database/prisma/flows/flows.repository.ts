@@ -7,7 +7,10 @@ import {
   AliasSource,
   UnmatchedStatus,
 } from '@prisma/client';
-import { FlowNodeDto, FlowEdgeDto } from '@gitroom/nestjs-libraries/dtos/flows/flow.dto';
+import {
+  FlowNodeDto,
+  FlowEdgeDto,
+} from '@gitroom/nestjs-libraries/dtos/flows/flow.dto';
 
 @Injectable()
 export class FlowsRepository {
@@ -31,7 +34,12 @@ export class FlowsRepository {
       },
       include: {
         integration: {
-          select: { id: true, name: true, picture: true, providerIdentifier: true },
+          select: {
+            id: true,
+            name: true,
+            picture: true,
+            providerIdentifier: true,
+          },
         },
         nodes: {
           where: { type: 'TRIGGER' },
@@ -56,7 +64,12 @@ export class FlowsRepository {
       },
       include: {
         integration: {
-          select: { id: true, name: true, picture: true, providerIdentifier: true },
+          select: {
+            id: true,
+            name: true,
+            picture: true,
+            providerIdentifier: true,
+          },
         },
         nodes: true,
         edges: true,
@@ -264,7 +277,27 @@ export class FlowsRepository {
     igMessageId?: string;
     commentText: string;
   }) {
-    return this._flowExecution.model.flowExecution.create({ data });
+    const where = data.igCommentId
+      ? {
+          flowId_igCommentId: {
+            flowId: data.flowId,
+            igCommentId: data.igCommentId,
+          },
+        }
+      : data.igMessageId
+      ? {
+          flowId_igMessageId: {
+            flowId: data.flowId,
+            igMessageId: data.igMessageId,
+          },
+        }
+      : undefined;
+    if (!where) throw new Error('A platform event identity is required');
+    return this._flowExecution.model.flowExecution.upsert({
+      where,
+      create: data,
+      update: {},
+    });
   }
 
   updateExecution(
@@ -317,15 +350,28 @@ export class FlowsRepository {
     });
   }
 
-  getExecution(id: string, orgId: string) {
+  getExecution(id: string, orgId: string, flowId?: string, profileId?: string) {
     return this._flowExecution.model.flowExecution.findFirst({
-      where: { id, flow: { organizationId: orgId } },
+      where: {
+        id,
+        ...(flowId ? { flowId } : {}),
+        flow: { organizationId: orgId, ...(profileId ? { profileId } : {}) },
+      },
     });
   }
 
-  getExecutions(flowId: string, orgId: string, page = 1, limit = 20) {
+  getExecutions(
+    flowId: string,
+    orgId: string,
+    page = 1,
+    limit = 20,
+    profileId?: string
+  ) {
     return this._flowExecution.model.flowExecution.findMany({
-      where: { flowId, flow: { organizationId: orgId } },
+      where: {
+        flowId,
+        flow: { organizationId: orgId, ...(profileId ? { profileId } : {}) },
+      },
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * limit,
       take: limit,
@@ -372,7 +418,13 @@ export class FlowsRepository {
 
   async appendExecutionLog(
     id: string,
-    entry: { nodeId: string; nodeType: string; status: string; timestamp: string; error?: string }
+    entry: {
+      nodeId: string;
+      nodeType: string;
+      status: string;
+      timestamp: string;
+      error?: string;
+    }
   ) {
     const execution = await this._flowExecution.model.flowExecution.findFirst({
       where: { id },
@@ -588,11 +640,7 @@ export class FlowsRepository {
     });
   }
 
-  findFlowsByAlias(
-    orgId: string,
-    integrationId: string,
-    aliasMediaId: string
-  ) {
+  findFlowsByAlias(orgId: string, integrationId: string, aliasMediaId: string) {
     return this._flowMediaAlias.model.flowMediaAlias.findMany({
       where: {
         integrationId,
@@ -619,11 +667,10 @@ export class FlowsRepository {
   }
 
   async deleteAliasForOrg(orgId: string, aliasId: string) {
-    const existing =
-      await this._flowMediaAlias.model.flowMediaAlias.findFirst({
-        where: { id: aliasId, flow: { organizationId: orgId } },
-        select: { id: true },
-      });
+    const existing = await this._flowMediaAlias.model.flowMediaAlias.findFirst({
+      where: { id: aliasId, flow: { organizationId: orgId } },
+      select: { id: true },
+    });
     if (!existing) return false;
     await this._flowMediaAlias.model.flowMediaAlias.delete({
       where: { id: aliasId },
@@ -784,8 +831,8 @@ export class FlowsRepository {
     flowId: string,
     excludeId?: string
   ) {
-    const result = await this._unmatchedComment.model.unmatchedComment.updateMany(
-      {
+    const result =
+      await this._unmatchedComment.model.unmatchedComment.updateMany({
         where: {
           integrationId,
           igMediaId,
@@ -797,8 +844,7 @@ export class FlowsRepository {
           boundFlowId: flowId,
           boundAt: new Date(),
         },
-      }
-    );
+      });
     return result.count;
   }
 
@@ -807,8 +853,8 @@ export class FlowsRepository {
     igMediaId: string,
     excludeId?: string
   ) {
-    const result = await this._unmatchedComment.model.unmatchedComment.updateMany(
-      {
+    const result =
+      await this._unmatchedComment.model.unmatchedComment.updateMany({
         where: {
           integrationId,
           igMediaId,
@@ -819,20 +865,18 @@ export class FlowsRepository {
           status: UnmatchedStatus.IGNORED,
           ignoredAt: new Date(),
         },
-      }
-    );
+      });
     return result.count;
   }
 
   async deleteUnmatchedOlderThan(cutoff: Date) {
-    const result = await this._unmatchedComment.model.unmatchedComment.deleteMany(
-      {
+    const result =
+      await this._unmatchedComment.model.unmatchedComment.deleteMany({
         where: {
           status: UnmatchedStatus.PENDING,
           createdAt: { lt: cutoff },
         },
-      }
-    );
+      });
     return result.count;
   }
 }

@@ -5,6 +5,8 @@ import {
   PostDetails,
   PostResponse,
   SocialProvider,
+  ReportMetricsMap,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { PinterestSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/pinterest.dto';
@@ -14,10 +16,14 @@ import {
   BadBody,
   RefreshToken,
   SocialAbstract,
+  ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import dayjs from 'dayjs';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { Integration } from '@prisma/client';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 const mediaPathname = (path: string) => {
   try {
@@ -30,6 +36,26 @@ const mediaPathname = (path: string) => {
 const hasMediaExtension = (path: string, extension: string) =>
   mediaPathname(path).toLowerCase().endsWith(`.${extension.toLowerCase()}`);
 
+type PinterestPendingData = {
+  mediaId: string; // empty for image-only pins (no asynchronous processing)
+  message: string;
+  settings: {
+    link?: string;
+    title?: string;
+    dominant_color?: string;
+    board: string;
+  };
+  imagePaths: string[];
+  coverPath?: string;
+  // Arm -> confirm -> publish handshake (same as the Facebook story flow):
+  // finalizePost arms without mutating, checkPostStatus witnesses, and only a
+  // witnessed attempt runs the create - so a create that dies with an unknown
+  // outcome is detected instead of run again (Pinterest has no idempotency
+  // key).
+  attempting?: boolean;
+  confirmed?: boolean;
+};
+
 @Rules(
   'Pinterest requires at least one media, if posting a video, you must have two attachment, one for video, one for the cover picture, When posting a video, there can be only one, if posting images, there can be maximum 5'
 )
@@ -38,8 +64,11 @@ export class PinterestProvider
   implements SocialProvider
 {
   identifier = 'pinterest';
+
   name = 'Pinterest';
+
   isBetweenSteps = false;
+
   scopes = [
     'boards:read',
     'boards:write',
@@ -47,7 +76,9 @@ export class PinterestProvider
     'pins:write',
     'user_accounts:read',
   ];
-  override maxConcurrentJob = 3; // Pinterest has more lenient rate limits
+
+  override maxConcurrentJob = 3;
+
   maxLength() {
     return 500;
   }
@@ -150,7 +181,7 @@ export class PinterestProvider
   }
 
   async generateAuthUrl(clientInformation?: ClientInformation) {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     const clientId =
       clientInformation?.client_id || process.env.PINTEREST_CLIENT_ID;
     return {
@@ -159,7 +190,7 @@ export class PinterestProvider
       )}&response_type=code&scope=${encodeURIComponent(
         this.scopes.join(',')
       )}&state=${state}`,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -516,5 +547,257 @@ export class PinterestProvider
       console.error('Error fetching Pinterest post analytics:', err);
       return [];
     }
+  }
+
+  reportMetrics: ReportMetricsMap = {
+    reach: ['Impressions'],
+    engagement: ['Pin Clicks', 'Saves', 'Outbound Clicks'],
+  };
+
+  override async checkValidity([firstItem]: Array<ValidityMedia[]>): Promise<
+    string | true
+  > {
+    const isMp4 = firstItem?.find(
+      (item) => (item?.path?.indexOf?.('mp4') ?? -1) > -1
+    );
+    const isPicture = firstItem?.find(
+      (item) => (item?.path?.indexOf?.('mp4') ?? -1) === -1
+    );
+    if ((firstItem?.length ?? 0) === 0) {
+      return 'Requires at least one media';
+    }
+    if ((firstItem?.length ?? 0) > 5) {
+      return 'You can only have up to 5 media items';
+    }
+    if (isMp4 && firstItem?.length !== 2 && !isPicture) {
+      return 'If posting a video you have to also include a cover image as second media';
+    }
+    if (isMp4 && (firstItem?.length ?? 0) > 2) {
+      return 'If posting a video you can only have two media items';
+    }
+
+    if (
+      (firstItem?.length ?? 0) > 1 &&
+      firstItem?.every((p) => (p?.path?.indexOf?.('mp4') ?? -1) === -1)
+    ) {
+      const loadAll = await Promise.all(
+        firstItem?.map((p) => this.getImageDimensions(p?.path)) ?? []
+      );
+      const checkAllTheSameWidthHeight = loadAll?.every((p, i, arr) => {
+        return p?.width === arr?.[0]?.width && p?.height === arr?.[0]?.height;
+      });
+      if (!checkAllTheSameWidthHeight) {
+        return 'Requires all images to have the same width and height';
+      }
+    }
+    return true;
+  }
+
+  async postPending(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails<PinterestSettingsDto>[]
+  ): Promise<PostResponse[]> {
+    let mediaId = '';
+    const findMp4 = postDetails?.[0]?.media?.find((p) =>
+      hasExtension(p.path, 'mp4')
+    );
+    const picture = postDetails?.[0]?.media?.find(
+      (p) => !hasExtension(p.path, 'mp4')
+    );
+
+    // Upload the video now; the processing wait moves to checkPostStatus and
+    // the pin itself is only created by finalizePost, so nothing here is
+    // irreversible - a failure leaves only an orphaned media upload.
+    if (findMp4) {
+      const { upload_url, media_id, upload_parameters } = await (
+        await this.fetch('https://api.pinterest.com/v5/media', {
+          method: 'POST',
+          body: JSON.stringify({
+            media_type: 'video',
+          }),
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+        })
+      ).json();
+
+      const { data } = await this.getSsrfSafeAxios().get(findMp4.path, {
+        responseType: 'stream',
+      });
+
+      const formData = Object.keys(upload_parameters)
+        .filter((f) => f)
+        .reduce((acc, key) => {
+          acc.append(key, upload_parameters[key]);
+          return acc;
+        }, new FormData());
+
+      formData.append('file', data);
+      await this.getSsrfSafeAxios().post(upload_url, formData);
+
+      mediaId = media_id;
+    }
+
+    return [
+      {
+        id: postDetails?.[0]?.id,
+        releaseURL: '',
+        postId: '',
+        status: 'pending',
+        pendingData: {
+          mediaId,
+          message: postDetails?.[0]?.message,
+          settings: {
+            link: postDetails?.[0]?.settings.link,
+            title: postDetails?.[0]?.settings.title,
+            dominant_color: postDetails?.[0]?.settings.dominant_color,
+            board: postDetails?.[0]?.settings.board,
+          },
+          imagePaths: (postDetails?.[0]?.media || []).map((m) => m.path),
+          coverPath: picture?.path,
+        } as PinterestPendingData,
+      },
+    ];
+  }
+
+  override async checkPostStatus(
+    accessToken: string,
+    pendingData: PinterestPendingData,
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    // A confirmed create attempt died without reporting its result: Pinterest
+    // gives no way to ask whether that pin was created, so never run the
+    // create again - stop with an explicit warning instead.
+    if (pendingData.attempting && pendingData.confirmed) {
+      throw new BadBody(
+        'pinterest',
+        JSON.stringify({}),
+        {} as any,
+        'Pinterest may have already published this pin, please check your account before posting again to avoid duplicates'
+      );
+    }
+
+    // witness the armed create so finalizePost knows the attempt is uniquely
+    // accounted for before it mutates anything
+    const witness = (): PendingCheckResponse =>
+      pendingData.attempting && !pendingData.confirmed
+        ? {
+            status: 'ready',
+            pendingData: { ...pendingData, confirmed: true },
+          }
+        : { status: 'ready', pendingData };
+
+    // Image-only pins have no asynchronous processing step.
+    if (!pendingData.mediaId) {
+      return witness();
+    }
+
+    let mediafile: { status?: string };
+    try {
+      mediafile = await (
+        await this.fetch(
+          'https://api.pinterest.com/v5/media/' + pendingData.mediaId,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          },
+          '',
+          0,
+          true
+        )
+      ).json();
+    } catch (err) {
+      if (err instanceof RefreshToken) {
+        throw err;
+      }
+
+      // Transient status-check error: the media may finish processing just
+      // fine, keep polling - if Pinterest stays broken the workflow exhausts
+      // its checks and warns the user properly.
+      return { status: 'pending', pendingData };
+    }
+
+    if (mediafile.status === 'failed') {
+      throw new BadBody(
+        'pinterest',
+        JSON.stringify({}),
+        {} as any,
+        'The file is corrupted and cannot be uploaded'
+      );
+    }
+
+    if (mediafile.status !== 'succeeded') {
+      return { status: 'pending', pendingData };
+    }
+
+    return witness();
+  }
+
+  override async finalizePost(
+    accessToken: string,
+    pendingData: PinterestPendingData,
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    // Create with an arm -> confirm -> publish handshake: the create only runs
+    // after checkPostStatus witnessed the intent, so a run that dies
+    // mid-create is detectable and the pin is never published twice.
+    if (!pendingData.attempting || !pendingData.confirmed) {
+      return {
+        status: 'pending',
+        pendingData: { ...pendingData, attempting: true, confirmed: false },
+      };
+    }
+
+    const mapImages = (pendingData.imagePaths || []).map((path) => ({ path }));
+
+    const { id: pId } = await (
+      await this.fetch('https://api.pinterest.com/v5/pins', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...(pendingData.settings.link
+            ? { link: pendingData.settings.link }
+            : {}),
+          ...(pendingData.settings.title
+            ? { title: pendingData.settings.title }
+            : {}),
+          description: pendingData.message,
+          ...(pendingData.settings.dominant_color
+            ? { dominant_color: pendingData.settings.dominant_color }
+            : {}),
+          board_id: pendingData.settings.board,
+          media_source: pendingData.mediaId
+            ? {
+                source_type: 'video_id',
+                media_id: pendingData.mediaId,
+                cover_image_url: pendingData.coverPath,
+              }
+            : mapImages?.length === 1
+            ? {
+                source_type: 'image_url',
+                url: mapImages?.[0]?.path,
+              }
+            : {
+                source_type: 'multiple_image_urls',
+                items: mapImages.map((m) => ({
+                  url: m.path,
+                })),
+              },
+        }),
+      })
+    ).json();
+
+    return {
+      status: 'completed',
+      postId: pId,
+      releaseURL: `https://www.pinterest.com/pin/${pId}`,
+    };
   }
 }

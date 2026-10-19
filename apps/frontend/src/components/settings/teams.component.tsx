@@ -100,12 +100,23 @@ export const AddMember = () => {
       profileIds: string[];
       profileRole: string;
     }) => {
-      const { url } = await (
-        await fetch('/settings/team', {
-          method: 'POST',
-          body: JSON.stringify(values),
-        })
-      ).json();
+      const response = await fetch('/settings/team', {
+        method: 'POST',
+        body: JSON.stringify(values),
+      });
+      if (!response.ok) {
+        const { message } = await response.json().catch(() => ({} as any));
+        toast.show(
+          (Array.isArray(message) ? message[0] : message) ||
+            t(
+              'could_not_invite_team_member',
+              'Could not invite the team member.'
+            ),
+          'warning'
+        );
+        return;
+      }
+      const { url } = await response.json();
       if (values.sendEmail) {
         modals.closeAll();
         toast.show(t('invitation_link_sent', 'Invitation link sent'));
@@ -202,7 +213,9 @@ export const AddMember = () => {
             </div>
           </div>
           <Button type="submit" className="mt-[18px]">
-            {sendEmail ? t('send_invitation_link', 'Send Invitation Link') : t('copy_link', 'Copy Link')}
+            {sendEmail
+              ? t('send_invitation_link', 'Send Invitation Link')
+              : t('copy_link', 'Copy Link')}
           </Button>
         </div>
       </form>
@@ -270,7 +283,10 @@ export const TeamsComponent = () => {
       async () => {
         if (
           !(await deleteDialog(
-            t('are_you_sure_remove_team_member', 'Are you sure you want to remove this team member?')
+            t(
+              'are_you_sure_remove_team_member',
+              'Are you sure you want to remove this team member?'
+            )
           ))
         ) {
           return;
@@ -312,7 +328,8 @@ export const TeamsComponent = () => {
                   : (p.user.profileMembers || []).length
                   ? (p.user.profileMembers || [])
                       .map(
-                        (pm) => `${pm.profile.name} (${profileRoleLabel(pm.role)})`
+                        (pm) =>
+                          `${pm.profile.name} (${profileRoleLabel(pm.role)})`
                       )
                       .join(', ')
                   : t('no_profile_assigned_short', 'Sem perfil')}

@@ -16,6 +16,18 @@ import { useToaster } from '@gitroom/react/toaster/toaster';
 import clsx from 'clsx';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import dayjs from 'dayjs';
+import { Checkbox } from '@gitroom/react/form/checkbox';
+
+// Mirrors WEBHOOK_EVENTS in libraries/nestjs-libraries/src/dtos/webhooks -
+// that module pulls node-only deps (crypto, undici) and can't be bundled here.
+const WEBHOOK_EVENTS = [
+  'post.published',
+  'post.failed',
+  'post.deleted',
+  'comment.received',
+];
+const DEFAULT_WEBHOOK_EVENTS = ['post.published'];
 
 export const Webhooks: FC = () => {
   const fetch = useFetch();
@@ -33,6 +45,16 @@ export const Webhooks: FC = () => {
         title: data ? t('update_webhook', 'Update webhook') : t('add_webhook', 'Add webhook'),
         withCloseButton: true,
         children: <AddOrEditWebhook data={data} reload={mutate} />,
+      });
+    },
+    [t]
+  );
+  const showDeliveries = useCallback(
+    (data: any) => () => {
+      modal.openModal({
+        title: t('webhook_deliveries', 'Webhook deliveries'),
+        withCloseButton: true,
+        children: <WebhookDeliveries id={data.id} />,
       });
     },
     [t]
@@ -72,15 +94,29 @@ export const Webhooks: FC = () => {
       <div className="my-[16px] mt-[16px] bg-sixth border-fifth items-center border rounded-[4px] p-[24px] flex gap-[24px]">
         <div className="flex flex-col w-full">
           {!!data?.length && (
-            <div className="grid grid-cols-[1fr,1fr,1fr,1fr] w-full gap-y-[10px]">
+            <div className="grid grid-cols-[1fr,1fr,1fr,1fr,1fr,1fr] w-full gap-y-[10px]">
               <div>{t('name', 'Name')}</div>
               <div>{t('url', 'URL')}</div>
+              <div>{t('events', 'Events')}</div>
+              <div>{t('deliveries', 'Deliveries')}</div>
               <div>{t('edit', 'Edit')}</div>
               <div>{t('delete', 'Delete')}</div>
               {data?.map((p: any) => (
                 <Fragment key={p.id}>
                   <div className="flex flex-col justify-center">{p.name}</div>
                   <div className="flex flex-col justify-center">{p.url}</div>
+                  <div className="flex flex-col justify-center text-customColor18">
+                    {(p.events?.length ? p.events : DEFAULT_WEBHOOK_EVENTS).join(
+                      ', '
+                    )}
+                  </div>
+                  <div className="flex flex-col justify-center">
+                    <div>
+                      <Button secondary={true} onClick={showDeliveries(p)}>
+                        {t('view', 'View')}
+                      </Button>
+                    </div>
+                  </div>
                   <div className="flex flex-col justify-center">
                     <div>
                       <Button onClick={addWebhook(p)}>
@@ -116,6 +152,7 @@ const details = object().shape({
   name: string().required(),
   url: string().url().required(),
   integrations: array(),
+  events: array().of(string()).min(1),
 });
 const getWebhookOptions = (t: (key: string, fallback: string) => string) => [
   {
@@ -146,9 +183,54 @@ export const AddOrEditWebhook: FC<{
       name: data?.name || '',
       url: data?.url || '',
       integrations: data?.integrations?.map((p: any) => p.integration) || [],
+      events: data?.events?.length ? data.events : DEFAULT_WEBHOOK_EVENTS,
     },
   });
   const integrations = form.watch('integrations');
+  const events = form.watch('events');
+  const toggleEvent = useCallback(
+    (event: string) => () => {
+      const current: string[] = form.getValues('events') || [];
+      form.setValue(
+        'events',
+        current.includes(event)
+          ? current.filter((e) => e !== event)
+          : [...current, event],
+        { shouldValidate: true }
+      );
+    },
+    []
+  );
+  // The secret is only ever readable right after it is generated - the list
+  // endpoint never returns it again.
+  const showSecret = useCallback(
+    (secret: string) => {
+      modal.openModal({
+        title: t('webhook_signing_secret', 'Webhook signing secret'),
+        withCloseButton: true,
+        children: <WebhookSecret secret={secret} />,
+      });
+    },
+    [t]
+  );
+  const rotateSecret = useCallback(async () => {
+    if (
+      !(await deleteDialog(
+        t(
+          'rotate_secret_confirm',
+          'Rotating invalidates the current secret. Continue?'
+        ),
+        t('rotate', 'Rotate')
+      ))
+    ) {
+      return;
+    }
+
+    const { secret } = await (
+      await fetch(`/webhooks/${data.id}/secret`, { method: 'POST' })
+    ).json();
+    showSecret(secret);
+  }, [data]);
   const integration = useCallback(async () => {
     return (await fetch('/integrations/list')).json();
   }, []);
@@ -174,17 +256,24 @@ export const AddOrEditWebhook: FC<{
   });
   const callBack = useCallback(
     async (values: any) => {
-      await fetch('/webhooks', {
-        method: data?.id ? 'PUT' : 'POST',
-        body: JSON.stringify({
-          ...(data?.id
-            ? {
-                id: data.id,
-              }
-            : {}),
-          ...values,
-        }),
-      });
+      const response = await (
+        await fetch('/webhooks', {
+          method: data?.id ? 'PUT' : 'POST',
+          body: JSON.stringify({
+            ...(data?.id
+              ? {
+                  id: data.id,
+                }
+              : {}),
+            ...values,
+          }),
+        })
+      ).json();
+
+      if (response?.secret) {
+        showSecret(response.secret);
+      }
+
       toast.show(
         data?.id
           ? t('webhook_updated_successfully', 'Webhook updated successfully')
@@ -280,6 +369,26 @@ export const AddOrEditWebhook: FC<{
                 isMain={true}
               />
             )}
+            <div className="mt-[16px] flex flex-col gap-[10px]">
+              <div>{t('events_to_send', 'Events to send')}</div>
+              {WEBHOOK_EVENTS.map((event) => (
+                <Checkbox
+                  key={event}
+                  disableForm={true}
+                  name={event}
+                  label={event}
+                  checked={events?.includes(event)}
+                  onChange={toggleEvent(event)}
+                />
+              ))}
+            </div>
+            {!!data?.id && (
+              <div className="mt-[16px]">
+                <Button type="button" secondary={true} onClick={rotateSecret}>
+                  {t('rotate_signing_secret', 'Rotate signing secret')}
+                </Button>
+              </div>
+            )}
             <div className="flex gap-[10px]">
               <Button
                 type="submit"
@@ -310,5 +419,70 @@ export const AddOrEditWebhook: FC<{
         </div>
       </form>
     </FormProvider>
+  );
+};
+
+export const WebhookSecret: FC<{ secret: string }> = ({ secret }) => {
+  const t = useT();
+
+  return (
+    <div className="flex flex-col gap-[16px]">
+      <div className="text-customColor18">
+        {t(
+          'webhook_secret_shown_once',
+          'Copy it now - this is the only time it is shown. Postiz signs every request with it and sends the result in the X-Postiz-Signature header, together with X-Postiz-Timestamp and X-Postiz-Event.'
+        )}
+      </div>
+      <div className="bg-sixth border-fifth border rounded-[4px] p-[12px] break-all select-all">
+        {secret}
+      </div>
+    </div>
+  );
+};
+
+export const WebhookDeliveries: FC<{ id: string }> = ({ id }) => {
+  const fetch = useFetch();
+  const t = useT();
+  const load = useCallback(async () => {
+    return (await fetch(`/webhooks/${id}/deliveries`)).json();
+  }, [id]);
+  const { data, isLoading } = useSWR(`webhook-deliveries-${id}`, load);
+
+  if (isLoading) {
+    return <div>{t('loading', 'Loading')}</div>;
+  }
+
+  if (!data?.length) {
+    return (
+      <div className="text-customColor18">
+        {t('no_deliveries_yet', 'No deliveries yet')}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-[1fr,1fr,1fr,1fr,2fr] w-full gap-y-[10px]">
+      <div>{t('date', 'Date')}</div>
+      <div>{t('event', 'Event')}</div>
+      <div>{t('status', 'Status')}</div>
+      <div>{t('attempts', 'Attempts')}</div>
+      <div>{t('error', 'Error')}</div>
+      {data.map((delivery: any) => (
+        <Fragment key={delivery.id}>
+          <div>{dayjs(delivery.createdAt).format('DD/MM/YYYY HH:mm')}</div>
+          <div>{delivery.event}</div>
+          <div>
+            {delivery.success
+              ? t('success', 'Success')
+              : t('failed', 'Failed')}
+            {!!delivery.statusCode && ` (${delivery.statusCode})`}
+          </div>
+          <div>{delivery.attempts}</div>
+          <div className="break-all text-customColor18">
+            {delivery.error || '-'}
+          </div>
+        </Fragment>
+      ))}
+    </div>
   );
 };

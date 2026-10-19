@@ -11,19 +11,34 @@ import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { WordpressDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/wordpress.dto';
 import slugify from 'slugify';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
-import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import {
+  ssrfSafeFetch,
+  getSsrfSafeDispatcher,
+} from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { string } from 'yup';
+
+const WORDPRESS_USER_AGENT = 'Postiz/1.0 (+https://postiz.com)';
 
 export class WordpressProvider
   extends SocialAbstract
   implements SocialProvider
 {
   identifier = 'wordpress';
+
   name = 'WordPress';
+
   isBetweenSteps = false;
+
   editor = 'html' as const;
+
   scopes = [] as string[];
-  override maxConcurrentJob = 5; // WordPress self-hosted typically has generous limits
+
+  override maxConcurrentJob = 5;
+
   dto = WordpressDto;
+
   maxLength() {
     return 100000;
   }
@@ -57,10 +72,10 @@ export class WordpressProvider
   }
 
   async generateAuthUrl() {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     return {
       url: state,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -76,6 +91,7 @@ export class WordpressProvider
       username: '',
     };
   }
+
   override handleErrors(
     body: string
   ):
@@ -229,14 +245,26 @@ export class WordpressProvider
   }
 
   private async wpGet(token: string, path: string) {
-    const { domain, auth } = this.decodeToken(token);
-    return (
-      await this.fetch(`${domain}${path}`, {
-        headers: {
-          Authorization: `Basic ${auth}`,
-        },
-      })
-    ).json();
+    const body = JSON.parse(Buffer.from(token, 'base64').toString()) as {
+      domain: string;
+      username: string;
+      password: string;
+    };
+
+    const auth = Buffer.from(`${body.username}:${body.password}`).toString(
+      'base64'
+    );
+
+    const response = await fetch(`${body.domain}${path}`, {
+      headers: {
+        Authorization: `Basic ${auth}`,
+        'User-Agent': WORDPRESS_USER_AGENT,
+      },
+      // @ts-ignore - undici-only option; blocks SSRF to internal IPs
+      dispatcher: getSsrfSafeDispatcher(),
+    });
+
+    return response.json();
   }
 
   @Tool({
@@ -249,10 +277,12 @@ export class WordpressProvider
       '/wp-json/wp/v2/categories?per_page=100'
     );
 
-    return (Array.isArray(categories) ? categories : []).map((category) => ({
-      id: category.id,
-      name: category.name,
-    }));
+    return (Array.isArray(categories) ? categories : []).map(
+      (category: any) => ({
+        id: category.id,
+        name: category.name,
+      })
+    );
   }
 
   @Tool({
@@ -262,7 +292,7 @@ export class WordpressProvider
   async tagsList(token: string) {
     const tags = await this.wpGet(token, '/wp-json/wp/v2/tags?per_page=100');
 
-    return (Array.isArray(tags) ? tags : []).map((tag) => ({
+    return (Array.isArray(tags) ? tags : []).map((tag: any) => ({
       id: tag.id,
       name: tag.name,
     }));
@@ -343,5 +373,9 @@ export class WordpressProvider
         releaseURL: submit.link,
       },
     ];
+  }
+
+  inlineImages() {
+    return true;
   }
 }

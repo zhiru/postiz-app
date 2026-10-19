@@ -6,6 +6,7 @@ import type { FlowActivity } from '@gitroom/orchestrator/activities/flow.activit
 // Caminho "Stateless postback handler" (B): todo o contexto vem do row
 // PendingPostback no banco, workflow so orquestra as activities.
 const {
+  getFlowWithNodes,
   getPendingPostback,
   consumePendingPostback,
   checkIgFollowStatus,
@@ -27,63 +28,84 @@ export async function followGateResolveWorkflow(input: {
   pendingPostbackId: string;
 }) {
   const pb = await getPendingPostback(input.pendingPostbackId);
-  if (!pb) return;
+  if (!pb || pb.status !== 'PENDING') return;
 
-  // Status race-condition safeguard: se outro clique ja processou, no-op.
-  if (pb.status !== 'PENDING') {
-    return;
-  }
-
-  // Agora temos consent: o clique no postback abriu a janela de messaging
-  // de 24h e populou o contexto que o is_user_follow_business precisa.
-  const follows = await checkIgFollowStatus(
-    pb.integrationId,
-    pb.organizationId,
-    pb.igSenderId,
-    'comment'
-  );
-
-  await appendExecutionLog(pb.originExecutionId, {
-    nodeId: 'postback_gate',
-    nodeType: 'GATE_RESOLVE',
-    status: follows ? 'gate_passed' : 'gate_blocked',
-    timestamp: new Date().toISOString(),
-    error: `attempt=${pb.attemptCount} follows=${follows} kind=${pb.kind}`,
-  });
-
-  if (follows) {
-    await sendFinalDm(pb.id);
-    await consumePendingPostback(pb.id);
+  const currentFlow = await getFlowWithNodes(pb.flowId);
+  if (!currentFlow || currentFlow.status !== 'ACTIVE') {
     await updateExecution(pb.originExecutionId, {
-      status: 'COMPLETED' as any,
+      status: 'CANCELLED' as any,
       completedAt: new Date(),
+      error: 'Automation paused',
     });
     return;
   }
-
-  // Nao segue ainda. Limite maxAttempts previne loop infinito de "Ja segui!".
-  // Ao atingir o limite, envia desculpa e encerra a execucao.
-  const willExhaust = pb.attemptCount + 1 >= pb.maxAttempts;
-  if (willExhaust) {
-    await sendAlreadyFollowedGate(pb.id, { exhausted: true });
-    await consumePendingPostback(pb.id);
+  try {
     await updateExecution(pb.originExecutionId, {
-      status: 'COMPLETED' as any,
-      completedAt: new Date(),
-      error: 'gate_max_attempts',
+      status: 'WAITING_POSTBACK' as any,
+      error: null,
+      completedAt: null,
     });
+
+    // Agora temos consent: o clique no postback abriu a janela de messaging
+    // de 24h e populou o contexto que o is_user_follow_business precisa.
+    const follows = await checkIgFollowStatus(
+      pb.integrationId,
+      pb.organizationId,
+      pb.igSenderId,
+      'comment'
+    );
+
     await appendExecutionLog(pb.originExecutionId, {
       nodeId: 'postback_gate',
       nodeType: 'GATE_RESOLVE',
-      status: 'gate_exhausted',
+      status: follows ? 'gate_passed' : 'gate_blocked',
       timestamp: new Date().toISOString(),
-      error: `attempts=${pb.attemptCount + 1} max=${pb.maxAttempts}`,
+      error: `attempt=${pb.attemptCount} follows=${follows} kind=${pb.kind}`,
     });
-    return;
-  }
 
-  // Ainda ha tentativas: activity cria nova PendingPostback 'already_followed'
-  // e envia o gate DM com botao "Ja segui!". Execucao permanece
-  // WAITING_POSTBACK aguardando o proximo clique.
-  await sendAlreadyFollowedGate(pb.id, { exhausted: false });
+    if (follows) {
+      await sendFinalDm(pb.id);
+      await consumePendingPostback(pb.id);
+      await updateExecution(pb.originExecutionId, {
+        status: 'COMPLETED' as any,
+        error: null,
+        completedAt: new Date(),
+      });
+      return;
+    }
+
+    // Nao segue ainda. Limite maxAttempts previne loop infinito de "Ja segui!".
+    // Ao atingir o limite, envia desculpa e encerra a execucao.
+    const willExhaust = pb.attemptCount + 1 >= pb.maxAttempts;
+    if (willExhaust) {
+      await sendAlreadyFollowedGate(pb.id, { exhausted: true });
+      await consumePendingPostback(pb.id);
+      await updateExecution(pb.originExecutionId, {
+        status: 'COMPLETED' as any,
+
+        completedAt: new Date(),
+        error: 'gate_max_attempts',
+      });
+      await appendExecutionLog(pb.originExecutionId, {
+        nodeId: 'postback_gate',
+        nodeType: 'GATE_RESOLVE',
+        status: 'gate_exhausted',
+        timestamp: new Date().toISOString(),
+        error: `attempts=${pb.attemptCount + 1} max=${pb.maxAttempts}`,
+      });
+      return;
+    }
+
+    // Ainda ha tentativas: activity cria nova PendingPostback 'already_followed'
+    // e envia o gate DM com botao "Ja segui!". Execucao permanece
+    // WAITING_POSTBACK aguardando o proximo clique.
+    await sendAlreadyFollowedGate(pb.id, { exhausted: false });
+  } catch {
+    await updateExecution(pb.originExecutionId, {
+      status: 'FAILED' as any,
+      completedAt: new Date(),
+      error:
+        'Delivery failed or confirmation unavailable. Check Instagram. Automatic resend blocked.',
+    });
+  }
 }

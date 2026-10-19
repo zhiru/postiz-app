@@ -127,7 +127,7 @@ const buildActivity = () => {
   };
 };
 
-describe('PostActivity V112', () => {
+describe('PostActivity V114', () => {
   const stripeSecret = process.env.STRIPE_SECRET_KEY;
 
   beforeEach(() => {
@@ -155,7 +155,9 @@ describe('PostActivity V112', () => {
     ]);
 
     await expect(
-      activity.postSocialPending('org-1', 'integration-1', [post as any])
+      activity.postSocialPendingForkV114('org-1', 'integration-1', [
+        post as any,
+      ])
     ).resolves.toEqual([
       expect.objectContaining({
         status: 'pending',
@@ -184,7 +186,9 @@ describe('PostActivity V112', () => {
       },
     ]);
 
-    await activity.postSocialPending('org-1', 'integration-1', [post as any]);
+    await activity.postSocialPendingForkV114('org-1', 'integration-1', [
+      post as any,
+    ]);
 
     expect(provider.post).toHaveBeenCalledWith(
       'ig-1',
@@ -206,10 +210,10 @@ describe('PostActivity V112', () => {
       releaseURL: 'https://example.com/post',
     });
 
-    await activity.checkPostStatus('org-1', 'integration-1', {
+    await activity.checkPostStatusForkV114('org-1', 'integration-1', {
       containerId: 'container-1',
     });
-    await activity.finalizePost('org-1', 'integration-1', {
+    await activity.finalizePostForkV114('org-1', 'integration-1', {
       containerId: 'container-1',
     });
 
@@ -233,7 +237,11 @@ describe('PostActivity V112', () => {
     });
 
     await expect(
-      activity.refreshTokenForWorkflow('org-1', 'integration-1', 'expired')
+      activity.refreshTokenForWorkflowForkV114(
+        'org-1',
+        'integration-1',
+        'expired'
+      )
     ).resolves.toBe(true);
   });
 
@@ -250,7 +258,9 @@ describe('PostActivity V112', () => {
     ]);
 
     await expect(
-      activity.postSocialPending('org-1', 'integration-1', [post as any])
+      activity.postSocialPendingForkV114('org-1', 'integration-1', [
+        post as any,
+      ])
     ).rejects.toThrow(
       'Pending post state contains a forbidden credential field'
     );
@@ -260,7 +270,7 @@ describe('PostActivity V112', () => {
     const { activity, postService } = buildActivity();
     postService.getPostsRecursively.mockResolvedValue([]);
 
-    await expect(activity.getPostV112('org-1', 'post-1')).resolves.toBe(false);
+    await expect(activity.getPostV114('org-1', 'post-1')).resolves.toBe(false);
     expect(postService.getPostsRecursively).toHaveBeenCalledWith(
       'post-1',
       true,
@@ -280,7 +290,7 @@ describe('PostActivity V112', () => {
       },
     ] as any);
 
-    const result = await activity.getPostV112('org-1', 'post-1');
+    const result = await activity.getPostV114('org-1', 'post-1');
 
     expect((result as any).integration).toEqual({
       id: 'integration-1',
@@ -295,7 +305,7 @@ describe('PostActivity V112', () => {
     expect(result).not.toHaveProperty('childrenPost');
   });
 
-  it('respeita o canario V112 ao recuperar posts ausentes', async () => {
+  it('respeita o canario V114 ao recuperar posts ausentes', async () => {
     const previous = process.env.POST_WORKFLOW_V112_INTEGRATION_IDS;
     process.env.POST_WORKFLOW_V112_INTEGRATION_IDS = 'integration-1';
     const { activity, postService, signalWithStart } = buildActivity();
@@ -311,7 +321,7 @@ describe('PostActivity V112', () => {
     ] as any);
 
     try {
-      await activity.searchForMissingThreeHoursPosts();
+      await activity.searchForMissingThreeHoursPostsForkV114();
     } finally {
       if (previous === undefined) {
         delete process.env.POST_WORKFLOW_V112_INTEGRATION_IDS;
@@ -321,7 +331,7 @@ describe('PostActivity V112', () => {
     }
 
     expect(signalWithStart).toHaveBeenCalledWith(
-      'postWorkflowV112',
+      'postWorkflowV114',
       expect.objectContaining({ workflowId: 'post_post-1' })
     );
   });

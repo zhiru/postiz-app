@@ -6,7 +6,7 @@ import {
 } from '@langchain/core/messages';
 import { END, START, StateGraph } from '@langchain/langgraph';
 import { ChatOpenAI, DallEAPIWrapper } from '@langchain/openai';
-import { TavilySearchResults } from '@langchain/community/tools/tavily_search';
+import { TavilySearch as TavilySearchResults } from '@langchain/tavily';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import dayjs from 'dayjs';
@@ -27,6 +27,7 @@ export interface PersonaData {
   targetAudience?: string | null;
   examplePosts?: string[];
 }
+import { generationError } from '@gitroom/nestjs-libraries/openai/generation.error';
 
 const tools = !process.env.TAVILY_API_KEY
   ? []
@@ -41,7 +42,7 @@ const model = new ChatOpenAI({
 
 const dalle = new DallEAPIWrapper({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'dall-e-3',
+  model: 'chatgpt-image-latest',
 });
 
 interface WorkflowChannelsState {
@@ -368,20 +369,24 @@ export class AgentGraphService {
 
     const stylePrefix = state.persona?.imageStyle
       ? `Style: ${state.persona.imageStyle}. `
-      : '';
-    const newContent = await Promise.all(
-      (state.content || []).map(async (p) => {
-        const image = await dalle.invoke(`${stylePrefix}${p.prompt!}`);
-        return {
-          ...p,
-          image,
-        };
-      })
-    );
+      : "";
+    try {
+      const newContent = await Promise.all(
+        (state.content || []).map(async (p) => {
+          const image = await dalle.invoke(`${stylePrefix}${p.prompt!}`);
+          return {
+            ...p,
+            image,
+          };
+        })
+      );
 
-    return {
-      content: newContent,
-    };
+      return {
+        content: newContent,
+      };
+    } catch (err) {
+      throw generationError(err);
+    }
   }
 
   async uploadPictures(state: WorkflowChannelsState) {
@@ -394,7 +399,9 @@ export class AgentGraphService {
             state.orgId,
             name,
             upload,
-            undefined,
+            p.image.startsWith('data:')
+              ? undefined
+              : new URL(p.image).pathname.split('/').pop() || undefined,
             state.profileId
           );
 

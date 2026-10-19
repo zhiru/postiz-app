@@ -5,6 +5,7 @@ import {
   PostDetails,
   PostResponse,
   SocialProvider,
+  ReportMetricsMap,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { LinkedinProvider } from '@gitroom/nestjs-libraries/integrations/social/linkedin.provider';
@@ -14,6 +15,237 @@ import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+
+export interface Root {
+  pageStatisticsByIndustryV2: any[];
+  pageStatisticsBySeniority: any[];
+  organization: string;
+  pageStatisticsByGeoCountry: any[];
+  pageStatisticsByTargetedContent: any[];
+  totalPageStatistics: TotalPageStatistics;
+  pageStatisticsByStaffCountRange: any[];
+  pageStatisticsByFunction: any[];
+  pageStatisticsByGeo: any[];
+  followerGains: { organicFollowerGain: number; paidFollowerGain: number };
+  timeRange: TimeRange;
+  totalShareStatistics: {
+    uniqueImpressionsCount: number;
+    shareCount: number;
+    engagement: number;
+    clickCount: number;
+    likeCount: number;
+    impressionCount: number;
+    commentCount: number;
+  };
+}
+
+export interface TotalPageStatistics {
+  clicks: Clicks;
+  views: Views;
+}
+
+export interface Clicks {
+  mobileCustomButtonClickCounts: any[];
+  desktopCustomButtonClickCounts: any[];
+}
+
+export interface Views {
+  mobileProductsPageViews: MobileProductsPageViews;
+  allDesktopPageViews: AllDesktopPageViews;
+  insightsPageViews: InsightsPageViews;
+  mobileAboutPageViews: MobileAboutPageViews;
+  allMobilePageViews: AllMobilePageViews;
+  productsPageViews: ProductsPageViews;
+  desktopProductsPageViews: DesktopProductsPageViews;
+  jobsPageViews: JobsPageViews;
+  peoplePageViews: PeoplePageViews;
+  overviewPageViews: OverviewPageViews;
+  mobileOverviewPageViews: MobileOverviewPageViews;
+  lifeAtPageViews: LifeAtPageViews;
+  desktopOverviewPageViews: DesktopOverviewPageViews;
+  mobileCareersPageViews: MobileCareersPageViews;
+  allPageViews: AllPageViews;
+  careersPageViews: CareersPageViews;
+  mobileJobsPageViews: MobileJobsPageViews;
+  mobileLifeAtPageViews: MobileLifeAtPageViews;
+  desktopJobsPageViews: DesktopJobsPageViews;
+  desktopPeoplePageViews: DesktopPeoplePageViews;
+  aboutPageViews: AboutPageViews;
+  desktopAboutPageViews: DesktopAboutPageViews;
+  mobilePeoplePageViews: MobilePeoplePageViews;
+  desktopCareersPageViews: DesktopCareersPageViews;
+  desktopInsightsPageViews: DesktopInsightsPageViews;
+  desktopLifeAtPageViews: DesktopLifeAtPageViews;
+  mobileInsightsPageViews: MobileInsightsPageViews;
+}
+
+export interface MobileProductsPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface AllDesktopPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface InsightsPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface MobileAboutPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface AllMobilePageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface ProductsPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface DesktopProductsPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface JobsPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface PeoplePageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface OverviewPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface MobileOverviewPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface LifeAtPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface DesktopOverviewPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface MobileCareersPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface AllPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface CareersPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface MobileJobsPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface MobileLifeAtPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface DesktopJobsPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface DesktopPeoplePageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface AboutPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface DesktopAboutPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface MobilePeoplePageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface DesktopCareersPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface DesktopInsightsPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface DesktopLifeAtPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface MobileInsightsPageViews {
+  pageViews: number;
+  uniquePageViews: number;
+}
+
+export interface TimeRange {
+  start: number;
+  end: number;
+}
+
+export interface PostShareStatElement {
+  organizationalEntity: string;
+  share: string;
+  totalShareStatistics: {
+    uniqueImpressionsCount: number;
+    shareCount: number;
+    engagement: number;
+    clickCount: number;
+    likeCount: number;
+    impressionCount: number;
+    commentCount: number;
+  };
+  timeRange?: TimeRange;
+}
+
+export interface SocialActionsResponse {
+  likesSummary?: {
+    totalLikes: number;
+    likedByCurrentUser: boolean;
+  };
+  commentsSummary?: {
+    totalFirstLevelComments: number;
+    commentsState: string;
+  };
+}
 
 @Rules(
   'LinkedIn can have maximum one attachment when selecting video, when choosing a carousel on LinkedIn minimum amount of attachment must be two, and only pictures, if uploading a video, LinkedIn can have only one attachment'
@@ -23,10 +255,15 @@ export class LinkedinPageProvider
   implements SocialProvider
 {
   override identifier = 'linkedin-page';
+
   override name = 'LinkedIn Page';
+
   override isBetweenSteps = true;
+
   override refreshWait = true;
-  override maxConcurrentJob = 2; // LinkedIn Page has professional posting limits
+
+  override maxConcurrentJob = 2;
+
   override scopes = [
     'openid',
     'profile',
@@ -123,7 +360,7 @@ export class LinkedinPageProvider
   }
 
   override async generateAuthUrl(clientInformation?: ClientInformation) {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     const codeVerifier = makeId(30);
     const clientId =
       clientInformation?.client_id || process.env.LINKEDIN_CLIENT_ID;
@@ -154,7 +391,6 @@ export class LinkedinPageProvider
     return (elements || [])
       .filter(
         (e: any) =>
-          e.organizationalTarget &&
           e['organizationalTarget~'] &&
           ['ADMINISTRATOR', 'CONTENT_ADMINISTRATOR'].includes(e.role)
       )
@@ -703,234 +939,148 @@ export class LinkedinPageProvider
 
     return false;
   }
-}
 
-export interface Root {
-  pageStatisticsByIndustryV2: any[];
-  pageStatisticsBySeniority: any[];
-  organization: string;
-  pageStatisticsByGeoCountry: any[];
-  pageStatisticsByTargetedContent: any[];
-  totalPageStatistics: TotalPageStatistics;
-  pageStatisticsByStaffCountRange: any[];
-  pageStatisticsByFunction: any[];
-  pageStatisticsByGeo: any[];
-  followerGains: { organicFollowerGain: number; paidFollowerGain: number };
-  timeRange: TimeRange;
-  totalShareStatistics: {
-    uniqueImpressionsCount: number;
-    shareCount: number;
-    engagement: number;
-    clickCount: number;
-    likeCount: number;
-    impressionCount: number;
-    commentCount: number;
+  reportMetrics: ReportMetricsMap = {
+    followersGained: ['Organic Followers', 'Paid Followers'],
+    reach: ['Page Views'],
+    engagement: ['Clicks', 'Shares', 'Comments'],
   };
-}
 
-export interface TotalPageStatistics {
-  clicks: Clicks;
-  views: Views;
-}
+  override async postPending(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    return super.postPending(
+      id,
+      accessToken,
+      postDetails,
+      integration,
+      'company'
+    );
+  }
 
-export interface Clicks {
-  mobileCustomButtonClickCounts: any[];
-  desktopCustomButtonClickCounts: any[];
-}
+  private async pageStatistics(
+    id: string,
+    accessToken: string,
+    startDate: number,
+    endDate: number
+  ): Promise<AnalyticsData[]> {
+    const { elements }: { elements: Root[]; paging: any } = await (
+      await fetch(
+        `https://api.linkedin.com/v2/organizationPageStatistics?q=organization&organization=${encodeURIComponent(
+          `urn:li:organization:${id}`
+        )}&timeIntervals=(timeRange:(start:${startDate},end:${endDate}),timeGranularityType:DAY)`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Linkedin-Version': '202601',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+        }
+      )
+    ).json();
 
-export interface Views {
-  mobileProductsPageViews: MobileProductsPageViews;
-  allDesktopPageViews: AllDesktopPageViews;
-  insightsPageViews: InsightsPageViews;
-  mobileAboutPageViews: MobileAboutPageViews;
-  allMobilePageViews: AllMobilePageViews;
-  productsPageViews: ProductsPageViews;
-  desktopProductsPageViews: DesktopProductsPageViews;
-  jobsPageViews: JobsPageViews;
-  peoplePageViews: PeoplePageViews;
-  overviewPageViews: OverviewPageViews;
-  mobileOverviewPageViews: MobileOverviewPageViews;
-  lifeAtPageViews: LifeAtPageViews;
-  desktopOverviewPageViews: DesktopOverviewPageViews;
-  mobileCareersPageViews: MobileCareersPageViews;
-  allPageViews: AllPageViews;
-  careersPageViews: CareersPageViews;
-  mobileJobsPageViews: MobileJobsPageViews;
-  mobileLifeAtPageViews: MobileLifeAtPageViews;
-  desktopJobsPageViews: DesktopJobsPageViews;
-  desktopPeoplePageViews: DesktopPeoplePageViews;
-  aboutPageViews: AboutPageViews;
-  desktopAboutPageViews: DesktopAboutPageViews;
-  mobilePeoplePageViews: MobilePeoplePageViews;
-  desktopCareersPageViews: DesktopCareersPageViews;
-  desktopInsightsPageViews: DesktopInsightsPageViews;
-  desktopLifeAtPageViews: DesktopLifeAtPageViews;
-  mobileInsightsPageViews: MobileInsightsPageViews;
-}
+    const { elements: elements2 }: { elements: Root[]; paging: any } = await (
+      await fetch(
+        `https://api.linkedin.com/v2/organizationalEntityFollowerStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(
+          `urn:li:organization:${id}`
+        )}&timeIntervals=(timeRange:(start:${startDate},end:${endDate}),timeGranularityType:DAY)`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Linkedin-Version': '202601',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+        }
+      )
+    ).json();
 
-export interface MobileProductsPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
+    const { elements: elements3 }: { elements: Root[]; paging: any } = await (
+      await fetch(
+        `https://api.linkedin.com/v2/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(
+          `urn:li:organization:${id}`
+        )}&timeIntervals=(timeRange:(start:${startDate},end:${endDate}),timeGranularityType:DAY)`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Linkedin-Version': '202601',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+        }
+      )
+    ).json();
 
-export interface AllDesktopPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
+    const analytics = [...elements2, ...elements, ...elements3].reduce(
+      (all, current) => {
+        if (
+          typeof current?.totalPageStatistics?.views?.allPageViews
+            ?.pageViews !== 'undefined'
+        ) {
+          all['Page Views'].push({
+            total: current.totalPageStatistics.views.allPageViews.pageViews,
+            date: dayjs(current.timeRange.start).format('YYYY-MM-DD'),
+          });
+        }
 
-export interface InsightsPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
+        if (
+          typeof current?.followerGains?.organicFollowerGain !== 'undefined'
+        ) {
+          all['Organic Followers'].push({
+            total: current?.followerGains?.organicFollowerGain,
+            date: dayjs(current.timeRange.start).format('YYYY-MM-DD'),
+          });
+        }
 
-export interface MobileAboutPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
+        if (typeof current?.followerGains?.paidFollowerGain !== 'undefined') {
+          all['Paid Followers'].push({
+            total: current?.followerGains?.paidFollowerGain,
+            date: dayjs(current.timeRange.start).format('YYYY-MM-DD'),
+          });
+        }
 
-export interface AllMobilePageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
+        if (typeof current?.totalShareStatistics !== 'undefined') {
+          all['Clicks'].push({
+            total: current?.totalShareStatistics.clickCount,
+            date: dayjs(current.timeRange.start).format('YYYY-MM-DD'),
+          });
 
-export interface ProductsPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
+          all['Shares'].push({
+            total: current?.totalShareStatistics.shareCount,
+            date: dayjs(current.timeRange.start).format('YYYY-MM-DD'),
+          });
 
-export interface DesktopProductsPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
+          all['Engagement'].push({
+            total: current?.totalShareStatistics.engagement,
+            date: dayjs(current.timeRange.start).format('YYYY-MM-DD'),
+          });
 
-export interface JobsPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
+          all['Comments'].push({
+            total: current?.totalShareStatistics.commentCount,
+            date: dayjs(current.timeRange.start).format('YYYY-MM-DD'),
+          });
+        }
 
-export interface PeoplePageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
+        return all;
+      },
+      {
+        'Page Views': [] as any[],
+        Clicks: [] as any[],
+        Shares: [] as any[],
+        Engagement: [] as any[],
+        Comments: [] as any[],
+        'Organic Followers': [] as any[],
+        'Paid Followers': [] as any[],
+      }
+    );
 
-export interface OverviewPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface MobileOverviewPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface LifeAtPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface DesktopOverviewPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface MobileCareersPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface AllPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface CareersPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface MobileJobsPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface MobileLifeAtPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface DesktopJobsPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface DesktopPeoplePageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface AboutPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface DesktopAboutPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface MobilePeoplePageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface DesktopCareersPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface DesktopInsightsPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface DesktopLifeAtPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface MobileInsightsPageViews {
-  pageViews: number;
-  uniquePageViews: number;
-}
-
-export interface TimeRange {
-  start: number;
-  end: number;
-}
-
-// Post analytics interfaces
-export interface PostShareStatElement {
-  organizationalEntity: string;
-  share: string;
-  totalShareStatistics: {
-    uniqueImpressionsCount: number;
-    shareCount: number;
-    engagement: number;
-    clickCount: number;
-    likeCount: number;
-    impressionCount: number;
-    commentCount: number;
-  };
-  timeRange?: TimeRange;
-}
-
-export interface SocialActionsResponse {
-  likesSummary?: {
-    totalLikes: number;
-    likedByCurrentUser: boolean;
-  };
-  commentsSummary?: {
-    totalFirstLevelComments: number;
-    commentsState: string;
-  };
+    return Object.keys(analytics).map((key) => ({
+      label: key,
+      data: analytics[
+        key as 'Page Views' | 'Organic Followers' | 'Paid Followers'
+      ],
+      percentageChange: 0,
+    }));
+  }
 }

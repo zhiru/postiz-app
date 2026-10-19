@@ -1,10 +1,13 @@
 // context.ts
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { SelfHostedInstance } from '@gitroom/nestjs-libraries/chat/mcp.relay.service';
 
 type Ctx = {
   requestId: string;
   auth: any; // replace with your org type if you have it, e.g. Organization
   profileId?: string;
+  // a self-hosted connection: where its tool calls are relayed to
+  relay?: SelfHostedInstance & { id: string };
 };
 
 const als = new AsyncLocalStorage<Ctx>();
@@ -27,4 +30,8 @@ export function getRequestId(): string | undefined {
 
 export function getProfileId(): string | undefined {
   return als.getStore()?.profileId;
+}
+
+export function getRelay(): Ctx['relay'] {
+  return als.getStore()?.relay;
 }

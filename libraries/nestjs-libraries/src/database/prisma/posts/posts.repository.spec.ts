@@ -16,7 +16,8 @@ describe('PostsRepository.getErrorPosts', () => {
       {} as any,
       {} as any,
       {} as any,
-      {} as any
+      {} as any,
+      {} as any // transaction
     );
   });
 
@@ -80,7 +81,8 @@ describe('PostsRepository.changeState', () => {
       {} as any,
       {} as any,
       {} as any,
-      {} as any
+      {} as any,
+      {} as any // transaction
     );
   });
 
@@ -104,13 +106,27 @@ describe('PostsRepository - ciclo de republicacao apos erro', () => {
   beforeEach(() => {
     prismaMock = createPrismaRepositoryMock('post');
     prismaMock.model.post.update.mockResolvedValue({ id: 'p1' } as any);
+    const tx = {
+      post: {
+        ...prismaMock.model.post,
+        findFirstOrThrow: jest.fn().mockResolvedValue({
+          id: 'p1',
+          integrationId: 'channel',
+          intervalInDays: null,
+        }),
+      },
+    };
+    prismaMock.model.post.findUnique.mockResolvedValue(null);
     repo = new PostsRepository(
       prismaMock as any,
       {} as any,
       {} as any,
       {} as any,
       {} as any,
-      {} as any
+      {} as any,
+      {
+        model: { $transaction: jest.fn().mockImplementation((run) => run(tx)) },
+      } as any // transaction
     );
   });
 
@@ -123,6 +139,7 @@ describe('PostsRepository - ciclo de republicacao apos erro', () => {
         state: 'PUBLISHED',
         releaseURL: 'https://example.com/post/1',
         releaseId: 'remote-1',
+        externalId: 'remote-1',
         error: null,
       },
     });
@@ -176,7 +193,8 @@ describe('PostsRepository.searchForMissingThreeHoursPosts', () => {
       {} as any,
       {} as any,
       {} as any,
-      {} as any
+      {} as any,
+      {} as any // transaction
     );
 
     await repo.searchForMissingThreeHoursPosts();
@@ -198,7 +216,8 @@ describe('PostsRepository.getPost for publishing', () => {
       {} as any,
       {} as any,
       {} as any,
-      {} as any
+      {} as any,
+      {} as any // transaction
     );
 
     await repo.getPost('post-1', true, 'org-1', true);

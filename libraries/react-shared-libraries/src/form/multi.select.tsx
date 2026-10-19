@@ -10,6 +10,10 @@ export interface MultiSelectOption {
   value: string | number;
 }
 
+// Controlled multi-select primitive: renders a scrollable checkbox list and
+// reports the full selected array via `onChange`. Selection state is owned by
+// the caller (pair it with react-hook-form's `setValue`), keeping this purely
+// presentational so any provider/form can reuse it.
 export const MultiSelect: FC<{
   label: string;
   name?: string;
@@ -38,8 +42,8 @@ export const MultiSelect: FC<{
   const err = useMemo(() => {
     if (error) return error;
     if (!form || !name || !form.formState.errors[name]) return;
-    return form.formState.errors[name]?.message as string;
-  }, [form?.formState.errors, error, name]);
+    return form?.formState?.errors?.[name]?.message as string;
+  }, [form?.formState?.errors?.[name!]?.message, error, name]);
 
   const isSelected = (optionValue: string | number) =>
     value.some((current) => String(current) === String(optionValue));

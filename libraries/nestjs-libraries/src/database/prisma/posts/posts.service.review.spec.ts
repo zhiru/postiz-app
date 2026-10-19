@@ -1,8 +1,22 @@
-// Mocks topo-de-modulo (mesma razao dos outros specs de PostsService).
 jest.mock(
-  '@gitroom/nestjs-libraries/integrations/integration.manager',
-  () => ({ IntegrationManager: class IntegrationManagerMock {} })
+  '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service',
+  () => ({ IntegrationService: class IntegrationServiceMock {} })
 );
+jest.mock('@gitroom/nestjs-libraries/ai/ai-text.service', () => ({
+  AiTextService: class AiTextServiceMock {},
+}));
+jest.mock('@gitroom/nestjs-libraries/openai/openai.service', () => ({
+  OpenaiService: class OpenaiServiceMock {},
+}));
+
+jest.mock('@gitroom/nestjs-libraries/upload/upload.factory', () => ({
+  UploadFactory: { createStorage: jest.fn().mockReturnValue({}) },
+}));
+
+// Mocks topo-de-modulo (mesma razao dos outros specs de PostsService).
+jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
+  IntegrationManager: class IntegrationManagerMock {},
+}));
 jest.mock(
   '@gitroom/nestjs-libraries/integrations/refresh.integration.service',
   () => ({ RefreshIntegrationService: class RefreshIntegrationServiceMock {} })
@@ -11,10 +25,9 @@ jest.mock(
   '@gitroom/nestjs-libraries/database/prisma/media/media.service',
   () => ({ MediaService: class MediaServiceMock {} })
 );
-jest.mock(
-  '@gitroom/nestjs-libraries/short-linking/short.link.service',
-  () => ({ ShortLinkService: class ShortLinkServiceMock {} })
-);
+jest.mock('@gitroom/nestjs-libraries/short-linking/short.link.service', () => ({
+  ShortLinkService: class ShortLinkServiceMock {},
+}));
 
 import { PostsService } from './posts.service';
 import { createMock } from '@gitroom/nestjs-libraries/test';
@@ -30,6 +43,7 @@ const buildService = (repo: ReturnType<typeof createMock<PostsRepository>>) =>
     null as any,
     null as any,
     null as any,
+    {} as any, // webhooksService
     null as any,
     {} as any,
     {} as any
@@ -134,7 +148,11 @@ describe('PostsService - revisao (aprovar/comentar por perfil)', () => {
       } as any);
       repo.getComments.mockResolvedValue([{ id: 'c-1' }] as any);
 
-      const res = await service.getReviewComments('org-1', 'post-1', 'prof-dell');
+      const res = await service.getReviewComments(
+        'org-1',
+        'post-1',
+        'prof-dell'
+      );
 
       expect(res).toEqual([{ id: 'c-1' }]);
       expect(repo.getComments).toHaveBeenCalledWith('post-1', 'org-1');

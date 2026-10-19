@@ -119,7 +119,7 @@ Para atualizar para uma versão específica, edite o `docker-compose.yml` e alte
 
 O Robo MultiPost suporta multi-tenancy em 3 niveis: **Usuario > Organizacao > Perfil**. Isso permite desde uso individual ate agencias gerenciando multiplos clientes com equipes e permissoes isoladas.
 
-Para o guia completo com exemplos de casos de uso, consulte a [documentacao de Multi-Tenancy](docs/multi-tenancy.md).
+Para o guia completo com exemplos de casos de uso, consulte a [documentacao de Multi-Tenancy](docs/architecture/multi-tenancy.md).
 
 ## Automacoes Instagram (estilo ManyChat)
 
@@ -147,7 +147,7 @@ O Robô MultiPost possui API pública disponível em `/api/`. Você pode usar es
 
 ## Desenvolvimento local
 
-Para instruções detalhadas de setup local (desenvolvimento e produção), consulte o arquivo [validacao-dev.md](validacao-dev.md) na raiz do repositório.
+Para instruções detalhadas de setup local (desenvolvimento e produção), consulte o arquivo [validacao-dev.md](docs/development/validacao-dev.md) na raiz do repositório.
 
 ## Créditos
 
@@ -158,3 +158,8 @@ O código original foi modificado para atender as necessidades da comunidade Aut
 ## Licença
 
 [AGPL-3.0](LICENSE)
+
+
+## Integração Aireset
+
+Esta versão incorpora as melhorias do fork zhiru/postiz-app, incluindo sincronização do histórico do Instagram, relatórios e comentários. Consulte `docs/robo-multipost-integration.md` antes de migrar uma instância existente.

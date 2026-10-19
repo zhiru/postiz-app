@@ -2,16 +2,20 @@ import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org
 import { HttpException, Injectable } from '@nestjs/common';
 import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
 import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
+import { IntegrationRepository } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.repository';
 import { AddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/add.team.member.dto';
+import { AdminAddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/admin.add.team.member.dto';
+import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import dayjs from 'dayjs';
+import { CreateOrganizationDto } from '@gitroom/nestjs-libraries/dtos/organizations/create.organization.dto';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import {
   emailT,
   normalizeLang,
   resolveOrgLang,
 } from '@gitroom/nestjs-libraries/emails/i18n/email.i18n';
-import { Organization, ProfileRole, ShortLinkPreference } from '@prisma/client';
+import { Organization, ProfileRole, Role, User, ShortLinkPreference } from '@prisma/client';
 import Zernio from '@zernio/node';
 import { AutopostService } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.service';
 import { ProfileService } from '@gitroom/nestjs-libraries/database/prisma/profiles/profile.service';
@@ -21,7 +25,8 @@ export class OrganizationService {
   constructor(
     private _organizationRepository: OrganizationRepository,
     private _notificationsService: NotificationService,
-    private _profileService: ProfileService
+    private _profileService: ProfileService,
+    private _integrationRepository: IntegrationRepository
   ) {}
   async createOrgAndUser(
     body: Omit<CreateOrgUserDto, 'providerToken'> & { providerId?: string },
@@ -49,20 +54,6 @@ export class OrganizationService {
       this._notificationsService.hasEmailProvider(),
       ip,
       userAgent
-    );
-  }
-
-  // Fallback: cria workspace pessoal para um usuario ja existente quando a
-  // entrada no workspace do convite falha (evita conta orfa sem org).
-  async createOrgForUser(
-    userId: string,
-    company: string,
-    language?: string | null
-  ) {
-    return this._organizationRepository.createOrgForUser(
-      userId,
-      company,
-      language ? normalizeLang(language) : null
     );
   }
 
@@ -120,8 +111,25 @@ export class OrganizationService {
     return this._organizationRepository.getOrgById(id);
   }
 
+  getOrgByIdWithSubscription(id: string) {
+    return this._organizationRepository.getOrgByIdWithSubscription(id);
+  }
+
+  getAccountOverview(orgId: string) {
+    return this._organizationRepository.getAccountOverview(orgId);
+  }
+
   getOrgByApiKey(api: string) {
     return this._organizationRepository.getOrgByApiKey(api);
+  }
+
+  async canUseSuperAdminApi(orgId: string) {
+    const [superAdmin, privilegedOther] = await Promise.all([
+      this._organizationRepository.getSuperAdminUser(orgId),
+      this._organizationRepository.getPrivilegedNonSuperAdminUser(orgId),
+    ]);
+
+    return !!superAdmin && !privilegedOther;
   }
 
   getUserOrg(id: string) {
@@ -146,6 +154,10 @@ export class OrganizationService {
 
   async setStreak(organizationId: string, type: 'start' | 'end') {
     return this._organizationRepository.setStreak(organizationId, type);
+  }
+
+  async getLastPublishDate(organizationId: string) {
+    return this._organizationRepository.getLastPublishDate(organizationId);
   }
 
   getOrgByCustomerId(customerId: string) {
@@ -210,6 +222,62 @@ export class OrganizationService {
       }
     }
     return { url };
+  }
+
+  async addTeamMemberByEmail(org: Organization, body: AdminAddTeamMemberDto) {
+    const tier =
+      // @ts-ignore
+      org?.subscription?.subscriptionTier ||
+      (!process.env.STRIPE_PUBLISHABLE_KEY ? 'ULTIMATE' : 'FREE');
+
+    if (!pricing[tier].team_members) {
+      throw new HttpException(
+        'The organization plan does not include team members',
+        400
+      );
+    }
+
+    const users = await this._organizationRepository.getUsersByEmail(
+      body.email
+    );
+    if (!users.length) {
+      throw new HttpException('No Postiz account found for this email', 400);
+    }
+
+    if (users.length > 1) {
+      throw new HttpException(
+        'Multiple accounts exist for this email (different login providers)',
+        400
+      );
+    }
+
+    const [user] = users;
+
+    const userOrgs = await this._organizationRepository.getOrgsByUserId(
+      user.id
+    );
+    if (userOrgs.some((current) => current.id === org.id)) {
+      throw new HttpException(
+        'User is already a member of this organization',
+        400
+      );
+    }
+
+    const added = await this._organizationRepository.addUserToOrg(
+      user.id,
+      makeId(5),
+      org.id,
+      body.role as 'USER' | 'ADMIN'
+    );
+
+    if (!added) {
+      throw new HttpException(
+        'Could not add the user to the organization',
+        400
+      );
+    }
+
+    return { added: true };
   }
 
   async deleteTeamMember(org: Organization, userId: string) {
@@ -350,5 +418,109 @@ export class OrganizationService {
       orgId,
       enabled
     );
+  }
+
+  async createOrgForUser(userId: string, body: CreateOrganizationDto | string, language?: string | null) {
+    if (typeof body === 'string') {
+      return this._organizationRepository.createOrgForUser(userId, body, language ? normalizeLang(language) : null);
+    }
+    const maxOrgs = Number(process.env.MAX_ORGS_PER_USER) || 10;
+    const enabledOrgs = (
+      await this._organizationRepository.getOrgsByUserId(userId)
+    ).filter((item) => !item.users[0].disabled);
+
+    if (enabledOrgs.length >= maxOrgs) {
+      throw new HttpException(
+        `You can create up to ${maxOrgs} organizations`,
+        400
+      );
+    }
+
+    return this._organizationRepository.createOrgForUser(
+      userId,
+      body.name?.trim() || 'My Organization'
+    );
+  }
+
+  async renameOwnedOrganization(userId: string, orgId: string, name: string) {
+    const org = await this.getEnabledUserOrg(userId, orgId);
+    if (org.users[0].role !== Role.SUPERADMIN) {
+      throw new HttpException(
+        'You do not have permission to rename this organization',
+        400
+      );
+    }
+
+    return this._organizationRepository.updateOrganizationName(orgId, name);
+  }
+
+  async getOrgToDelete(userId: string, orgId: string) {
+    const orgs = await this._organizationRepository.getOrgsByUserId(userId);
+    const org = await this.getEnabledUserOrg(userId, orgId);
+    if (org.users[0].role !== Role.SUPERADMIN) {
+      throw new HttpException(
+        'You do not have permission to delete this organization',
+        400
+      );
+    }
+
+    if (orgs.filter((item) => !item.users[0].disabled).length === 1) {
+      throw new HttpException(
+        'You cannot delete your only organization. Delete your account instead',
+        400
+      );
+    }
+
+    const team = await this._organizationRepository.getTeam(org.id);
+    if (
+      team?.users?.some(
+        (member) => member.user.id !== userId && !member.disabled
+      )
+    ) {
+      throw new HttpException(
+        'Please remove your team members before deleting this organization',
+        400
+      );
+    }
+
+    return org;
+  }
+
+  async deleteOwnedOrganization(orgId: string, userId: string) {
+    // the last-organization guard runs first, so a refused delete keeps the channels
+    const deleted =
+      await this._organizationRepository.deleteOrganizationIfNotLast(
+        orgId,
+        userId
+      );
+
+    if (!deleted) {
+      throw new HttpException(
+        'Could not delete the organization, please refresh the page and try again',
+        400
+      );
+    }
+
+    await this._integrationRepository.deleteIntegrationsForAccount(orgId);
+    return deleted;
+  }
+
+  private async getEnabledUserOrg(userId: string, orgId: string) {
+    const org = (
+      await this._organizationRepository.getOrgsByUserId(userId)
+    ).find((item) => item.id === orgId && !item.users[0].disabled);
+    if (!org) {
+      throw new HttpException('Organization not found', 400);
+    }
+
+    return org;
+  }
+
+  getOrganizationName(orgId: string) {
+    return this._organizationRepository.getOrganizationName(orgId);
+  }
+
+  updateOrganizationName(orgId: string, name: string) {
+    return this._organizationRepository.updateOrganizationName(orgId, name);
   }
 }

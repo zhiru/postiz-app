@@ -7,24 +7,106 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
 });
 
+const PicturePrompt = z.object({ prompt: z.string() });
+
 const VoicePrompt = z.object({
   voice: z.string(),
 });
 
-/**
- * Camada legada do OpenAI.
- *
- * A maioria dos metodos foi migrada para `AiTextService` e `AiImageService`
- * (Fase 1 — Blocos B e C), que respeitam a configuracao por workspace.
- *
- * Os metodos abaixo sao mantidos APENAS para features dormentes
- * (HeyGen e ImageSlides) que ainda nao tem upstream alternativo. Quando
- * essas features forem revisadas (Bloco F), este arquivo deve ser
- * removido completamente.
- */
+const ClipsPrompt = z.object({
+  clips: z.array(
+    z.object({
+      from: z.number().describe('Number of the first line of the clip'),
+      to: z.number().describe('Number of the last line of the clip'),
+      title: z.string().describe('Short title of the clip'),
+      content: z
+        .string()
+        .describe('Social media post to publish the clip with, no hashtags'),
+    })
+  ),
+});
+
 @Injectable()
 export class OpenaiService {
-  /** Usado por HeygenProvider para gerar texto narrado em estilo conversacional. */
+  // The model answers with line numbers and not times, so a clip can only
+  // start and end where the transcript really has a boundary
+  async pickClips(
+    title: string,
+    language: string,
+    segments: { start: number; end: number; text: string }[],
+    maxClips: number
+  ) {
+    const { clips } = (
+      await openai.chat.completions.parse(
+        {
+          model: 'gpt-4.1',
+          messages: [
+            {
+              role: 'system',
+              content: `You are an assistant that takes the transcript of a video and picks the parts that will work best as short vertical clips for social media.
+Every line of the transcript is "number [start seconds - end seconds] text".
+Pick up to ${maxClips} clips, best first. A clip is a range of consecutive lines that starts with a hook, makes one complete point and is understandable without the rest of the video.
+The length of a clip is the end of its last line minus the start of its first line: it must be between 20 and 90 seconds, never longer, so check the numbers before answering.
+Clips must not overlap. Write the title and the post in this language, whatever the language of these instructions: ${language}.`,
+            },
+            {
+              role: 'user',
+              content: `title: ${title}\n\n${segments
+                .map(
+                  (p, index) =>
+                    `${index} [${p.start.toFixed(1)} - ${p.end.toFixed(1)}] ${
+                      p.text
+                    }`
+                )
+                .join('\n')}`,
+            },
+          ],
+          response_format: zodResponseFormat(ClipsPrompt, 'clipsPrompt'),
+        },
+        // shorter than the activity: an attempt that was given up on must not
+        // still be running, and storing clips, when its retry gets there
+        { timeout: 8 * 60 * 1000, maxRetries: 0 }
+      )
+    ).choices[0].message.parsed || { clips: [] };
+
+    return clips;
+  }
+
+  async generateImage(prompt: string, isVertical = false) {
+    // gpt-image models always return base64 (b64_json) and do not accept the
+    // `response_format` parameter, unlike the deprecated dall-e-3.
+    const generate = (
+      await openai.images.generate({
+        prompt,
+        model: 'chatgpt-image-latest',
+        size: isVertical ? '1024x1536' : '1024x1024',
+      })
+    ).data[0];
+
+    return generate.b64_json;
+  }
+
+  async generatePromptForPicture(prompt: string) {
+    return (
+      (
+        await openai.chat.completions.parse({
+          model: 'gpt-4.1',
+          messages: [
+            {
+              role: 'system',
+              content: `You are an assistant that take a description and style and generate a prompt that will be used later to generate images, make it a very long and descriptive explanation, and write a lot of things for the renderer like, if it${"'"}s realistic describe the camera`,
+            },
+            {
+              role: 'user',
+              content: `prompt: ${prompt}`,
+            },
+          ],
+          response_format: zodResponseFormat(PicturePrompt, 'picturePrompt'),
+        })
+      ).choices[0].message.parsed?.prompt || ''
+    );
+  }
+
   async generateVoiceFromText(prompt: string) {
     return (
       (

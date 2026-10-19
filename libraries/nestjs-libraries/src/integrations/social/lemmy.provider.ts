@@ -5,24 +5,40 @@ import {
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  SocialAbstract,
+  BadBody,
+  RefreshToken,
+  ValidityMedia,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import dayjs from 'dayjs';
 import { Integration } from '@prisma/client';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { LemmySettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/lemmy.dto';
-import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import {
+  ssrfSafeFetch,
+  getSsrfSafeDispatcher,
+} from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 
 export class LemmyProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 3; // Lemmy instances typically have moderate limits
+  override maxConcurrentJob = 3;
+
   identifier = 'lemmy';
+
   name = 'Lemmy';
+
   isBetweenSteps = false;
+
   scopes = [] as string[];
+
   editor = 'normal' as const;
+
   maxLength() {
     return 10000;
   }
+
   dto = LemmySettingsDto;
 
   async customFields() {
@@ -62,10 +78,10 @@ export class LemmyProvider extends SocialAbstract implements SocialProvider {
   }
 
   async generateAuthUrl() {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     return {
       url: state,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -159,18 +175,10 @@ export class LemmyProvider extends SocialAbstract implements SocialProvider {
     const valueArray: PostResponse[] = [];
 
     for (const lemmy of firstPost.settings.subreddit) {
-      console.log({
-        community_id: +lemmy.value.id,
-        name: lemmy.value.title,
-        body: firstPost.message,
-        ...(lemmy.value.url ? { url: lemmy.value.url } : {}),
-        ...(firstPost.media?.length
-          ? { custom_thumbnail: firstPost.media[0].path }
-          : {}),
-        nsfw: false,
-      });
       const { post_view } = await (
-        await ssrfSafeFetch(service + '/api/v3/post', {
+        await this.fetch(service + '/api/v3/post', {
+          // @ts-ignore - undici-only option; blocks SSRF to internal IPs
+          dispatcher: getSsrfSafeDispatcher(),
           body: JSON.stringify({
             community_id: +lemmy.value.id,
             name: lemmy.value.title,
@@ -231,7 +239,9 @@ export class LemmyProvider extends SocialAbstract implements SocialProvider {
 
     for (const singlePostId of postIds) {
       const { comment_view } = await (
-        await ssrfSafeFetch(service + '/api/v3/comment', {
+        await this.fetch(service + '/api/v3/comment', {
+          // @ts-ignore - undici-only option; blocks SSRF to internal IPs
+          dispatcher: getSsrfSafeDispatcher(),
           body: JSON.stringify({
             post_id: +singlePostId,
             content: commentPost.message,
@@ -281,9 +291,11 @@ export class LemmyProvider extends SocialAbstract implements SocialProvider {
     const { jwt, service } = await this.getJwtAndService(integration);
 
     const { communities } = await (
-      await ssrfSafeFetch(
+      await this.fetch(
         service + `/api/v3/search?type_=Communities&sort=Active&q=${data.word}`,
         {
+          // @ts-ignore - undici-only option; blocks SSRF to internal IPs
+          dispatcher: getSsrfSafeDispatcher(),
           headers: {
             Authorization: `Bearer ${jwt}`,
           },
@@ -296,5 +308,80 @@ export class LemmyProvider extends SocialAbstract implements SocialProvider {
       name: p.community.title,
       id: p.community.id,
     }));
+  }
+
+  override handleErrors(
+    body: string,
+    status: number
+  ):
+    | { type: 'refresh-token' | 'bad-body' | 'retry'; value: string }
+    | undefined {
+    if (body.includes('rate_limit_error')) {
+      return {
+        type: 'retry',
+        value: 'Lemmy rate limit reached, please try again later',
+      };
+    }
+
+    if (body.includes('not_logged_in') || body.includes('incorrect_login')) {
+      return {
+        type: 'refresh-token',
+        value: 'Lemmy session is no longer valid, please reconnect the channel',
+      };
+    }
+
+    if (body.includes('site_ban') || body.includes('"error":"banned"')) {
+      return {
+        type: 'bad-body',
+        value: 'This account is banned on the Lemmy instance',
+      };
+    }
+
+    if (body.includes('couldnt_find_community')) {
+      return {
+        type: 'bad-body',
+        value:
+          'The selected Lemmy community no longer exists, please pick another one',
+      };
+    }
+
+    if (body.includes('blocked_url')) {
+      return {
+        type: 'bad-body',
+        value: 'The Lemmy instance blocks the URL in this post',
+      };
+    }
+
+    if (body.includes('"error":"deleted"')) {
+      return {
+        type: 'bad-body',
+        value: 'The selected Lemmy community or post was deleted',
+      };
+    }
+
+    if (body.includes('"error":"locked"')) {
+      return {
+        type: 'bad-body',
+        value: 'This Lemmy post is locked, comments cannot be added',
+      };
+    }
+
+    return undefined;
+  }
+
+  override async checkValidity(
+    items: Array<ValidityMedia[]>
+  ): Promise<string | true> {
+    const [firstItems] = items ?? [];
+    if (
+      firstItems?.length &&
+      (firstItems?.[0]?.path?.indexOf?.('png') ?? -1) === -1 &&
+      (firstItems?.[0]?.path?.indexOf?.('jpg') ?? -1) === -1 &&
+      (firstItems?.[0]?.path?.indexOf?.('jpef') ?? -1) === -1 &&
+      (firstItems?.[0]?.path?.indexOf?.('gif') ?? -1) === -1
+    ) {
+      return 'You can set only one picture for a cover';
+    }
+    return true;
   }
 }

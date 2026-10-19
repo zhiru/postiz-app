@@ -60,7 +60,7 @@ export default withProvider<WordpressDto>({
   SettingsComponent: WordpressSettings,
   CustomPreviewComponent: undefined, // WordpressPreview,
   dto: WordpressDto,
-  checkValidity: undefined,
   maximumCharacters: 100000,
   defaults: { status: 'publish' },
+  inlineImages: true,
 });

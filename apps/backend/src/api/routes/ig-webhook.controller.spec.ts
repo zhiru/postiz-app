@@ -464,6 +464,47 @@ describe('IgWebhookController', () => {
       expect(flowsService.handlePostbackClick).toHaveBeenCalledTimes(1);
     });
 
+    it.each(['messaging', 'changes'] as const)(
+      'responde 503 quando o postback em %s precisa de reentrega',
+      async (transport) => {
+        process.env.INSTAGRAM_APP_SECRET = 'env-secret';
+        integrationService.getIntegrationsByInternalId.mockResolvedValue([
+          integration('int-1', 'org-1'),
+        ] as any);
+        flowsService.handlePostbackClick.mockResolvedValue({ retry: true });
+        const original = postbackBody('account-1');
+        const entry = original.entry[0];
+        const body =
+          transport === 'messaging'
+            ? original
+            : {
+                object: 'instagram',
+                entry: [
+                  {
+                    id: entry.id,
+                    changes: [{ field: 'messages', value: entry.messaging[0] }],
+                  },
+                ],
+              };
+        const response = { status: jest.fn().mockReturnThis() };
+
+        await expect(
+          controller.handleWebhook(
+            makeReq(body, 'env-secret'),
+            response as any
+          )
+        ).resolves.toEqual({ status: 'retry' });
+
+        expect(response.status).toHaveBeenCalledWith(503);
+        expect(flowsService.handlePostbackClick).toHaveBeenCalledWith({
+          payload: 'pb_abc',
+          metaMid: 'mid-1',
+          senderIgsid: 'sender-1',
+          igAccountId: 'account-1',
+        });
+      }
+    );
+
     it('filtra a entry de messaging da vitima em corpo misto e processa so a autorizada', async () => {
       // Assinatura valida da org-1 (escopo orgs:{org-1}); corpo tem postback da
       // conta da org-1 (autorizada) + postback da conta da org-2 (vitima).

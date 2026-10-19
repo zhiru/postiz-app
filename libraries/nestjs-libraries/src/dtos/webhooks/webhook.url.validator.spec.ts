@@ -3,6 +3,7 @@ import dns from 'node:dns/promises';
 import { validate } from 'class-validator';
 import {
   IsSafeWebhookUrlConstraint,
+  isBlockedIp,
   isSafePublicHttpsUrl,
 } from './webhook.url.validator';
 import { OnlyURL } from './webhooks.dto';
@@ -93,5 +94,20 @@ describe('webhook.url.validator', () => {
         constraints: [true],
       } as never)
     ).resolves.toBe(false);
+  });
+  afterEach(() => { delete process.env.SSRF_ALLOWED_HOSTS; });
+
+  it('bloqueia IP privado e permite somente o CIDR configurado', () => {
+    expect(isBlockedIp('10.0.0.5')).toBe(true);
+    process.env.SSRF_ALLOWED_HOSTS = '10.0.0.0/8';
+    expect(isBlockedIp('10.0.0.5')).toBe(false);
+    expect(isBlockedIp('192.168.1.5')).toBe(true);
+  });
+
+  it('permite o hostname explicito e bloqueia outro host privado', async () => {
+    process.env.SSRF_ALLOWED_HOSTS = 'n8n.internal';
+    dnsLookup.mockResolvedValue([{ address: '192.168.1.50', family: 4 }]);
+    await expect(isSafePublicHttpsUrl('https://n8n.internal/webhook')).resolves.toBe(true);
+    await expect(isSafePublicHttpsUrl('https://other.internal/webhook')).resolves.toBe(false);
   });
 });

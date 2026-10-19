@@ -1,3 +1,9 @@
+jest.mock('@gitroom/nestjs-libraries/ai/ai-image.service', () => ({ AiImageService: class {} }));
+jest.mock('@gitroom/nestjs-libraries/ai/ai-text.service', () => ({ AiTextService: class {} }));
+jest.mock('@gitroom/nestjs-libraries/ai/ai-video.service', () => ({ AiVideoService: class {} }));
+jest.mock('@gitroom/nestjs-libraries/upload/upload.factory', () => ({ UploadFactory: { createStorage: () => ({}), createProcessor: () => null } }));
+jest.mock('@gitroom/nestjs-libraries/upload/custom.upload.validation', () => ({ getMaxSize: jest.fn(), uploadStreamToStorage: jest.fn() }));
+jest.mock('@gitroom/nestjs-libraries/redis/redis.service', () => ({ ioRedis: { get: jest.fn(), set: jest.fn(), rpush: jest.fn(), expire: jest.fn(), lrange: jest.fn() } }));
 // MediaService importa SubscriptionService que cascateia ate nostr-tools
 // (ESM-only que quebra ts-jest). Mockamos topo-de-modulo as cadeias pesadas.
 jest.mock(
@@ -55,7 +61,8 @@ describe('MediaService.generateImage', () => {
       null as any, // videoManager
       aiImage,
       aiText,
-      createMock<AiVideoService>()
+      createMock<AiVideoService>(),
+      null as any
     );
 
     const result = await service.generateImage('um gato', buildOrg());
@@ -63,7 +70,8 @@ describe('MediaService.generateImage', () => {
     expect(subscription.useCredit).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'org-1' }),
       'ai_images',
-      expect.any(Function)
+      expect.any(Function),
+      undefined
     );
     expect(aiImage.generate).toHaveBeenCalledWith(
       'org-1',
@@ -98,7 +106,8 @@ describe('MediaService.generateImage', () => {
       null as any,
       aiImage,
       aiText,
-      createMock<AiVideoService>()
+      createMock<AiVideoService>(),
+      null as any
     );
 
     await service.generateImage('gato', buildOrg(), true);
@@ -143,7 +152,8 @@ describe('MediaService.generateImage', () => {
       null as any,
       aiImage,
       aiText,
-      createMock<AiVideoService>()
+      createMock<AiVideoService>(),
+      null as any
     );
 
     const result = await service.generateImage('gato', buildOrg(), true);
@@ -176,7 +186,8 @@ describe('MediaService.generateImage', () => {
       null as any,
       aiImage,
       aiText,
-      createMock<AiVideoService>()
+      createMock<AiVideoService>(),
+      null as any
     );
 
     await expect(
@@ -205,7 +216,8 @@ describe('MediaService.generateImage', () => {
       null as any,
       aiImage,
       aiText,
-      createMock<AiVideoService>()
+      createMock<AiVideoService>(),
+      null as any
     );
 
     await service.generateImage('prompt', buildOrg(), false, 'profile-9');
@@ -238,7 +250,8 @@ describe('MediaService.generateImage', () => {
       null as any,
       aiImage,
       aiText,
-      createMock<AiVideoService>()
+      createMock<AiVideoService>(),
+      null as any
     );
 
     await service.generateImage('prompt', buildOrg(), false, undefined, '9:16');

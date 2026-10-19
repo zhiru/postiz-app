@@ -1,38 +1,17 @@
-import crypto from 'crypto';
+import { randomInt } from 'crypto';
 
-const ALPHABET =
-  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+// Same alphabet and shape as makeId, but every character comes from the
+// OS entropy pool instead of Math.random. Use this for anything that acts
+// as a credential: tokens, secrets, api keys, oauth state and PKCE verifiers.
+// makeId stays as it is because it is also imported by the frontend and by
+// Temporal workflow files, where the crypto module is not available.
+export const makeSecureId = (length: number) => {
+  let text = '';
+  const possible =
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
-/**
- * Gera um identificador aleatorio criptograficamente seguro (CSPRNG).
- *
- * Usar SEMPRE que o valor for um segredo/credencial (tokens de API, client
- * secrets, authorization codes, apiKeys) — `makeId` usa `Math.random()`, que
- * nao e seguro (o estado do PRNG e recuperavel a partir de poucas saidas).
- *
- * Usa rejection sampling sobre `crypto.randomBytes` para mapear no alfabeto
- * base62 sem vies de modulo (256 nao e multiplo de 62: descartamos bytes
- * >= 248 = 4*62).
- *
- * IMPORTANTE: este modulo importa `crypto` e por isso NAO pode ser importado
- * (nem transitivamente) por codigo de workflow do Temporal — o bundler de
- * workflows rejeita `crypto` (quebra determinismo). Workflows devem usar
- * `makeId` de `make.is.ts`, que e livre de `crypto`.
- */
-export const makeSecureId = (length: number): string => {
-  if (length <= 0) {
-    return '';
+  for (let i = 0; i < length; i += 1) {
+    text += possible.charAt(randomInt(possible.length));
   }
-  const max = Math.floor(256 / ALPHABET.length) * ALPHABET.length; // 248
-  let out = '';
-  while (out.length < length) {
-    const bytes = crypto.randomBytes(length - out.length);
-    for (let i = 0; i < bytes.length && out.length < length; i += 1) {
-      const b = bytes[i];
-      if (b < max) {
-        out += ALPHABET.charAt(b % ALPHABET.length);
-      }
-    }
-  }
-  return out;
+  return text;
 };

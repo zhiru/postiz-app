@@ -70,7 +70,7 @@ export class NotificationService {
     );
   }
 
-  async inAppNotification(
+  async localizedInAppNotification(
     orgId: string,
     payload: NotificationPayload,
     sendEmail = false,
@@ -97,8 +97,8 @@ export class NotificationService {
       try {
         await this._temporalService.client
           .getRawClient()
-          ?.workflow.signalWithStart('digestEmailWorkflow', {
-            workflowId: 'digest_email_workflow_' + orgId,
+          ?.workflow.signalWithStart('digestEmailWorkflowV2', {
+            workflowId: 'digest_email_workflow_v2_' + orgId,
             signal: 'email',
             signalArgs: [
               [
@@ -129,7 +129,7 @@ export class NotificationService {
     await this.sendEmailsToOrg(orgId, payload, type, lang);
   }
 
-  async sendEmailsToOrg(
+  async localizedSendEmailsToOrg(
     orgId: string,
     payload: NotificationPayload,
     type?: NotificationType,
@@ -155,7 +155,13 @@ export class NotificationService {
           continue;
         }
       }
-      await this.sendEmail(user.email, subject, message, undefined, resolvedLang);
+      await this.sendEmail(
+        user.email,
+        subject,
+        message,
+        undefined,
+        resolvedLang
+      );
     }
   }
 
@@ -171,5 +177,119 @@ export class NotificationService {
 
   hasEmailProvider() {
     return this._emailService.hasProvider();
+  }
+
+  async inAppNotification(
+    orgId: string,
+    payload: NotificationPayload | string,
+    messageOrSend: string | boolean = false,
+    sendOrDigest = false,
+    digestOrType: boolean | NotificationType = 'success',
+    legacyType: NotificationType = 'success'
+  ) {
+    if (typeof payload === 'string')
+      return this.legacyInAppNotification(
+        orgId,
+        payload,
+        String(messageOrSend),
+        sendOrDigest,
+        typeof digestOrType === 'boolean' ? digestOrType : false,
+        legacyType
+      );
+    return this.localizedInAppNotification(
+      orgId,
+      payload,
+      Boolean(messageOrSend),
+      sendOrDigest,
+      typeof digestOrType === 'string' ? digestOrType : 'success'
+    );
+  }
+  async sendEmailsToOrg(
+    orgId: string,
+    payload: NotificationPayload | string,
+    messageOrType?: string,
+    typeOrLang?: string
+  ) {
+    if (typeof payload === 'string')
+      return this.legacySendEmailsToOrg(
+        orgId,
+        payload,
+        messageOrType || '',
+        typeOrLang as NotificationType
+      );
+    return this.localizedSendEmailsToOrg(
+      orgId,
+      payload,
+      messageOrType as NotificationType,
+      typeOrLang
+    );
+  }
+  async legacyInAppNotification(
+    orgId: string,
+    subject: string,
+    message: string,
+    sendEmail = false,
+    digest = false,
+    type: NotificationType = 'success'
+  ) {
+    await this._notificationRepository.createNotification(orgId, message);
+    if (!sendEmail) {
+      return;
+    }
+
+    if (digest) {
+      try {
+        await this._temporalService.client
+          .getRawClient()
+          ?.workflow.signalWithStart('digestEmailWorkflow', {
+            workflowId: 'digest_email_workflow_' + orgId,
+            signal: 'email',
+            signalArgs: [
+              [
+                {
+                  title: subject,
+                  message,
+                  type,
+                },
+              ],
+            ],
+            taskQueue: 'main',
+            workflowIdConflictPolicy: 'USE_EXISTING',
+            args: [{ organizationId: orgId }],
+            typedSearchAttributes: new TypedSearchAttributes([
+              {
+                key: organizationId,
+                value: orgId,
+              },
+            ]),
+          });
+      } catch (err) {}
+
+      return;
+    }
+
+    await this.sendEmailsToOrg(orgId, subject, message, type);
+  }
+
+  async legacySendEmailsToOrg(
+    orgId: string,
+    subject: string,
+    message: string,
+    type?: NotificationType
+  ) {
+    const userOrg = await this._organizationRepository.getAllUsersOrgs(orgId);
+    for (const user of userOrg?.users || []) {
+      // 'info' type is always sent regardless of preferences
+      if (type !== 'info') {
+        // Filter users based on their email preferences
+        if (type === 'success' && !user.user.sendSuccessEmails) {
+          continue;
+        }
+        if (type === 'fail' && !user.user.sendFailureEmails) {
+          continue;
+        }
+      }
+      await this.sendEmail(user.user.email, subject, message);
+    }
   }
 }

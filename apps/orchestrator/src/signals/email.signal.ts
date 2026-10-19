@@ -1,7 +1,9 @@
 import { defineSignal } from '@temporalio/workflow';
 
 export type Email = {
-  messageKey: string;
+  title?: string;
+  message?: string;
+  messageKey?: string;
   subjectKey?: string;
   params?: Record<string, string | number | undefined>;
   type: 'success' | 'fail' | 'info';

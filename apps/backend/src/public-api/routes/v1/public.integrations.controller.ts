@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,7 +9,9 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
   UsePipes,
 } from '@nestjs/common';
@@ -24,14 +27,19 @@ import {
 } from '@nestjs/swagger';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
 import { GetPublicApiProfileId } from '@gitroom/nestjs-libraries/user/public.api.profile.from.request';
+import { streamUploadOptions } from '@gitroom/nestjs-libraries/upload/multer.stream.engine';
+import { omit } from 'lodash';
+import { GetIncludeDeletedFromRequest } from '@gitroom/nestjs-libraries/user/include.deleted.from.request';
+import { GetOAuthUserIdFromRequest } from '@gitroom/nestjs-libraries/user/oauth.user.id.from.request';
 import { Organization } from '@prisma/client';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { GetPostsDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.dto';
+import { ChangePostStatusDto } from '@gitroom/nestjs-libraries/dtos/posts/change.post.status.dto';
+import { UpdatePostSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/update.post.settings.dto';
 import {
   AuthorizationActions,
   Sections,
@@ -39,25 +47,22 @@ import {
 import { VideoDto } from '@gitroom/nestjs-libraries/dtos/videos/video.dto';
 import { VideoFunctionDto } from '@gitroom/nestjs-libraries/dtos/videos/video.function.dto';
 import { UploadDto } from '@gitroom/nestjs-libraries/dtos/media/upload.dto';
+import { GetMediaDto } from '@gitroom/nestjs-libraries/dtos/media/get.media.dto';
+import { ClippingDto } from '@gitroom/nestjs-libraries/dtos/clipping/clipping.dto';
+import { ClippingService } from '@gitroom/nestjs-libraries/database/prisma/clipping/clipping.service';
 import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
 import { GetNotificationsDto } from '@gitroom/nestjs-libraries/dtos/notifications/get.notifications.dto';
-import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
-import { ssrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
-import { Readable } from 'stream';
-import { detectAllowedUploadMime } from '@gitroom/nestjs-libraries/upload/allowed.upload.mime';
-import {
-  CustomFileValidationPipe,
-  getMaxUploadSize,
-} from '@gitroom/nestjs-libraries/upload/custom.upload.validation';
-import {
-  readResponseBodyWithLimit,
-  ResponseBodyTooLargeError,
-} from '@gitroom/nestjs-libraries/upload/bounded.response.reader';
 import * as Sentry from '@sentry/nestjs';
-import { socialIntegrationList, IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
+import {
+  socialIntegrationList,
+  IntegrationManager,
+} from '@gitroom/nestjs-libraries/integrations/integration.manager';
 import { getValidationSchemas } from '@gitroom/nestjs-libraries/chat/validation.schemas.helper';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import { PostValidationException } from '@gitroom/backend/api/routes/posts.validation.exception';
+import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
+import { SuperAdminGuard } from '@gitroom/backend/services/auth/super.admin.guard';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import { EncryptionService } from '@gitroom/nestjs-libraries/crypto/encryption.service';
@@ -120,13 +125,23 @@ const POST_BODY_EXAMPLES: Record<string, { summary: string; value: any }> = {
     },
   },
 };
+import { AdminStatsService } from '@gitroom/nestjs-libraries/database/prisma/admin-stats/admin-stats.service';
+import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
+import { GetOrgActivityDto } from '@gitroom/nestjs-libraries/dtos/analytics/get.org.activity.dto';
+import { GetReportDto } from '@gitroom/nestjs-libraries/dtos/analytics/get.report.dto';
+import { AnalyticsReportService } from '@gitroom/nestjs-libraries/database/prisma/analytics/analytics.report.service';
+import { Response } from 'express';
+import { ResetCreditsDto } from '@gitroom/nestjs-libraries/dtos/billing/reset.credits.dto';
+import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
+import dayjs from 'dayjs';
+import { SocialCommentsService } from '@gitroom/nestjs-libraries/database/prisma/social-comments/social.comments.service';
+import { GetSocialCommentsDto } from '@gitroom/nestjs-libraries/dtos/comments/get.social.comments.dto';
+import { ReplySocialCommentDto } from '@gitroom/nestjs-libraries/dtos/comments/reply.social.comment.dto';
 
 @ApiTags('Public API')
 @ApiSecurity('api-key')
 @Controller('/public/v1')
 export class PublicIntegrationsController {
-  private storage = UploadFactory.createStorage();
-
   constructor(
     private _integrationService: IntegrationService,
     private _postsService: PostsService,
@@ -134,8 +149,42 @@ export class PublicIntegrationsController {
     private _notificationService: NotificationService,
     private _integrationManager: IntegrationManager,
     private _refreshIntegrationService: RefreshIntegrationService,
-    private _encryption: EncryptionService
+    private _encryption: EncryptionService,
+    private _usersService: UsersService,
+    private _adminStatsService: AdminStatsService,
+    private _organizationService: OrganizationService,
+    private _clippingService: ClippingService,
+    private _subscriptionService: SubscriptionService,
+    private _analyticsReportService: AnalyticsReportService,
+    private _socialCommentsService: SocialCommentsService
   ) {}
+
+  @Get('/comments')
+  async getComments(
+    @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
+    @Query() query: GetSocialCommentsDto
+  ) {
+    return this._socialCommentsService.getComments(org.id, query, publicApiProfileId);
+  }
+
+  // Anything reaching this endpoint is an automation (n8n, an agent), so the
+  // text is queued for approval unless the organization turned auto reply on.
+  @Post('/comments/:id/reply')
+  async replyToComment(
+    @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
+    @Param('id') id: string,
+    @Body() body: ReplySocialCommentDto
+  ) {
+    return this._socialCommentsService.reply(
+      org.id,
+      id,
+      body.message,
+      'automation',
+      publicApiProfileId
+    );
+  }
 
   @Post('/upload')
   @ApiOperation({
@@ -153,8 +202,7 @@ export class PublicIntegrationsController {
   @ApiResponse({ status: 201, description: 'Arquivo salvo (retorna id + path).' })
   @ApiResponse({ status: 400, description: 'Nenhum arquivo enviado.' })
   @ApiResponse({ status: 401, description: 'Chave de API ausente ou inválida.' })
-  @UseInterceptors(FileInterceptor('file'))
-  @UsePipes(new CustomFileValidationPipe())
+  @UseInterceptors(FileInterceptor('file', streamUploadOptions()))
   async uploadSimple(
     @GetOrgFromRequest() org: Organization,
     @GetPublicApiProfileId() publicApiProfileId: string | undefined,
@@ -165,15 +213,11 @@ export class PublicIntegrationsController {
       throw new HttpException({ msg: 'No file provided' }, 400);
     }
 
-    const getFile = await this.storage.uploadFile(file);
-    // Chave de perfil: vincula a midia ao proprio perfil. Sem isso, a midia
-    // ficava com profileId=null (compartilhada com todos os perfis via o OR
-    // de getMedia) em vez de escopada ao perfil que fez o upload.
     return this._mediaService.saveFile(
       org.id,
-      getFile.originalname,
-      getFile.path,
-      undefined,
+      file.filename,
+      file.path,
+      file.originalname,
       publicApiProfileId
     );
   }
@@ -193,72 +237,15 @@ export class PublicIntegrationsController {
     @Body() body: UploadDto
   ) {
     Sentry.metrics.count('public_api-request', 1);
-    // Validacao SSRF + DNS-pinning (fecha a janela TOCTOU): a URL e fornecida
-    // pelo usuario, entao so seguimos para hosts publicos seguros.
-    if (!(await isSafePublicHttpsUrl(body.url))) {
-      throw new HttpException({ msg: 'Unsafe URL' }, 400);
-    }
-    let response: globalThis.Response;
     try {
-      response = await fetch(body.url, {
-        // @ts-ignore — undici option, not in lib.dom fetch types
-        dispatcher: ssrfSafeDispatcher,
-        signal: AbortSignal.timeout(30_000),
-      });
-    } catch {
-      throw new HttpException({ msg: 'Failed to fetch URL' }, 400);
-    }
-    if (!response.ok) {
-      throw new HttpException({ msg: 'Failed to fetch URL' }, 400);
-    }
-
-    let buffer: Buffer;
-    try {
-      buffer = await readResponseBodyWithLimit(
-        response,
-        getMaxUploadSize('video/mp4')
-      );
-    } catch (error) {
-      if (error instanceof ResponseBodyTooLargeError) {
-        throw new HttpException({ msg: 'File is too large.' }, 400);
+      return await this._mediaService.uploadFromUrl(org.id, body.url, publicApiProfileId);
+    } catch (err) {
+      // Validation failures keep this route's { msg } error shape
+      if (err instanceof BadRequestException) {
+        throw new HttpException({ msg: err.message }, 400);
       }
-      throw new HttpException({ msg: 'Failed to fetch URL' }, 400);
+      throw err;
     }
-
-    // Valida pelo conteudo real (magic bytes), nao pelo Content-Type/extensao
-    // declarados (forjaveis). Rejeita SVG/HTML e outros vetores de XSS.
-    const detected = await detectAllowedUploadMime(buffer);
-    if (!detected) {
-      throw new HttpException({ msg: 'Unsupported file type.' }, 400);
-    }
-    if (buffer.length > getMaxUploadSize(detected.mime)) {
-      throw new HttpException({ msg: 'File is too large.' }, 400);
-    }
-    const mimetype = detected.mime;
-    const ext = detected.ext;
-
-    const getFile = await this.storage.uploadFile({
-      buffer,
-      mimetype,
-      size: buffer.length,
-      path: '',
-      fieldname: '',
-      destination: '',
-      stream: new Readable(),
-      filename: '',
-      originalname: `upload.${ext}`,
-      encoding: '',
-    });
-
-    // Chave de perfil: vincula a midia da URL ao proprio perfil (mesmo motivo
-    // do /upload acima).
-    return this._mediaService.saveFile(
-      org.id,
-      getFile.originalname,
-      getFile.path,
-      undefined,
-      publicApiProfileId
-    );
   }
 
   @Get('/find-slot/:id')
@@ -317,6 +304,7 @@ export class PublicIntegrationsController {
     const posts = await this._postsService.getPosts(
       org.id,
       query,
+      query.includeAttachments,
       effectiveProfileId
     );
     return {
@@ -347,9 +335,16 @@ export class PublicIntegrationsController {
   ) {
     Sentry.metrics.count('public_api-request', 1);
     const body = await this._postsService.mapTypeToPost(
-      rawBody,
+      {
+        ...rawBody,
+        // a date per channel is a dashboard feature, the public API keeps one
+        // date for the whole request
+        posts: Array.isArray(rawBody?.posts)
+          ? rawBody.posts.map((post: any) => omit(post, 'date'))
+          : rawBody?.posts,
+      },
       org.id,
-      rawBody.type === 'draft'
+      rawBody?.type === 'draft' || true
     );
     body.type = rawBody.type;
 
@@ -366,8 +361,70 @@ export class PublicIntegrationsController {
       }
     }
 
-    console.log(JSON.stringify(body, null, 2));
-    return this._postsService.createPost(org.id, body, publicApiProfileId);
+    if (
+      process.env.RESTRICT_UPLOAD_DOMAINS &&
+      body.posts.some((p) =>
+        p.value.some((a) =>
+          a.image.some(
+            (i) => i.path.indexOf(process.env.RESTRICT_UPLOAD_DOMAINS) === -1
+          )
+        )
+      )
+    ) {
+      throw new HttpException(
+        {
+          msg: `All media must be uploaded through our upload API route and contain the domain: ${process.env.RESTRICT_UPLOAD_DOMAINS}`,
+        },
+        400
+      );
+    }
+
+    // Server-side validation — same rules as the dashboard, surfaced as a
+    // readable 400 (see PostValidationExceptionFilter).
+    const validation = await this._postsService.validatePosts(
+      org.id,
+      body.posts
+    );
+
+    const fail = (item: (typeof validation)[number], error: string) => {
+      throw new PostValidationException({
+        provider: item.identifier,
+        name: item.name,
+        error,
+      });
+    };
+
+    for (const item of validation) {
+      if (item.emptyContent) {
+        fail(
+          item,
+          'Your post should have at least one character or one image.'
+        );
+      }
+    }
+
+    if (body.type !== 'draft') {
+      for (const item of validation) {
+        if (!item.valid) {
+          fail(item, item.settingsError || 'Please fix your settings');
+        }
+        if (item.errors !== true) {
+          fail(item, item.errors as string);
+        }
+        if (item.tooLong) {
+          fail(item, 'post is too long, please fix it');
+        }
+      }
+    }
+
+    const allowedCreationMethods = ['CLI', 'API'] as const;
+    const creationMethod = allowedCreationMethods.includes(
+      rawBody.creationMethod
+    )
+      ? (rawBody.creationMethod as 'CLI' | 'API')
+      : 'API';
+
+    return this._postsService.createPost(org.id, body, creationMethod, false, publicApiProfileId);
   }
 
   @Delete('/posts/:id')
@@ -411,50 +468,97 @@ export class PublicIntegrationsController {
 
   @Get('/is-connected')
   @ApiOperation({ summary: 'Healthcheck da chave de API', description: 'Retorna `{ connected: true }` se a chave for válida.' })
-  async getActiveIntegrations(@GetOrgFromRequest() org: Organization) {
+  async getActiveIntegrations(@GetOrgFromRequest() org: Organization, @GetPublicApiProfileId() publicApiProfileId: string | undefined) {
     Sentry.metrics.count('public_api-request', 1);
     return { connected: true };
   }
 
+  @Get('/media')
+  async getMedia(
+    @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
+    @Query() query: GetMediaDto
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    const { pages, results } = await this._mediaService.getMedia(
+      org.id,
+      query.page,
+      query.search,
+      publicApiProfileId
+    );
+
+    return {
+      pages,
+      results: results.map((p) => ({
+        id: p.id,
+        name: p.name,
+        originalName: p.originalName,
+        path: p.path,
+        createdAt: p.createdAt,
+      })),
+    };
+  }
+
+  // `user` is only known for OAuth app tokens; an API key belongs to the
+  // whole organization
+  @Get('/me')
+  async getMe(
+    @GetOrgFromRequest() org: Organization,
+    @GetOAuthUserIdFromRequest() userId?: string
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    const user = userId ? await this._usersService.getPersonal(userId) : null;
+
+    return {
+      organization: { id: org.id, name: org.name },
+      user: user
+        ? { id: user.id, name: user.name, picture: user.picture?.path || null }
+        : null,
+    };
+  }
+
+  @Get('/groups')
+  async listGroups(@GetOrgFromRequest() org: Organization, @GetPublicApiProfileId() publicApiProfileId: string | undefined) {
+    Sentry.metrics.count('public_api-request', 1);
+    if (publicApiProfileId) {
+      const channels = await this._integrationService.getIntegrationsList(org.id, publicApiProfileId);
+      return [...new Map(channels.filter((item) => item.customer).map((item) => [item.customer.id, { id: item.customer.id, name: item.customer.name }])).values()];
+    }
+    return (await this._integrationService.customers(org.id)).map(
+      (customer) => ({
+        id: customer.id,
+        name: customer.name,
+      })
+    );
+  }
+
   @Get('/integrations')
-  @ApiOperation({
-    summary: 'Listar canais (integrações)',
-    description:
-      'Lista os canais conectados (Instagram, X, Facebook, etc.). Use o `id` retornado como `integrationId` ao criar posts/automações.',
-  })
-  @ApiQuery({
-    name: 'profileId',
-    required: false,
-    description: 'Filtra por perfil (chave de org). Chave de perfil só vê o próprio.',
-  })
-  @ApiResponse({ status: 200, description: 'Lista de canais (id, name, identifier, picture, ...).' })
-  @ApiResponse({ status: 403, description: 'Chave de perfil tentando acessar outro perfil.' })
   async listIntegration(
     @GetOrgFromRequest() org: Organization,
     @GetPublicApiProfileId() publicApiProfileId: string | undefined,
-    @Query('profileId') profileId?: string
+    @Query('profileId') profileId?: string,
+    @Query('group') group?: string
   ) {
-    Sentry.metrics.count('public_api-request', 1);
     if (publicApiProfileId && profileId && profileId !== publicApiProfileId) {
       throw new HttpException({ msg: 'Profile key cannot access another profile' }, 403);
     }
-    const effectiveProfileId = publicApiProfileId ?? profileId;
-    return (await this._integrationService.getIntegrationsList(org.id, effectiveProfileId)).map(
-      (org) => ({
-        id: org.id,
-        name: org.name,
-        identifier: org.providerIdentifier,
-        picture: org.picture,
-        disabled: org.disabled,
-        profile: org.profile,
-        customer: org.customer
+    Sentry.metrics.count('public_api-request', 1);
+    return (await this._integrationService.getIntegrationsList(org.id, publicApiProfileId ?? profileId))
+      .filter((integration) => !group || integration.customer?.id === group)
+      .map((integration) => ({
+        id: integration.id,
+        name: integration.customName || integration.name,
+        identifier: integration.providerIdentifier,
+        picture: integration.picture,
+        disabled: integration.disabled,
+        profile: integration.profile,
+        customer: integration.customer
           ? {
-              id: org.customer.id,
-              name: org.customer.name,
+              id: integration.customer.id,
+              name: integration.customer.name,
             }
           : undefined,
-      })
-    );
+      }));
   }
 
   @Get('/social/:integration')
@@ -464,7 +568,8 @@ export class PublicIntegrationsController {
   async getIntegrationUrl(
     @Param('integration') integration: string,
     @Query('refresh') refresh: string,
-    @GetOrgFromRequest() org: Organization
+    @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined
   ) {
     Sentry.metrics.count('public_api-request', 1);
     if (
@@ -475,19 +580,36 @@ export class PublicIntegrationsController {
       throw new HttpException({ msg: 'Integration not allowed' }, 400);
     }
 
-    const integrationProvider =
-      this._integrationManager.getSocialIntegration(integration);
+    // A provider migrated via MIGRATE_PROVIDERS reconnects through its target
+    // provider's OAuth: the callback lands on the target and the channel is
+    // migrated in place (see migrateIntegration).
+    const migrateTo = refresh
+      ? this._integrationManager.getMigrationTarget(integration)
+      : undefined;
+
+    const integrationProvider = this._integrationManager.getSocialIntegration(
+      migrateTo || integration
+    );
 
     if (integrationProvider.externalUrl) {
       throw new HttpException(
-        { msg: 'This integration requires an external URL and is not supported via the public API' },
+        {
+          msg: 'This integration requires an external URL and is not supported via the public API',
+        },
         400
       );
     }
 
     try {
-      const { codeVerifier, state, url } =
-        await integrationProvider.generateAuthUrl();
+      const credentials = await this._integrationManager.getProviderCredentials(migrateTo || integration, org.id, publicApiProfileId);
+      const clientInformation = credentials ? {
+        client_id: integration === 'threads' ? credentials.threadsAppId || credentials.clientId || '' : integration === 'instagram-standalone' ? credentials.instagramAppId || credentials.clientId || '' : credentials.clientId || '',
+        client_secret: integration === 'threads' ? credentials.threadsAppSecret || credentials.clientSecret || '' : integration === 'instagram-standalone' ? credentials.instagramAppSecret || credentials.clientSecret || '' : credentials.clientSecret || '',
+        instanceUrl: '',
+      } : undefined;
+      const { codeVerifier, state, url } = await integrationProvider.generateAuthUrl(clientInformation);
+      if (publicApiProfileId) await ioRedis.set(`profile:${state}`, publicApiProfileId, 'EX', 3600);
+      if (clientInformation) await ioRedis.set(`external:${state}`, JSON.stringify(clientInformation), 'EX', 3600);
 
       if (refresh) {
         await ioRedis.set(`refresh:${state}`, refresh, 'EX', 3600);
@@ -500,6 +622,100 @@ export class PublicIntegrationsController {
     } catch (err) {
       throw new HttpException({ msg: 'Failed to generate auth URL' }, 500);
     }
+  }
+
+  @Get('/users')
+  @UseGuards(SuperAdminGuard)
+  async listUsers(
+    @GetOrgFromRequest() org: Organization,
+    @Query('name') name: string
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    const term = name?.trim();
+
+    if (!term) {
+      throw new HttpException({ msg: 'A search term is required' }, 400);
+    }
+
+    return this._usersService.getImpersonateUser(term);
+  }
+
+  @Get('/debug/posts/:id')
+  @UseGuards(SuperAdminGuard)
+  async getPostTimeline(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    const timeline = await this._postsService.getPostTimeline(id, org.id);
+
+    if (!timeline) {
+      throw new HttpException({ msg: 'Post not found' }, 404);
+    }
+
+    return timeline;
+  }
+
+  @Get('/debug/account')
+  @UseGuards(SuperAdminGuard)
+  async getAccountOverview(@GetOrgFromRequest() org: Organization) {
+    Sentry.metrics.count('public_api-request', 1);
+    const account = await this._organizationService.getAccountOverview(org.id);
+
+    if (!account) {
+      throw new HttpException({ msg: 'Organization not found' }, 404);
+    }
+
+    return account;
+  }
+
+  @Get('/debug/channels')
+  @UseGuards(SuperAdminGuard)
+  async getChannelHealth(
+    @GetOrgFromRequest() org: Organization,
+    @GetIncludeDeletedFromRequest() includeDeleted: boolean
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._integrationService.getChannelHealth(org.id, includeDeleted);
+  }
+
+  @Get('/debug/activity')
+  @UseGuards(SuperAdminGuard)
+  async getOrgActivity(
+    @GetOrgFromRequest() org: Organization,
+    @GetIncludeDeletedFromRequest() includeDeleted: boolean,
+    @Query() query: GetOrgActivityDto
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+
+    const from = query.from ? dayjs(query.from) : dayjs().subtract(30, 'day');
+    const to = query.to ? dayjs(query.to) : dayjs();
+
+    return this._adminStatsService.getOrgActivity({
+      organizationId: org.id,
+      from: from.startOf('day').toDate(),
+      to: to.endOf('day').toDate(),
+      includeDeleted,
+    });
+  }
+
+  @Post('/credits/reset')
+  @UseGuards(SuperAdminGuard)
+  async resetCredits(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: ResetCreditsDto
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    const reset = await this._subscriptionService.resetCredits(
+      org.id,
+      body.type
+    );
+
+    if (!reset) {
+      throw new HttpException({ msg: 'No subscription found' }, 404);
+    }
+
+    return reset;
   }
 
   @Get('/notifications')
@@ -528,9 +744,11 @@ export class PublicIntegrationsController {
   @ApiResponse({ status: 400, description: 'Parâmetros inválidos.' })
   generateVideo(
     @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
     @Body() body: VideoDto
   ) {
     Sentry.metrics.count('public_api-request', 1);
+    if (publicApiProfileId) throw new HttpException({ msg: 'This feature requires an organization API key' }, 403);
     return this._mediaService.generateVideo(org, body);
   }
 
@@ -545,21 +763,52 @@ export class PublicIntegrationsController {
     );
   }
 
+  @Post('/clipping')
+  startClipping(
+    @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
+    @Body() body: ClippingDto
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    if (publicApiProfileId) throw new HttpException({ msg: 'This feature requires an organization API key' }, 403);
+    return this._clippingService.startClipping(org, body);
+  }
+
+  @Get('/clipping')
+  getClippings(
+    @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
+    @Query('page') page: number
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    if (publicApiProfileId) throw new HttpException({ msg: 'This feature requires an organization API key' }, 403);
+    return this._clippingService.getClippings(org.id, page);
+  }
+
+  @Get('/clipping/:id')
+  getClipping(@GetOrgFromRequest() org: Organization, @GetPublicApiProfileId() publicApiProfileId: string | undefined, @Param('id') id: string) {
+    Sentry.metrics.count('public_api-request', 1);
+    if (publicApiProfileId) throw new HttpException({ msg: 'This feature requires an organization API key' }, 403);
+    return this._clippingService.getClipping(org.id, id);
+  }
+
   @Delete('/integrations/:id')
   @ApiOperation({ summary: 'Excluir um canal (integração) e seus posts' })
   @ApiParam({ name: 'id', description: 'integrationId' })
   async deleteChannel(
     @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
     @Param('id') id: string
   ) {
     Sentry.metrics.count('public_api-request', 1);
+    if (publicApiProfileId) await this._integrationService.validateIntegrationProfile(org.id, id, publicApiProfileId);
     const isTherePosts = await this._integrationService.getPostsForChannel(
       org.id,
       id
     );
     if (isTherePosts.length) {
       for (const post of isTherePosts) {
-        this._postsService.deletePost(org.id, post.group).catch(() => {});
+        this._postsService.deletePost(org.id, post.group, publicApiProfileId).catch(() => {});
       }
     }
 
@@ -571,13 +820,19 @@ export class PublicIntegrationsController {
   @ApiParam({ name: 'id', description: 'integrationId' })
   async getIntegrationSettings(
     @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
     @Param('id') id: string
   ) {
     Sentry.metrics.count('public_api-request', 1);
+    if (publicApiProfileId) await this._integrationService.validateIntegrationProfile(org.id, id, publicApiProfileId);
     const loadIntegration = await this._integrationService.getIntegrationById(
       org.id,
       id
     );
+
+    if (!loadIntegration) {
+      throw new HttpException({ msg: 'Integration not found' }, 404);
+    }
 
     const verified =
       JSON.parse(loadIntegration.additionalSettings || '[]')?.find(
@@ -616,10 +871,42 @@ export class PublicIntegrationsController {
   @ApiParam({ name: 'id', description: 'ID do post' })
   async getMissingContent(
     @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
     @Param('id') id: string
   ) {
     Sentry.metrics.count('public_api-request', 1);
+    await this.assertPostScope(org.id, id, publicApiProfileId);
     return this._postsService.getMissingContent(org.id, id);
+  }
+
+  @Put('/posts/:id/settings')
+  async updatePostSettings(
+    @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
+    @Param('id') id: string,
+    @Body() body: UpdatePostSettingsDto
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    await this.assertPostScope(org.id, id, publicApiProfileId);
+    return this._postsService.updatePostSettings(
+      org.id,
+      id,
+      body.settings,
+      'API',
+      publicApiProfileId
+    );
+  }
+
+  @Put('/posts/:id/status')
+  async changePostStatus(
+    @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
+    @Param('id') id: string,
+    @Body() body: ChangePostStatusDto
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    await this.assertPostScope(org.id, id, publicApiProfileId);
+    return this._postsService.changePostStatus(org.id, id, body.status);
   }
 
   @Put('/posts/:id/release-id')
@@ -627,11 +914,42 @@ export class PublicIntegrationsController {
   @ApiParam({ name: 'id', description: 'ID do post' })
   async updateReleaseId(
     @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
     @Param('id') id: string,
     @Body('releaseId') releaseId: string
   ) {
     Sentry.metrics.count('public_api-request', 1);
-    return this._postsService.updateReleaseId(org.id, id, releaseId);
+    await this.assertPostScope(org.id, id, publicApiProfileId);
+    // the batch only links the posts in the dashboard
+    const { batchId, ...post } = await this._postsService.updateReleaseId(
+      org.id,
+      id,
+      releaseId
+    );
+    return post;
+  }
+
+  // Declared before /analytics/:integration so "report" is not swallowed as an
+  // integration id.
+  @Get('/analytics/report')
+  async getAnalyticsReport(
+    @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
+    @Query() query: GetReportDto,
+    @Res({ passthrough: true }) res: Response
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    if (query.format !== 'csv') {
+      return this._analyticsReportService.getReport(org.id, query, publicApiProfileId);
+    }
+
+    res.header('Content-Type', 'text/csv; charset=utf-8');
+    res.header(
+      'Content-Disposition',
+      `attachment; filename="postiz-report-${query.from}-${query.to}.csv"`
+    );
+
+    return this._analyticsReportService.getReportCsv(org.id, query, publicApiProfileId);
   }
 
   @Get('/analytics/:integration')
@@ -684,10 +1002,12 @@ export class PublicIntegrationsController {
   @ApiParam({ name: 'id', description: 'integrationId' })
   async triggerIntegrationTool(
     @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined,
     @Param('id') id: string,
     @Body() body: { methodName: string; data: Record<string, string> }
   ) {
     Sentry.metrics.count('public_api-request', 1);
+    if (publicApiProfileId) await this._integrationService.validateIntegrationProfile(org.id, id, publicApiProfileId);
     const getIntegration = await this._integrationService.getIntegrationById(
       org.id,
       id
@@ -765,4 +1085,10 @@ export class PublicIntegrationsController {
       }
     }
   }
+  private async assertPostScope(orgId: string, postId: string, profileId?: string) {
+    if (!profileId) return;
+    const scope = await this._postsService.getPostProfileScope(orgId, postId);
+    if (!scope || scope.profileId !== profileId) throw new HttpException({ msg: 'Post not found' }, 404);
+  }
+
 }

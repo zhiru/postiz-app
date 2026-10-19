@@ -1,26 +1,44 @@
-import { HttpStatus, Injectable, NestMiddleware } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
+import { Organization } from '@prisma/client';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { OAuthService } from '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service';
 import { ProfileService } from '@gitroom/nestjs-libraries/database/prisma/profiles/profile.service';
 import { HttpForbiddenException } from '@gitroom/nestjs-libraries/services/exception.filter';
+import { setSentryUserContext } from '@gitroom/nestjs-libraries/sentry/initialize.sentry';
 
 @Injectable()
 export class PublicAuthMiddleware implements NestMiddleware {
+  private readonly _logger = new Logger(PublicAuthMiddleware.name);
+
   constructor(
     private _organizationService: OrganizationService,
     private _oauthService: OAuthService,
     private _profileService: ProfileService
   ) {}
+
+  private setOrg(req: Request, org: Organization) {
+    // @ts-ignore
+    req.org = { ...org, users: [{ users: { role: 'SUPERADMIN' } }] };
+  }
+
   async use(req: Request, res: Response, next: NextFunction) {
-    const auth = (req.headers.authorization ||
-      req.headers.Authorization) as string;
+    const auth = (
+      ((req.headers.authorization || req.headers.Authorization) as string) || ''
+    ).replace(/^Bearer\s+/i, '');
     if (!auth) {
       res.status(HttpStatus.UNAUTHORIZED).json({ msg: 'No API Key found' });
       return;
     }
     try {
-      if (auth.startsWith('pos_')) {
+      let org: Organization & { subscription?: unknown };
+      let profileApiKey = false;
+      const isOAuthApp = auth.startsWith('pos_');
+
+      // @ts-ignore
+      req.isOAuthApp = isOAuthApp;
+
+      if (isOAuthApp) {
         const authorization = await this._oauthService.getOrgByOAuthToken(auth);
         if (!authorization) {
           res
@@ -29,53 +47,82 @@ export class PublicAuthMiddleware implements NestMiddleware {
           return;
         }
 
-        const org = authorization.organization;
-        if (!!process.env.STRIPE_SECRET_KEY && !org.subscription) {
-          res
-            .status(HttpStatus.UNAUTHORIZED)
-            .json({ msg: 'No subscription found' });
-          return;
-        }
-
+        org = authorization.organization;
+        // The user who approved the OAuth app, so /me can show who is connected
         // @ts-ignore
-        req.org = { ...org, users: [{ users: { role: 'SUPERADMIN' } }] };
+        req.oauthUserId = authorization.userId;
       } else {
         const profile = await this._profileService.getProfileByApiKey(auth);
         if (profile) {
-          const org = profile.organization;
-          if (!!process.env.STRIPE_SECRET_KEY && !org.subscription) {
-            res
-              .status(HttpStatus.UNAUTHORIZED)
-              .json({ msg: 'No subscription found' });
-            return;
-          }
-          // @ts-ignore
-          req.org = { ...org, users: [{ users: { role: 'SUPERADMIN' } }] };
+          org = profile.organization;
+          profileApiKey = true;
           // @ts-ignore
           req.publicApiProfileId = profile.id;
         } else {
-          const org = await this._organizationService.getOrgByApiKey(auth);
-          if (!org) {
-            res
-              .status(HttpStatus.UNAUTHORIZED)
-              .json({ msg: 'Invalid API key' });
-            return;
-          }
-
-          if (!!process.env.STRIPE_SECRET_KEY && !org.subscription) {
-            res
-              .status(HttpStatus.UNAUTHORIZED)
-              .json({ msg: 'No subscription found' });
-            return;
-          }
-
-          // @ts-ignore
-          req.org = { ...org, users: [{ users: { role: 'SUPERADMIN' } }] };
+        org = await this._organizationService.getOrgByApiKey(auth);
+        if (!org) {
+          res
+            .status(HttpStatus.UNAUTHORIZED)
+            .json({ msg: 'Invalid API key' });
+          return;
         }
+        }
+      }
+
+      if (!!process.env.STRIPE_SECRET_KEY && !org.subscription) {
+        res
+          .status(HttpStatus.UNAUTHORIZED)
+          .json({ msg: 'No subscription found' });
+        return;
+      }
+
+      this.setOrg(req, org);
+      const includeDeleted =
+        (req.headers['x-postiz-include-deleted'] as string)?.trim() === 'true';
+      // @ts-ignore
+      req.authOrgId = org.id;
+      // @ts-ignore
+      req.includeDeleted = includeDeleted;
+
+      const overrideOrgId = (req.headers['x-postiz-org'] as string)?.trim();
+
+      if (overrideOrgId) {
+        if (
+          isOAuthApp || profileApiKey ||
+          !(await this._organizationService.canUseSuperAdminApi(org.id))
+        ) {
+          res.status(HttpStatus.FORBIDDEN).json({ msg: 'Unauthorized' });
+          return;
+        }
+
+        const overrideOrg =
+          await this._organizationService.getOrgByIdWithSubscription(
+            overrideOrgId
+          );
+
+        if (!overrideOrg || (overrideOrg.deletedAt && !includeDeleted)) {
+          res
+            .status(HttpStatus.NOT_FOUND)
+            .json({ msg: 'Organization not found' });
+          return;
+        }
+
+        this.setOrg(req, overrideOrg);
+
+        this._logger.log(
+          `Organization override performed by organization ${org.id}: acting as ${overrideOrg.id} on ${req.method} ${req.path}`
+        );
       }
     } catch (err) {
       throw new HttpForbiddenException();
     }
+
+    setSentryUserContext({
+      // @ts-ignore
+      orgId: req.org.id,
+      // @ts-ignore
+      paymentId: req.org.paymentId,
+    });
     next();
   }
 }

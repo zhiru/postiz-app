@@ -1,3 +1,8 @@
+jest.mock('@gitroom/nestjs-libraries/database/prisma/users/users.service', () => ({ UsersService: class {} }));
+jest.mock('@gitroom/nestjs-libraries/database/prisma/organizations/organization.service', () => ({ OrganizationService: class {} }));
+jest.mock('@gitroom/nestjs-libraries/services/email.service', () => ({ EmailService: class {} }));
+jest.mock('@gitroom/backend/services/auth/providers/providers.manager', () => ({ AuthProviderManager: class {} }));
+jest.mock('bcrypt', () => ({ hashSync: jest.fn(), compareSync: jest.fn() }));
 // NewsletterService.register roda no fluxo OAuth; mock evita chamada de rede.
 jest.mock('@gitroom/nestjs-libraries/newsletter/newsletter.service', () => ({
   NewsletterService: { register: jest.fn().mockResolvedValue(undefined) },
@@ -36,7 +41,7 @@ const makeDeps = () => ({
     addUserToOrg: jest.fn().mockResolvedValue({ organizationId: 'org-invited' }),
   },
   notificationService: {},
-  emailService: { sendEmail: jest.fn().mockResolvedValue(undefined) },
+  emailService: { sendEmailSync: jest.fn().mockResolvedValue(undefined) },
   providerManager: { getProvider: jest.fn() },
 });
 
@@ -59,7 +64,6 @@ describe('AuthService.routeAuth - registro com DISABLE_REGISTRATION', () => {
     service = new AuthService(
       deps.userService as any,
       deps.orgService as any,
-      deps.notificationService as any,
       deps.emailService as any,
       deps.providerManager as any
     );

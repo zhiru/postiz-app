@@ -1,57 +1,20 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "permissions": {
-    "allow": [
-      "Bash(pnpm:*)",
-      "Bash(git status:*)",
-      "Bash(git log:*)",
-      "Bash(git diff:*)",
-      "Bash(git branch:*)",
-      "Bash(git fetch:*)",
-      "Bash(git checkout:*)",
-      "Bash(git merge:*)",
-      "Bash(git tag:*)",
-      "Bash(git remote:*)",
-      "Bash(git push:*)",
-      "Bash(docker:*)",
-      "Bash(ls:*)",
-      "Bash(find:*)",
-      "Bash(grep:*)",
-      "WebFetch(domain:docs.postiz.com)",
-      "WebFetch(domain:docs.getlate.dev)",
-      "WebFetch(domain:agents.md)",
-      "mcp__context7__resolve-library-id",
-      "mcp__context7__query-docs"
-    ],
     "deny": [
-      "Bash(git push --force:*)",
-      "Bash(git reset --hard:*)",
-      "Bash(git clean -f:*)",
-      "Bash(rm -rf:*)",
-      "Bash(npm:*)",
-      "Bash(yarn:*)"
-    ]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "input=$(cat); cmd=$(echo \"$input\" | jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE '^git commit'; then branch=$(git branch --show-current 2>/dev/null); if [ \"$branch\" = \"postiz\" ]; then echo 'Nao e permitido commitar na branch postiz. Esta branch e espelho limpo do upstream Postiz.' >&2; exit 2; fi; fi; exit 0"
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/tdd-check.sh",
-            "statusMessage": "Verificando TDD compliance..."
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/gh-pr-fork-guard.sh",
-            "statusMessage": "Verificando --repo no gh pr..."
-          }
-        ]
-      }
+      "Read(./.env)",
+      "Read(.env)",
+      "Edit(./.env)",
+      "Edit(.env)",
+      "Bash(cat .env)",
+      "Bash(cat ./.env)",
+      "Bash(less .env)",
+      "Bash(more .env)",
+      "Bash(head .env)",
+      "Bash(tail .env)",
+      "Bash(nano .env)",
+      "Bash(vi .env)",
+      "Bash(vim .env)"
     ]
   }
 }

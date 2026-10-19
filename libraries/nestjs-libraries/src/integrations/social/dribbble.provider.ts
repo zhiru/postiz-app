@@ -7,22 +7,34 @@ import {
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import FormData from 'form-data';
-import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  SocialAbstract,
+  BadBody,
+  ValidityMedia,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { DribbbleDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/dribbble.dto';
 import mime from 'mime-types';
 import { DiscordDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/discord.dto';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 
 export class DribbbleProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 3; // Dribbble has moderate API limits
+  override maxConcurrentJob = 3;
+
   identifier = 'dribbble';
+
   name = 'Dribbble';
+
   isBetweenSteps = false;
+
   scopes = ['public', 'upload'];
+
   editor = 'normal' as const;
+
   maxLength() {
     return 40000;
   }
+
   dto = DribbbleDto;
 
   async refreshToken(refreshToken: string): Promise<AuthTokenDetails> {
@@ -84,14 +96,14 @@ export class DribbbleProvider extends SocialAbstract implements SocialProvider {
   }
 
   async generateAuthUrl() {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     return {
       url: `https://dribbble.com/oauth/authorize?client_id=${
         process.env.DRIBBBLE_CLIENT_ID
       }&redirect_uri=${encodeURIComponent(
         `${process.env.FRONTEND_URL}/integrations/social/dribbble`
       )}&response_type=code&scope=${this.scopes.join('+')}&state=${state}`,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -155,16 +167,31 @@ export class DribbbleProvider extends SocialAbstract implements SocialProvider {
     formData.append('title', postDetails[0].settings.title);
     formData.append('description', postDetails[0].message);
 
-    const data2 = await this.getSsrfSafeAxios().post(
-      'https://api.dribbble.com/v2/shots',
-      formData,
-      {
-        headers: {
-          ...formData.getHeaders(),
-          Authorization: `Bearer ${accessToken}`,
-        },
+    let data2;
+    try {
+      data2 = await this.getSsrfSafeAxios().post(
+        'https://api.dribbble.com/v2/shots',
+        formData,
+        {
+          headers: {
+            ...formData.getHeaders(),
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status >= 400 && status < 500 && status !== 429) {
+        throw new BadBody(
+          this.identifier,
+          JSON.stringify(err?.response?.data ?? {}),
+          '{}',
+          err?.response?.data?.message ||
+            `Dribbble rejected the shot with status ${status}`
+        );
       }
-    );
+      throw err;
+    }
 
     const location = data2.headers['location'];
     const newId = location.split('/').at(-1);
@@ -195,5 +222,27 @@ export class DribbbleProvider extends SocialAbstract implements SocialProvider {
   ): Promise<AnalyticsData[]> {
     // Dribbble doesn't provide detailed post-level analytics via their API
     return [];
+  }
+
+  override async checkValidity([firstItem]: Array<ValidityMedia[]>): Promise<
+    string | true
+  > {
+    const isMp4 = firstItem?.find(
+      (item) => (item?.path?.indexOf?.('mp4') ?? -1) > -1
+    );
+    if (firstItem?.length !== 1) {
+      return 'Requires one item';
+    }
+    if (isMp4) {
+      return 'Does not support mp4 files';
+    }
+    const details = await this.getImageDimensions(firstItem?.[0]?.path);
+    if (
+      (details?.width === 400 && details?.height === 300) ||
+      (details?.width === 800 && details?.height === 600)
+    ) {
+      return true;
+    }
+    return 'Invalid image size. Requires 400x300 or 800x600 px images.';
   }
 }

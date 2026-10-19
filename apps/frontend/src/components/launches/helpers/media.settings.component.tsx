@@ -4,6 +4,7 @@ import { EventEmitter } from 'events';
 import React, { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { TopTitle } from '@gitroom/frontend/components/launches/helpers/top.title.component';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
+import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -195,7 +196,10 @@ export const CreateThumbnail: FC<{
       } catch (fallbackError) {
         console.error('Fallback capture also failed:', fallbackError);
         alert(
-          t('unable_to_capture_frame', 'Unable to capture frame. This might be due to CORS restrictions on the video source.')
+          t(
+            'unable_to_capture_frame',
+            'Unable to capture frame. This might be due to CORS restrictions on the video source.'
+          )
         );
         setIsCapturing(false);
       }
@@ -257,7 +261,9 @@ export const CreateThumbnail: FC<{
               disabled={isCapturing}
               className="bg-forth text-white px-6 py-2 rounded-lg hover:bg-opacity-80 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isCapturing ? t('capturing', 'Capturing...') : t('select_this_frame', 'Select This Frame')}
+              {isCapturing
+                ? t('capturing', 'Capturing...')
+                : t('select_this_frame', 'Select This Frame')}
             </button>
           </div>
         </>
@@ -374,11 +380,14 @@ export const MediaComponentInner: FC<{
           type="text"
           value={altText}
           onChange={(e) => setAltText(e.target.value)}
-          placeholder={t('describe_content_placeholder', 'Describe the image/video content...')}
+          placeholder={t(
+            'describe_content_placeholder',
+            'Describe the image/video content...'
+          )}
           className="w-full px-3 py-2 bg-fifth border border-tableBorder rounded-lg text-textColor placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-forth focus:border-transparent"
         />
       </div>
-      {media?.path?.indexOf('mp4') > -1 && (
+      {hasExtension(media?.path, 'mp4') && (
         <>
           {/* Alt Text Input */}
           <div>

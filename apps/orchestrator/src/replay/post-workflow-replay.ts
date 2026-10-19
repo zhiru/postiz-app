@@ -7,6 +7,8 @@ const POST_WORKFLOW_TYPES = new Set([
   'postWorkflowV101',
   'postWorkflowV102',
   'postWorkflowV112',
+  'postWorkflowV113',
+  'postWorkflowV114',
 ]);
 
 type ReadFile = (path: string, encoding: BufferEncoding) => Promise<string>;
@@ -87,7 +89,7 @@ function getPostWorkflowType(history: unknown): string {
     !POST_WORKFLOW_TYPES.has(workflowType)
   ) {
     throw new Error(
-      'O JSON nao pertence a um workflow de publicacao suportado (V101, V102 ou V112).'
+      'O JSON nao pertence a um workflow de publicacao suportado (V101, V102, V112, V113 ou V114).'
     );
   }
 

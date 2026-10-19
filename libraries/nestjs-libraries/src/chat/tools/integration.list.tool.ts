@@ -18,8 +18,24 @@ export class IntegrationListTool implements AgentToolInterface {
   run() {
     return createTool({
       id: 'integrationList',
-      description: `This tool list available integrations to schedule posts to`,
-      inputSchema: z.object({}),
+      description: `This tool list available integrations to schedule posts to. Optionally pass a group id (from the groupList tool) to only list integrations belonging to that group`,
+      inputSchema: z.object({
+        group: z
+          .string()
+          .optional()
+          .describe(
+            'Optional group (customer) id from the groupList tool to filter the integrations'
+          ),
+      }),
+      mcp: {
+        annotations: {
+          title: 'List Integrations',
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
       outputSchema: z.object({
         output: z.array(
           z.object({
@@ -42,15 +58,23 @@ export class IntegrationListTool implements AgentToolInterface {
         return {
           output: (
             await this._integrationService.getIntegrationsList(organizationId, profileId)
-          ).map((p) => ({
-            name: p.name,
-            id: p.id,
-            disabled: p.disabled,
-            picture: p.picture || '/no-picture.jpg',
-            platform: p.providerIdentifier,
-            display: p.profile,
-            type: p.type,
-          })),
+          )
+            .filter((p) => !input.group || p.customer?.id === input.group)
+            .map((p) => ({
+              name: p.customName || p.name,
+              id: p.id,
+              disabled: p.disabled,
+              picture: p.picture || '/no-picture.jpg',
+              platform: p.providerIdentifier,
+              display: p.profile,
+              type: p.type,
+              customer: p.customer
+                ? {
+                    id: p.customer.id,
+                    name: p.customer.name,
+                  }
+                : undefined,
+            })),
         };
       },
     });

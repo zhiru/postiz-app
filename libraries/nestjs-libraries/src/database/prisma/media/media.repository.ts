@@ -47,6 +47,54 @@ export class MediaRepository {
         path: true,
         thumbnail: true,
         alt: true,
+        status: true,
+      },
+    });
+  }
+
+  startProcessing(org: string, id: string) {
+    return this._media.model.media.update({
+      where: { id, organizationId: org },
+      data: { status: 'processing', processingError: null },
+      select: { id: true, status: true },
+    });
+  }
+
+  finishProcessing(
+    org: string,
+    id: string,
+    data: { name?: string; path?: string; fileSize?: number; error?: string }
+  ) {
+    return this._media.model.media.update({
+      where: { id, organizationId: org },
+      data: {
+        ...(data.name ? { name: data.name } : {}),
+        ...(data.path ? { path: data.path } : {}),
+        ...(data.fileSize ? { fileSize: data.fileSize } : {}),
+        status: data.error ? 'failed' : 'ready',
+        processingError: data.error || null,
+      },
+      select: { id: true, status: true },
+    });
+  }
+
+  getMediaStatus(org: string, id: string, profileId?: string) {
+    return this._media.model.media.findFirst({
+      where: {
+        id,
+        organizationId: org,
+        ...this.profileFilter(profileId),
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        name: true,
+        originalName: true,
+        path: true,
+        thumbnail: true,
+        alt: true,
+        status: true,
+        processingError: true,
       },
     });
   }
@@ -181,11 +229,12 @@ export class MediaRepository {
     });
   }
 
-  saveMediaInformation(org: string, data: SaveMediaInformationDto) {
+  saveMediaInformation(org: string, data: SaveMediaInformationDto, profileId?: string) {
     return this._media.model.media.update({
       where: {
         id: data.id,
         organizationId: org,
+        ...this.profileFilter(profileId),
       },
       data: {
         alt: data.alt,
@@ -204,18 +253,26 @@ export class MediaRepository {
     });
   }
 
-  async getMedia(org: string, page: number, profileId?: string) {
+  async getMedia(org: string, page: number, search?: string, profileId?: string) {
     const pageNum = (page || 1) - 1;
-    // Show media for the active profile + unscoped media (profileId is null)
+    const trimmedSearch = search?.trim();
+    const searchFilter = trimmedSearch
+      ? {
+          originalName: {
+            contains: trimmedSearch,
+            mode: 'insensitive' as const,
+          },
+        }
+      : {};
     const profileFilter = this.profileFilter(profileId);
     const query: Prisma.MediaCountArgs = {
       where: {
         organization: {
           id: org,
         },
-        // Sem este filtro a contagem inclui mídia já excluída e a paginação
-        // passa a exibir páginas vazias depois de uma exclusão em massa.
         deletedAt: null,
+        status: { not: 'processing' },
+        ...searchFilter,
         ...profileFilter,
       },
     };
@@ -224,6 +281,9 @@ export class MediaRepository {
       where: {
         organizationId: org,
         deletedAt: null,
+        // still being normalized: it shows up once the workflow releases it
+        status: { not: 'processing' },
+        ...searchFilter,
         ...profileFilter,
       },
       orderBy: {
@@ -246,6 +306,7 @@ export class MediaRepository {
             oauthApps: true,
           },
         },
+        createdAt: true,
       },
       skip: pageNum * 18,
       take: 18,

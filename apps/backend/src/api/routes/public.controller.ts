@@ -19,7 +19,6 @@ import { Request, Response } from 'express';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { getCookieUrlFromDomain } from '@gitroom/helpers/subdomain/subdomain.management';
 import { AgentGraphInsertService } from '@gitroom/nestjs-libraries/agent/agent.graph.insert.service';
-import { Nowpayments } from '@gitroom/nestjs-libraries/crypto/nowpayments';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
@@ -32,6 +31,7 @@ import { ReviewLinksService } from '@gitroom/nestjs-libraries/database/prisma/re
 import { CommentKind } from '@prisma/client';
 import { buildAgentSkillMarkdown } from '@gitroom/nestjs-libraries/agent/agent.skill.template';
 import { SkipProfileAccess } from '@gitroom/nestjs-libraries/services/auth/profile-access/profile-access.decorators';
+import { CreatePublicCommentDto } from '@gitroom/nestjs-libraries/dtos/comments/add.comment.dto';
 
 const pump = promisify(pipeline);
 
@@ -43,7 +43,6 @@ export class PublicController {
     private _trackService: TrackService,
     private _agentGraphInsertService: AgentGraphInsertService,
     private _postsService: PostsService,
-    private _nowpayments: Nowpayments,
     private _subscriptionService: SubscriptionService,
     private _reviewLinksService: ReviewLinksService
   ) {}
@@ -76,8 +75,10 @@ export class PublicController {
 
   @Get(`/posts/:id`)
   async getPreview(@Param('id') id: string) {
+    // the batch only links the posts in the dashboard, it stays out of the
+    // public preview
     return (await this._postsService.getPostsRecursively(id, true)).map(
-      ({ childrenPost, ...p }) => ({
+      ({ childrenPost, batchId, ...p }) => ({
         ...p,
         ...(p.integration
           ? {
@@ -97,6 +98,12 @@ export class PublicController {
   @Get(`/posts/:id/comments`)
   async getComments(@Param('id') postId: string) {
     return { comments: await this._postsService.getComments(postId) };
+  }
+
+  @Get('/posts/:id/review-comments')
+  async getGuestReviewComments(@Param('id') postId: string, @Query('token') token?: string) {
+    const link = await this._reviewLinksService.resolveToken(postId, token);
+    return { comments: link ? await this._postsService.getGuestComments(postId) : [] };
   }
 
   @Get(`/posts/:id/review`)
@@ -170,6 +177,15 @@ export class PublicController {
       content: body?.note,
       kind,
     });
+  }
+
+  @Post(`/posts/:id/comments`)
+  async createComment(
+    @Param('id') postId: string,
+    @Body() body: CreatePublicCommentDto,
+    @RealIP() ip: string
+  ) {
+    return this._postsService.createPublicComment(postId, body, null, ip);
   }
 
   @Post('/t')
@@ -248,12 +264,6 @@ export class PublicController {
     } catch (err) {
       return { success: false };
     }
-  }
-
-  @Post('/crypto/:path')
-  async cryptoPost(@Body() body: any, @Param('path') path: string) {
-    console.log('cryptoPost', body, path);
-    return this._nowpayments.processPayment(path, body);
   }
 
   @Get('/stream')

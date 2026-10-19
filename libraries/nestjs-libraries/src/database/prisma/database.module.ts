@@ -1,5 +1,10 @@
+import { AutomationDeliveryService } from './flows/automation-delivery.service';
 import { Global, Module } from '@nestjs/common';
-import { PrismaRepository, PrismaService, PrismaTransaction } from './prisma.service';
+import {
+  PrismaRepository,
+  PrismaService,
+  PrismaTransaction,
+} from './prisma.service';
 import { OrganizationRepository } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.repository';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
@@ -11,18 +16,28 @@ import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/in
 import { IntegrationRepository } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.repository';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.repository';
+import { PostsSyncRepository } from './posts/posts-sync.repository';
+import { PostsSyncService } from './posts/posts-sync.service';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { MediaRepository } from '@gitroom/nestjs-libraries/database/prisma/media/media.repository';
 import { NotificationsRepository } from '@gitroom/nestjs-libraries/database/prisma/notifications/notifications.repository';
 import { EmailService } from '@gitroom/nestjs-libraries/services/email.service';
 import { StripeService } from '@gitroom/nestjs-libraries/services/stripe.service';
+import { PaymentService } from '@gitroom/nestjs-libraries/services/payment/payment.service';
+import { PaymentProviderManager } from '@gitroom/nestjs-libraries/services/payment/payment.provider.manager';
+import { RevenueCatProvider } from '@gitroom/nestjs-libraries/services/payment/providers/revenuecat.provider';
 import { ExtractContentService } from '@gitroom/nestjs-libraries/openai/extract.content.service';
 import { OpenaiService } from '@gitroom/nestjs-libraries/openai/openai.service';
+import { DeepgramService } from '@gitroom/nestjs-libraries/deepgram/deepgram.service';
+import { ClippingService } from '@gitroom/nestjs-libraries/database/prisma/clipping/clipping.service';
+import { ClippingRepository } from '@gitroom/nestjs-libraries/database/prisma/clipping/clipping.repository';
 import { AgenciesService } from '@gitroom/nestjs-libraries/database/prisma/agencies/agencies.service';
 import { AgenciesRepository } from '@gitroom/nestjs-libraries/database/prisma/agencies/agencies.repository';
 import { TrackService } from '@gitroom/nestjs-libraries/track/track.service';
 import { ShortLinkService } from '@gitroom/nestjs-libraries/short-linking/short.link.service';
+import { SocialCommentsRepository } from '@gitroom/nestjs-libraries/database/prisma/social-comments/social.comments.repository';
+import { SocialCommentsService } from '@gitroom/nestjs-libraries/database/prisma/social-comments/social.comments.service';
 import { WebhooksRepository } from '@gitroom/nestjs-libraries/database/prisma/webhooks/webhooks.repository';
 import { WebhooksService } from '@gitroom/nestjs-libraries/database/prisma/webhooks/webhooks.service';
 import { SignatureRepository } from '@gitroom/nestjs-libraries/database/prisma/signatures/signature.repository';
@@ -65,6 +80,14 @@ import { StatusEventRepository } from '@gitroom/nestjs-libraries/database/prisma
 import { InfraHealthService } from '@gitroom/nestjs-libraries/database/prisma/status/infra-health.service';
 import { InfraHealthRepository } from '@gitroom/nestjs-libraries/database/prisma/status/infra-health.repository';
 import { AiModule } from '@gitroom/nestjs-libraries/ai/ai.module';
+import { ErrorsRepository } from '@gitroom/nestjs-libraries/database/prisma/errors/errors.repository';
+import { ErrorsService } from '@gitroom/nestjs-libraries/database/prisma/errors/errors.service';
+import { AdminStatsRepository } from '@gitroom/nestjs-libraries/database/prisma/admin-stats/admin-stats.repository';
+import { AdminStatsService } from '@gitroom/nestjs-libraries/database/prisma/admin-stats/admin-stats.service';
+import { AnalyticsReportRepository } from '@gitroom/nestjs-libraries/database/prisma/analytics/analytics.report.repository';
+import { AnalyticsReportService } from '@gitroom/nestjs-libraries/database/prisma/analytics/analytics.report.service';
+import { InstanceCredentialsRepository } from '@gitroom/nestjs-libraries/database/prisma/instance-credentials/instance.credentials.repository';
+import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/prisma/instance-credentials/instance.credentials.service';
 
 @Global()
 @Module({
@@ -84,11 +107,20 @@ import { AiModule } from '@gitroom/nestjs-libraries/ai/ai.module';
     NotificationsRepository,
     WebhooksRepository,
     WebhooksService,
+    SocialCommentsRepository,
+    SocialCommentsService,
     IntegrationService,
     IntegrationRepository,
+    AnalyticsReportService,
+    AnalyticsReportRepository,
     PostsService,
     PostsRepository,
+    PostsSyncRepository,
+    PostsSyncService,
     StripeService,
+    PaymentService,
+    PaymentProviderManager,
+    RevenueCatProvider,
     SignatureRepository,
     AutopostRepository,
     AutopostService,
@@ -102,6 +134,9 @@ import { AiModule } from '@gitroom/nestjs-libraries/ai/ai.module';
     MetaSystemUserService,
     ExtractContentService,
     OpenaiService,
+    DeepgramService,
+    ClippingService,
+    ClippingRepository,
     FalService,
     EmailService,
     TrackService,
@@ -124,6 +159,7 @@ import { AiModule } from '@gitroom/nestjs-libraries/ai/ai.module';
     KnowledgeService,
     AnnouncementsRepository,
     AnnouncementsService,
+    AutomationDeliveryService,
     FlowsRepository,
     FlowsService,
     UnmatchedCommentService,
@@ -138,6 +174,12 @@ import { AiModule } from '@gitroom/nestjs-libraries/ai/ai.module';
     StatusEventRepository,
     InfraHealthService,
     InfraHealthRepository,
+    ErrorsRepository,
+    ErrorsService,
+    AdminStatsRepository,
+    AdminStatsService,
+    InstanceCredentialsRepository,
+    InstanceCredentialsService,
   ],
   get exports() {
     return this.providers;

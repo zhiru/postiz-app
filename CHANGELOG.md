@@ -7,6 +7,12 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+### Adicionado
+
+- Integração da base Robô MultiPost com as melhorias Aireset: preserva sincronização do histórico do Instagram, recorrência, relatórios, comentários, webhooks e administração. Migração aditiva e validação de preservação dos dados legados.
+- Automações passam a reservar envios no banco antes de chamar a Meta, bloqueando repetições após timeout ou confirmação incerta; histórico e permissões por perfil preservados. Workflows já em produção permanecem compatíveis, com versões novas isoladas.
+
+
 ## [0.5.6] - 2026-09-09
 
 ### Adicionado

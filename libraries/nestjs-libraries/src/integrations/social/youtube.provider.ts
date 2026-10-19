@@ -5,6 +5,8 @@ import {
   PostDetails,
   PostResponse,
   SocialProvider,
+  ReportMetricsMap,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { google, youtube_v3 } from 'googleapis';
@@ -13,12 +15,24 @@ import { YoutubeSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/provide
 import {
   BadBody,
   SocialAbstract,
+  PublishedWithError,
+  RefreshToken,
+  ValidityMedia,
+  rangeReadFailure,
+  stripQuery,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import * as process from 'node:process';
 import dayjs from 'dayjs';
 import { GaxiosResponse } from 'gaxios/build/src/common';
-import Schema$Video = youtube_v3.Schema$Video;
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { Integration } from '@prisma/client';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { createReadStream, statSync } from 'fs';
+import { timer } from '@gitroom/helpers/utils/timer';
+import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
+
+import Schema$Video = youtube_v3.Schema$Video;
 
 const clientAndYoutube = (clientInformation?: ClientInformation) => {
   const client = new google.auth.OAuth2({
@@ -51,12 +65,18 @@ const clientAndYoutube = (clientInformation?: ClientInformation) => {
 
 @Rules('YouTube must have on video attachment, it cannot be empty')
 export class YoutubeProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 200; // YouTube has strict upload quotas
+  override maxConcurrentJob = 200;
+
   identifier = 'youtube';
+
   name = 'YouTube';
+
   isBetweenSteps = true;
+
   keepReconnectAuthTokens = true;
+
   dto = YoutubeSettingsDto;
+
   scopes = [
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email',
@@ -69,6 +89,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
   ];
 
   editor = 'normal' as const;
+
   maxLength() {
     return 5000;
   }
@@ -171,7 +192,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
   }
 
   async generateAuthUrl(clientInformation?: ClientInformation) {
-    const state = makeId(7);
+    const state = makeSecureId(7);
     const { client } = clientAndYoutube(clientInformation);
     return {
       url: client.generateAuthUrl({
@@ -184,7 +205,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         redirect_uri: `${process.env.FRONTEND_URL}/integrations/social/youtube`,
         scope: this.scopes.slice(0),
       }),
-      codeVerifier: makeId(11),
+      codeVerifier: makeSecureId(11),
       state,
     };
   }
@@ -333,73 +354,60 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
   async post(
     id: string,
     accessToken: string,
-    postDetails: PostDetails[]
+    postDetails: PostDetails[],
+    integration: Integration
   ): Promise<PostResponse[]> {
-    const [firstPost, ...comments] = postDetails;
-
-    const { client, youtube } = clientAndYoutube();
-    client.setCredentials({ access_token: accessToken });
-    const youtubeClient = youtube(client);
-
-    const { settings }: { settings: YoutubeSettingsDto } = firstPost;
-
-    const response = await this.getSsrfSafeAxios()({
-      url: firstPost?.media?.[0]?.path,
-      method: 'GET',
-      responseType: 'stream',
-    });
-
-    const all: GaxiosResponse<Schema$Video> = await this.runInConcurrent(
-      async () =>
-        youtubeClient.videos.insert({
-          part: ['id', 'snippet', 'status'],
-          notifySubscribers: true,
-          requestBody: {
-            snippet: {
-              title: settings.title,
-              description: firstPost?.message,
-              ...(settings?.tags?.length
-                ? { tags: settings.tags.map((p) => p.label) }
-                : {}),
-            },
-            status: {
-              privacyStatus: settings.type,
-              selfDeclaredMadeForKids:
-                settings.selfDeclaredMadeForKids === 'yes',
-            },
-          },
-          media: {
-            body: response.data,
-          },
-        }),
-      true
+    const [response] = await this.postPending(
+      id,
+      accessToken,
+      postDetails,
+      integration
     );
 
-    if (settings?.thumbnail?.path) {
-      await this.runInConcurrent(async () =>
-        youtubeClient.thumbnails.set({
-          videoId: all?.data?.id!,
-          media: {
-            body: (
-              await this.getSsrfSafeAxios()({
-                url: settings?.thumbnail?.path,
-                method: 'GET',
-                responseType: 'stream',
-              })
-            ).data,
-          },
-        })
-      );
+    if (response.status !== 'pending') {
+      return [response];
     }
 
-    return [
-      {
-        id: firstPost.id,
-        releaseURL: `https://www.youtube.com/watch?v=${all?.data?.id}`,
-        postId: all?.data?.id!,
-        status: 'success',
-      },
-    ];
+    let pendingData = response.pendingData;
+    const started = Date.now();
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method, leaving room for one more full upload batch: failing here
+      // is safe (no video exists until the upload completes and the abandoned
+      // session just expires), timing the activity out is not.
+      if (
+        Date.now() - started >
+        8 * 60 * 1000 - YoutubeProvider.YOUTUBE_UPLOAD_BATCH_MS
+      ) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          '{}',
+          'The video upload took too long, please try a smaller video'
+        );
+      }
+
+      const finalize = await this.finalizePost(
+        accessToken,
+        pendingData,
+        integration
+      );
+
+      if (finalize.status === 'completed') {
+        return [
+          {
+            id: response.id,
+            releaseURL: finalize.releaseURL,
+            postId: finalize.postId,
+            status: 'success',
+          },
+        ];
+      }
+
+      pendingData = finalize.pendingData;
+    }
   }
 
   async analytics(
@@ -556,5 +564,488 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       console.error('Error fetching YouTube post analytics:', err);
       return [];
     }
+  }
+
+  reportMetrics: ReportMetricsMap = {
+    followersGained: ['Subscribers Gained'],
+    engagement: ['Likes'],
+  };
+
+  override async checkValidity(
+    items: Array<ValidityMedia[]>
+  ): Promise<string | true> {
+    const [firstItems] = items ?? [];
+    if (items?.[0]?.length !== 1) {
+      return 'You need one media';
+    }
+    if ((firstItems?.[0]?.path?.indexOf?.('mp4') ?? -1) === -1) {
+      return 'Item must be a video';
+    }
+    return true;
+  }
+
+  refreshErrorMessage(err: any): string | undefined {
+    const data = err?.response?.data || {};
+    const text = `${data.error_subtype || ''} ${data.error_description || ''} ${
+      err?.message || ''
+    }`;
+
+    if (text.includes('invalid_rapt')) {
+      return `because your organization's Google Workspace session policy invalidated its access. Ask your Google Workspace admin to mark Postiz as a trusted app and turn on "Exempt trusted apps" (https://support.google.com/a/answer/9368756) to prevent this from happening again`;
+    }
+
+    return undefined;
+  }
+
+  private static readonly YOUTUBE_CHUNK_SIZE = 8 * 1024 * 1024;
+
+  private static readonly YOUTUBE_UPLOAD_BATCH_MS = 4 * 60 * 1000;
+
+  private async youtubeMediaSize(
+    path: string,
+    totalRetries = 0
+  ): Promise<number> {
+    if (path.indexOf('http') === 0) {
+      // the media path is user-influenced, keep the SSRF-safe dispatcher that
+      // this.fetch applies to every other outbound request. identity encoding
+      // so content-length matches the bytes a later GET actually streams
+      // (fetch transparently decompresses encoded bodies).
+      setHeartbeatDetails(`youtube: media size ${stripQuery(path)}`);
+      const head = await fetch(path, {
+        method: 'HEAD',
+        headers: { 'accept-encoding': 'identity' },
+        dispatcher: getSsrfSafeDispatcher(),
+      } as any);
+      const length = Number(head.headers.get('content-length'));
+      // A failed HEAD can still carry a content-length (of the error body),
+      // and a zero/NaN size would poison the chunk math downstream. Same
+      // transient store behaviour as the ranged reads below: retry before
+      // failing the post, nothing irreversible has happened at this point.
+      if (!head.ok || !Number.isFinite(length) || length <= 0) {
+        if (totalRetries <= 2) {
+          await timer(5000);
+          return this.youtubeMediaSize(path, totalRetries + 1);
+        }
+
+        throw new BadBody(
+          this.identifier,
+          rangeReadFailure(head),
+          '{}',
+          'Could not determine the video size for the YouTube upload'
+        );
+      }
+      return length;
+    }
+
+    return statSync(path).size;
+  }
+
+  private async youtubeChunkStream(
+    path: string,
+    start: number,
+    end: number,
+    totalRetries = 0
+  ): Promise<any> {
+    if (path.indexOf('http') === 0) {
+      // identity encoding so the store keeps content-length and can answer
+      // with the requested range: a transformed (compressed) response loses
+      // its length, and a length-less object is answered with the full body.
+      setHeartbeatDetails(
+        `youtube: read media ${start}-${end} ${stripQuery(path)}`
+      );
+      const response = await fetch(path, {
+        headers: {
+          Range: `bytes=${start}-${end}`,
+          'accept-encoding': 'identity',
+        },
+        dispatcher: getSsrfSafeDispatcher(),
+      } as any);
+
+      // A store that ignores Range (200 with the full file) or answers with an
+      // error page would corrupt the upload at this offset, so the body is
+      // never used - but the same store answers the identical range correctly
+      // seconds later, so retry the read instead of failing the whole upload
+      // on one bad answer.
+      if (response.status !== 206) {
+        // release the socket before moving on: the abandoned body can be the
+        // whole object, and undici keeps the connection checked out until it
+        // is consumed or cancelled.
+        await response.body?.cancel().catch(() => {});
+
+        if (totalRetries <= 2) {
+          await timer(5000);
+          return this.youtubeChunkStream(path, start, end, totalRetries + 1);
+        }
+
+        throw new BadBody(
+          this.identifier,
+          rangeReadFailure(response),
+          '{}',
+          'The media storage did not return the requested byte range, please try again'
+        );
+      }
+
+      return response.body;
+    }
+
+    return createReadStream(path, { start, end });
+  }
+
+  private async probeUploadSession(
+    accessToken: string,
+    uploadUri: string,
+    videoSize: number
+  ): Promise<{ videoId: string } | { uploadedBytes: number }> {
+    setHeartbeatDetails('youtube: probe resumable session');
+    const probe = await fetch(uploadUri, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Range': `bytes */${videoSize}`,
+      },
+    });
+
+    if (probe.status === 200 || probe.status === 201) {
+      const { id } = await probe.json();
+      return { videoId: String(id) };
+    }
+
+    if (probe.status === 308) {
+      const range = probe.headers.get('range');
+      return {
+        uploadedBytes: range ? Number(range.split('-')[1]) + 1 : 0,
+      };
+    }
+
+    const text = await probe.text().catch(() => '{}');
+
+    // Transient Google-side errors: the session stays resumable, so throw a
+    // plain error - the caller treats it as "probe again later" instead of
+    // permanently failing a resumable upload.
+    if (probe.status === 429 || probe.status >= 500) {
+      throw new Error(
+        `YouTube upload status check failed with ${probe.status}`
+      );
+    }
+
+    const handleError = this.handleErrors(text);
+
+    // this.fetch has the same 401 fallback: Google 401 bodies don't always
+    // match the handleErrors strings
+    if (probe.status === 401 || handleError?.type === 'refresh-token') {
+      throw new RefreshToken(this.identifier, text, '{}');
+    }
+
+    throw new BadBody(
+      this.identifier,
+      text,
+      '{}',
+      probe.status === 404 || probe.status === 410
+        ? 'The upload session expired before the video was uploaded, please post again'
+        : handleError?.value || 'Failed to check the video upload status'
+    );
+  }
+
+  async postPending(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const [firstPost, ...comments] = postDetails;
+
+    const { settings }: { settings: YoutubeSettingsDto } = firstPost;
+    const path = firstPost?.media?.[0]?.path!;
+    const videoSize = await this.youtubeMediaSize(path);
+
+    // Start a resumable upload session: nothing exists on the channel until
+    // the final byte is received, so nothing here is irreversible yet - the
+    // bytes themselves are streamed by finalizePost, outside this activity.
+    const session = await this.fetch(
+      'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=id,snippet,status&notifySubscribers=true',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Type': 'video/mp4',
+          'X-Upload-Content-Length': String(videoSize),
+        },
+        body: JSON.stringify({
+          snippet: {
+            title: settings.title,
+            description: firstPost?.message,
+            ...(settings?.tags?.length
+              ? { tags: settings.tags.map((p) => p.label) }
+              : {}),
+          },
+          status: {
+            privacyStatus: settings.type,
+            selfDeclaredMadeForKids: settings.selfDeclaredMadeForKids === 'yes',
+          },
+        }),
+      }
+    );
+
+    const uploadUri = session.headers.get('location');
+    if (!uploadUri) {
+      throw new BadBody(
+        this.identifier,
+        '{}',
+        '{}',
+        'Could not start the video upload, please try again'
+      );
+    }
+
+    return [
+      {
+        id: firstPost.id,
+        releaseURL: '',
+        postId: '',
+        status: 'pending',
+        pendingData: {
+          uploadUri,
+          videoSize,
+          path,
+          uploadedBytes: 0,
+          thumbnail: settings?.thumbnail?.path || '',
+          postDbId: firstPost.id,
+        },
+      },
+    ];
+  }
+
+  override async checkPostStatus(
+    accessToken: string,
+    pendingData: {
+      uploadUri: string;
+      videoSize: number;
+      path: string;
+      uploadedBytes: number;
+      postDbId?: string;
+      thumbnail: string;
+      videoId?: string;
+    },
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    let probe: { videoId: string } | { uploadedBytes: number };
+    try {
+      probe = await this.probeUploadSession(
+        accessToken,
+        pendingData.uploadUri,
+        pendingData.videoSize
+      );
+    } catch (err) {
+      if (err instanceof RefreshToken || err instanceof BadBody) {
+        throw err;
+      }
+
+      // transient network error, the workflow will check again
+      return { status: 'pending', pendingData };
+    }
+
+    // the upload completed: the video exists, only the thumbnail may be left
+    if ('videoId' in probe) {
+      if (pendingData.thumbnail) {
+        return {
+          status: 'ready',
+          pendingData: { ...pendingData, videoId: probe.videoId },
+        };
+      }
+
+      return {
+        status: 'completed',
+        postId: probe.videoId,
+        releaseURL: `https://www.youtube.com/watch?v=${probe.videoId}`,
+      };
+    }
+
+    // bytes are still missing, finalizePost resumes from the exact offset
+    return {
+      status: 'ready',
+      pendingData: { ...pendingData, uploadedBytes: probe.uploadedBytes },
+    };
+  }
+
+  override async finalizePost(
+    accessToken: string,
+    pendingData: {
+      uploadUri: string;
+      videoSize: number;
+      path: string;
+      uploadedBytes: number;
+      thumbnail: string;
+      videoId?: string;
+      postDbId?: string;
+    },
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    let videoId = pendingData.videoId;
+
+    if (!videoId) {
+      // ask the session for the truth before sending anything - a previous
+      // run may have died mid-chunk, or even completed without us knowing
+      const probe = await this.probeUploadSession(
+        accessToken,
+        pendingData.uploadUri,
+        pendingData.videoSize
+      );
+
+      if ('uploadedBytes' in probe) {
+        const started = Date.now();
+        let uploaded = probe.uploadedBytes;
+
+        while (uploaded < pendingData.videoSize) {
+          // batch budget exhausted: hand back to the workflow, the next
+          // finalizePost resumes from the offset the session reports
+          if (Date.now() - started > YoutubeProvider.YOUTUBE_UPLOAD_BATCH_MS) {
+            return {
+              status: 'pending',
+              pendingData: { ...pendingData, uploadedBytes: uploaded },
+            };
+          }
+
+          const end =
+            Math.min(
+              uploaded + YoutubeProvider.YOUTUBE_CHUNK_SIZE,
+              pendingData.videoSize
+            ) - 1;
+          const body = await this.youtubeChunkStream(
+            pendingData.path,
+            uploaded,
+            end
+          );
+
+          setHeartbeatDetails('youtube: upload chunk to google');
+          const upload = await fetch(pendingData.uploadUri, {
+            method: 'PUT',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'video/mp4',
+              'Content-Length': String(end - uploaded + 1),
+              'Content-Range': `bytes ${uploaded}-${end}/${pendingData.videoSize}`,
+            },
+            body,
+            // Required by undici when streaming a request body.
+            duplex: 'half',
+          } as any);
+
+          // more bytes expected, resume from the offset the session reports
+          if (upload.status === 308) {
+            const range = upload.headers.get('range');
+            if (!range) {
+              // no committed range reported: don't guess the offset, let the
+              // next probe find the truth
+              return {
+                status: 'pending',
+                pendingData: { ...pendingData, uploadedBytes: uploaded },
+              };
+            }
+            uploaded = Number(range.split('-')[1]) + 1;
+            continue;
+          }
+
+          // final chunk received: the video now exists on the channel
+          if (upload.status === 200 || upload.status === 201) {
+            const { id } = await upload.json();
+            videoId = String(id);
+            break;
+          }
+
+          const text = await upload.text().catch(() => '{}');
+
+          // Transient Google-side errors: the session stays resumable, a plain
+          // error makes the workflow probe and resume instead of failing the
+          // whole upload.
+          if (upload.status === 429 || upload.status >= 500) {
+            throw new Error(
+              `YouTube chunk upload failed with ${upload.status}`
+            );
+          }
+
+          const handleError = this.handleErrors(text);
+
+          if (upload.status === 401 || handleError?.type === 'refresh-token') {
+            throw new RefreshToken(this.identifier, text, '{}');
+          }
+
+          throw new BadBody(
+            this.identifier,
+            text,
+            '{}',
+            handleError?.value || 'Failed to upload the video to YouTube'
+          );
+        }
+
+        if (!videoId) {
+          // all bytes sent without a confirmation, the next check asks the session
+          return {
+            status: 'pending',
+            pendingData: { ...pendingData, uploadedBytes: uploaded },
+          };
+        }
+      } else {
+        videoId = probe.videoId;
+      }
+    }
+
+    const releaseURL = `https://www.youtube.com/watch?v=${videoId}`;
+
+    if (pendingData.thumbnail) {
+      const { client, youtube } = clientAndYoutube();
+      client.setCredentials({ access_token: accessToken });
+      const youtubeClient = youtube(client);
+
+      try {
+        await this.runInConcurrent(async () =>
+          youtubeClient.thumbnails.set({
+            videoId,
+            media: {
+              body: (
+                await this.getSsrfSafeAxios()({
+                  url: pendingData.thumbnail,
+                  method: 'GET',
+                  responseType: 'stream',
+                })
+              ).data,
+            },
+          })
+        );
+      } catch (err: any) {
+        // Authentication failures can refresh and retry this idempotent call.
+        if (err instanceof RefreshToken) throw err;
+        // The video is already live: a rejected thumbnail must not lose its
+        // id and URL, or users re-upload a duplicate thinking the post never
+        // went out. Keep them on the post and still fail it (ERROR, curated
+        // message) so the user knows the thumbnail needs attention.
+        const text = JSON.stringify(err?.response?.data || {});
+        const handleError = this.handleErrors(text);
+
+        if (pendingData.postDbId) {
+          throw new PublishedWithError(
+            this.identifier,
+            pendingData.postDbId,
+            videoId,
+            releaseURL,
+            handleError?.value ||
+              'We have uploaded your video but could not set the thumbnail'
+          );
+        }
+
+        throw new BadBody(
+          this.identifier,
+          text,
+          '{}',
+          handleError?.value ||
+            'We have uploaded your video but could not set the thumbnail'
+        );
+      }
+    }
+
+    return {
+      status: 'completed',
+      postId: videoId,
+      releaseURL,
+    };
   }
 }

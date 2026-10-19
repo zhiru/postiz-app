@@ -16,7 +16,10 @@ import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/n
 import dayjs from 'dayjs';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
-import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  RefreshToken,
+  NotEnoughScopes,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { IntegrationTimeDto } from '@gitroom/nestjs-libraries/dtos/integrations/integration.time.dto';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { PlugDto } from '@gitroom/nestjs-libraries/dtos/plugs/plug.dto';
@@ -35,6 +38,7 @@ dayjs.extend(utc);
 @Injectable()
 export class IntegrationService {
   private storage = UploadFactory.createStorage();
+
   constructor(
     private _integrationRepository: IntegrationRepository,
     private _autopostsRepository: AutopostRepository,
@@ -241,12 +245,6 @@ export class IntegrationService {
     }
   }
 
-  /**
-   * Marca o canal como precisando reconectar e notifica o usuario UMA unica
-   * vez — apenas na transicao false->true (guarda atomica no repository). Evita
-   * e-mail/sininho duplicados quando o batch de refresh e o post-time (ou os
-   * varios call-sites de disconnectChannel) atingem a mesma integration.
-   */
   async disconnectChannel(
     orgId: string,
     integration: Integration,
@@ -276,7 +274,11 @@ export class IntegrationService {
     }
   }
 
-  async informAboutRefreshError(orgId: string, integration: Integration) {
+  async informAboutRefreshError(
+    orgId: string,
+    integration: Integration,
+    cause?: string
+  ) {
     await this._notificationService.inAppNotification(
       orgId,
       {
@@ -385,9 +387,11 @@ export class IntegrationService {
         // derrubar o refresh dos demais canais. Loga SOMENTE name+message, nunca
         // o objeto cru (pode carregar corpo de requisicao com refresh_token).
         console.error(
-          `[refresh-tokens] integration=${integration.id} org=${integration.organizationId} falhou: ${
-            (err as Error)?.name || 'Error'
-          }: ${(err as Error)?.message || 'sem detalhe'}`
+          `[refresh-tokens] integration=${integration.id} org=${
+            integration.organizationId
+          } falhou: ${(err as Error)?.name || 'Error'}: ${
+            (err as Error)?.message || 'sem detalhe'
+          }`
         );
       }
     }
@@ -407,7 +411,10 @@ export class IntegrationService {
       }
       return;
     }
-    const integration = await this._integrationRepository.getIntegrationById(orgId, integrationId);
+    const integration = await this._integrationRepository.getIntegrationById(
+      orgId,
+      integrationId
+    );
     if (!integration) {
       throw new Error('Integration not found');
     }
@@ -420,7 +427,12 @@ export class IntegrationService {
     return this._integrationRepository.disableChannel(org, id);
   }
 
-  async enableChannel(org: string, totalChannels: number, id: string, profileId?: string) {
+  async enableChannel(
+    org: string,
+    totalChannels: number,
+    id: string,
+    profileId?: string
+  ) {
     const integrations = (
       await this._integrationRepository.getIntegrationsList(org, profileId)
     ).filter((f) => !f.disabled);
@@ -534,7 +546,11 @@ export class IntegrationService {
       throw new Error('Invalid integration');
     }
 
-    if (profileId && getIntegration.profileId && getIntegration.profileId !== profileId) {
+    if (
+      profileId &&
+      getIntegration.profileId &&
+      getIntegration.profileId !== profileId
+    ) {
       throw new Error('Integration does not belong to this profile');
     }
 
@@ -786,5 +802,136 @@ export class IntegrationService {
         ];
       }, [] as number[])
     );
+  }
+
+  getChannelHealth(org: string, includeDeleted = false) {
+    return this._integrationRepository.getChannelHealth(org, includeDeleted);
+  }
+
+  updateCustomName(org: string, id: string, name: string) {
+    return this._integrationRepository.updateCustomName(org, id, name);
+  }
+
+  getIntegrationByInternalId(org: string, internalId: string) {
+    return this._integrationRepository.getIntegrationByInternalId(
+      org,
+      internalId
+    );
+  }
+
+  async migrateIntegration(
+    org: string,
+    oldInternalId: string,
+    newProvider: string,
+    auth: { id: string; username: string }
+  ) {
+    const existing =
+      await this._integrationRepository.getIntegrationByInternalId(
+        org,
+        oldInternalId
+      );
+
+    if (
+      !existing ||
+      this._integrationManager.getMigrationTarget(
+        existing.providerIdentifier
+      ) !== newProvider
+    ) {
+      throw new NotEnoughScopes(
+        'Please refresh the channel that needs to be refreshed'
+      );
+    }
+
+    const oldProvider = this._integrationManager.getSocialIntegration(
+      existing.providerIdentifier
+    );
+
+    if (!oldProvider.migrationMatch(auth, existing)) {
+      throw new NotEnoughScopes(
+        `Please connect the same account (@${existing.profile}) that needs to be refreshed`
+      );
+    }
+
+    if (
+      await this._integrationRepository.getIntegrationByInternalId(org, auth.id)
+    ) {
+      throw new NotEnoughScopes(
+        'This account is already connected as another channel, please delete one of them first'
+      );
+    }
+
+    return this._integrationRepository.migrateIntegration(
+      org,
+      existing.id,
+      auth.id,
+      newProvider,
+      existing.rootInternalId === existing.internalId
+        ? auth.id
+        : existing.rootInternalId
+    );
+  }
+
+  async migrateIntegrationOnConnect(
+    org: string,
+    newProvider: string,
+    auth: { id: string; username: string }
+  ) {
+    const sources = this._integrationManager.getMigrationSources(newProvider);
+    if (
+      !sources.length ||
+      this._integrationManager.getSocialIntegration(newProvider).isBetweenSteps
+    ) {
+      return undefined;
+    }
+
+    // the account already exists on the new provider: the normal upsert
+    // updates it, nothing to adopt
+    if (
+      await this._integrationRepository.getIntegrationByInternalId(org, auth.id)
+    ) {
+      return undefined;
+    }
+
+    const existing = (
+      await this._integrationRepository.getIntegrationsList(org)
+    ).find(
+      (p) =>
+        sources.includes(p.providerIdentifier) &&
+        this._integrationManager
+          .getSocialIntegration(p.providerIdentifier)
+          .migrationMatch(auth, p)
+    );
+
+    if (!existing) {
+      return undefined;
+    }
+
+    return this._integrationRepository.migrateIntegration(
+      org,
+      existing.id,
+      auth.id,
+      newProvider,
+      existing.rootInternalId === existing.internalId
+        ? auth.id
+        : existing.rootInternalId
+    );
+  }
+
+  async enableAllIntegrations(org: string) {
+    return this._integrationRepository.enableAllIntegrations(org);
+  }
+
+  async updateCustomerName(orgId: string, id: string, name: string) {
+    const exists = await this._integrationRepository.getCustomerByName(
+      orgId,
+      name
+    );
+    if (exists && exists.id !== id) {
+      throw new HttpException(
+        'A group with this name already exists',
+        HttpStatus.BAD_REQUEST
+      );
+    }
+    return this._integrationRepository.updateCustomerName(orgId, id, name);
   }
 }

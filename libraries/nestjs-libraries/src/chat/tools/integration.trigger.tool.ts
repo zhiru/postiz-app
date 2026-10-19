@@ -28,8 +28,18 @@ export class IntegrationTriggerTool implements AgentToolInterface {
   run() {
     return createTool({
       id: 'triggerTool',
-      description: `After using the integrationSchema, we sometimes miss details we can\'t ask from the user, like ids.
-      Sometimes this tool requires to user prompt for some settings, like a word to search for. methodName is required [input:callable-tools]`,
+      description: `Use this to call a provider helper function (a methodName from the integrationSchema callable tools) that fetches provider-specific data needed for settings, like ids or search results.
+      Some helper functions require values provided by the user, like a word to search for. methodName is required [input:callable-tools].
+      If provider auth is expired, this tool may refresh the stored integration token; if refresh fails, it marks the channel as needing reconnect and notifies the organization.`,
+      mcp: {
+        annotations: {
+          title: 'Trigger Integration Tool',
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+      },
       inputSchema: z.object({
         integrationId: z.string().describe('The id of the integration'),
         methodName: z
@@ -45,11 +55,16 @@ export class IntegrationTriggerTool implements AgentToolInterface {
         ),
       }),
       outputSchema: z.object({
-        output: z.array(z.record(z.string(), z.any())),
+        output: z.union([
+          z.array(z.record(z.string(), z.any())),
+          z.record(z.string(), z.any()),
+          z.string(),
+        ]),
       }),
       execute: async (input: any, options: any) => {
         checkAuth(input, options);
         const requestContext = readRequestContext(options);
+        const profileId = requestContext.get('profileId') as string | undefined;
         const organizationId = JSON.parse(
           requestContext.get('organization') as string
         ).id;
@@ -60,10 +75,10 @@ export class IntegrationTriggerTool implements AgentToolInterface {
             input.integrationId
           );
 
-        if (!getIntegration) {
-          return {
-            output: 'Integration not found',
-          };
+        if (!getIntegration || (profileId && getIntegration.profileId !== profileId)) {
+          throw new Error(
+            'Integration not found, use integrationList to get a valid integration id'
+          );
         }
         getIntegration.token = decryptIntegrationToken(
           this._encryption,
@@ -75,9 +90,9 @@ export class IntegrationTriggerTool implements AgentToolInterface {
         )!;
 
         if (!integrationProvider) {
-          return {
-            output: 'Integration not found',
-          };
+          throw new Error(
+            'Integration provider not found, use integrationList to get a valid integration id'
+          );
         }
 
         const tools = this._integrationManager.getAllTools();
@@ -89,9 +104,12 @@ export class IntegrationTriggerTool implements AgentToolInterface {
           // @ts-ignore
           !integrationProvider[input.methodName]
         ) {
-          return { output: 'tool not found' };
+          throw new Error(
+            `Method "${input.methodName}" not found for this integration, use integrationSchema to get the callable tools`
+          );
         }
 
+        let refreshed = false;
         while (true) {
           try {
             // @ts-ignore
@@ -110,7 +128,8 @@ export class IntegrationTriggerTool implements AgentToolInterface {
 
             return { output: load };
           } catch (err) {
-            if (err instanceof RefreshToken) {
+            if (err instanceof RefreshToken && !refreshed) {
+              refreshed = true;
               const data = await this._refreshIntegrationService.refresh(
                 getIntegration
               );
@@ -120,10 +139,9 @@ export class IntegrationTriggerTool implements AgentToolInterface {
                   organizationId,
                   getIntegration
                 );
-                return {
-                  output:
-                    'We had to disconnect the channel as the token expired',
-                };
+                throw new Error(
+                  'The channel was disconnected because its token expired, the user needs to reconnect it in Postiz'
+                );
               }
 
               const { accessToken } = data;
@@ -136,10 +154,22 @@ export class IntegrationTriggerTool implements AgentToolInterface {
                 }
 
                 continue;
-              } else {
               }
             }
-            return { output: 'Unexpected error' };
+
+            if (err instanceof RefreshToken) {
+              throw new Error(
+                'The provider rejected the credentials even after refreshing the token, the user needs to reconnect the channel in Postiz'
+              );
+            }
+
+            throw new Error(
+              `Provider call failed: ${
+                err instanceof Error && err.message
+                  ? err.message
+                  : 'unexpected error'
+              }`
+            );
           }
         }
       },

@@ -159,7 +159,9 @@ export const ThirdPartyComponent = () => {
                   data?.map((p: any) => (
                     <div
                       key={p.id}
-                      className={clsx('flex gap-[8px] items-center group/profile hover:bg-boxHover')}
+                      className={clsx(
+                        'flex gap-[8px] items-center group/profile hover:bg-boxHover'
+                      )}
                     >
                       <div className="h-full w-[4px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity">
                         <SVGLine />

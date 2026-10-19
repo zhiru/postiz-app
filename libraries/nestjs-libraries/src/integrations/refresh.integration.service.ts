@@ -1,3 +1,13 @@
+import { safeStringify } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+
+// A failed token request can carry the request body (client secret, refresh
+// token) on the error object for providers whose refresh fails through the
+// base fetch or a client library - log a summary instead of the raw error.
+function refreshErrorSummary(err: any): string {
+  return `message=${err?.message || ''} status=${
+    err?.status || err?.response?.status || 0
+  } response=${safeStringify(err?.response?.data ?? '')}`;
+}
 import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { Integration } from '@prisma/client';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
@@ -21,12 +31,19 @@ export class RefreshIntegrationService {
     private _encryption: EncryptionService,
     private _metaSystemUser: MetaSystemUserService
   ) {}
-  async refresh(integration: Integration, cause = ''): Promise<false | AuthTokenDetails> {
+  async refresh(
+    integration: Integration,
+    cause = ''
+  ): Promise<false | AuthTokenDetails> {
     const socialProvider = this._integrationManager.getSocialIntegration(
       integration.providerIdentifier
     );
 
-    const refresh = await this.refreshProcess(integration, socialProvider, cause);
+    const refresh = await this.refreshProcess(
+      integration,
+      socialProvider,
+      cause
+    );
 
     if (!refresh) {
       return false as const;
@@ -43,21 +60,28 @@ export class RefreshIntegrationService {
       integration.providerIdentifier,
       refresh.accessToken,
       refresh.refreshToken,
-      refresh.expiresIn
+      refresh.expiresIn,
+      undefined,
+      integration.inBetweenSteps
     );
 
     return refresh;
   }
 
-  public async setBetweenSteps(integration: Integration) {
+  public async setBetweenSteps(integration: Integration, cause = '') {
     await this._integrationService.setBetweenRefreshSteps(integration.id);
     await this._integrationService.informAboutRefreshError(
       integration.organizationId,
-      integration
+      integration,
+      cause
     );
   }
 
-  public async startRefreshWorkflow(orgId: string, id: string, integration: SocialProvider) {
+  public async startRefreshWorkflow(
+    orgId: string,
+    id: string,
+    integration: SocialProvider
+  ) {
     if (!integration.refreshCron) {
       return false;
     }
@@ -66,7 +90,7 @@ export class RefreshIntegrationService {
       .getRawClient()
       ?.workflow.start(`refreshTokenWorkflow`, {
         workflowId: `refresh_${id}`,
-        args: [{integrationId: id, organizationId: orgId}],
+        args: [{ integrationId: id, organizationId: orgId }],
         taskQueue: 'main',
         workflowIdConflictPolicy: 'TERMINATE_EXISTING',
       });
@@ -79,7 +103,8 @@ export class RefreshIntegrationService {
    * nao so os que tem `refreshCron` por-canal. Chamado pelo StartupMigrationService.
    */
   public async ensureRefreshTokensCronWorkflow() {
-    const intervalHours = Number(process.env.TOKEN_REFRESH_INTERVAL_HOURS) || 24;
+    const intervalHours =
+      Number(process.env.TOKEN_REFRESH_INTERVAL_HOURS) || 24;
 
     return this._temporalService.client
       .getRawClient()
@@ -170,15 +195,50 @@ export class RefreshIntegrationService {
       return refresh;
     }
 
-    const reConnect = await socialProvider.reConnect(
-      integration.rootInternalId,
-      integration.internalId,
-      refresh.accessToken
-    );
+    const reConnect = await socialProvider
+      .reConnect(
+        integration.rootInternalId,
+        integration.internalId,
+        refresh.accessToken
+      )
+      .catch((err: any) => {
+        console.error(
+          `Could not reconnect ${integration.providerIdentifier} integration ${integration.id} after a successful token refresh:`,
+          refreshErrorSummary(err)
+        );
+        return false as const;
+      });
+
+    // A failing reConnect (e.g. YouTube's "Channel not found") used to throw
+    // raw out of this service and surface as a 500 wherever a caller (public
+    // post analytics included) just awaited refresh() expecting a boolean -
+    // treat it the same as a refresh failure instead.
+    if (!reConnect) {
+      return this.markRefreshFailed(integration, cause);
+    }
 
     return {
       ...refresh,
       ...reConnect,
     };
+  }
+
+  // informAboutRefreshError (with the failure cause) already notifies the
+  // user, and refreshNeeded sets the same flag disconnectChannel would —
+  // calling disconnectChannel here sent a second, cause-less copy of the same
+  // email for every failed refresh.
+  private async markRefreshFailed(integration: Integration, cause: string) {
+    await this._integrationService.refreshNeeded(
+      integration.organizationId,
+      integration.id
+    );
+
+    await this._integrationService.informAboutRefreshError(
+      integration.organizationId,
+      integration,
+      cause
+    );
+
+    return false as const;
   }
 }

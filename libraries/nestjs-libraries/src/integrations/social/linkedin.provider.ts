@@ -4,6 +4,7 @@ import {
   PostDetails,
   PostResponse,
   SocialProvider,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import sharp from 'sharp';
@@ -11,6 +12,8 @@ import { lookup } from 'mime-types';
 import {
   BadBody,
   SocialAbstract,
+  RefreshToken,
+  ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { Integration } from '@prisma/client';
 import { PostPlug } from '@gitroom/helpers/decorators/post.plug';
@@ -20,6 +23,10 @@ import { Readable } from 'stream';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 import { createReadStream, statSync } from 'node:fs';
 import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { hasExtension } from '@gitroom/helpers/utils/has.extension';
+import { timer } from '@gitroom/helpers/utils/timer';
+import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 
 const mediaPathname = (path: string) => {
   try {
@@ -32,15 +39,43 @@ const mediaPathname = (path: string) => {
 const hasMediaExtension = (path: string, extension: string) =>
   mediaPathname(path).toLowerCase().endsWith(`.${extension.toLowerCase()}`);
 
+type LinkedinPendingData = {
+  authorId: string;
+  postType: 'company' | 'personal';
+  message: string;
+  isPdf: boolean;
+  pdfTitle?: string;
+  mediaIds: string[];
+  // Media whose processing status can be read via GET: videos for every token,
+  // images/documents only for organization tokens.
+  poll: { urn: string; endpoint: 'videos' | 'images' | 'documents' }[];
+  // Check cycles to wait for unpollable media (personal images/documents).
+  graceChecks: number;
+  // Consecutive status reads that failed or answered without a status:
+  // bounded so a broken media endpoint fails with an accurate error instead
+  // of burning the whole check budget into a misleading "couldn't confirm"
+  // warning (nothing is ever published before the media is ready).
+  statusStalls?: number;
+  // Arm -> confirm -> publish handshake (same as the Facebook story flow):
+  // finalizePost arms without mutating, checkPostStatus witnesses, and only a
+  // witnessed attempt runs the create - so a create that dies with an unknown
+  // outcome is detected instead of run again (LinkedIn has no idempotency key).
+  attempting?: boolean;
+  confirmed?: boolean;
+};
+
 @Rules(
   'LinkedIn can have maximum one attachment when selecting video, when choosing a carousel on LinkedIn minimum amount of attachment must be two, and only pictures, if uploading a video, LinkedIn can have only one attachment'
 )
 export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   identifier = 'linkedin';
+
   name = 'LinkedIn';
+
   oneTimeToken = true;
 
   isBetweenSteps = false;
+
   scopes = [
     'openid',
     'profile',
@@ -50,10 +85,15 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     'w_organization_social',
     'r_organization_social',
   ];
-  override maxConcurrentJob = 2; // LinkedIn has professional posting limits
+
+  override maxConcurrentJob = 2;
+
   refreshWait = true;
+
   editor = 'normal' as const;
+
   dto = LinkedinDto;
+
   maxLength() {
     return 3000;
   }
@@ -132,7 +172,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   }
 
   async generateAuthUrl(clientInformation?: ClientInformation) {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     const codeVerifier = makeId(30);
     const clientId =
       clientInformation?.client_id || process.env.LINKEDIN_CLIENT_ID;
@@ -254,27 +294,23 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     fileName: string,
     accessToken: string,
     personId: string,
+    // Either the media bytes (images / converted PDFs) or a `{ path }`
+    // descriptor for videos, which are streamed chunk-by-chunk from the source
+    // instead of being held in memory.
     picture: Buffer | { path: string },
     type = 'personal' as 'company' | 'personal'
-  ) {
+  ): Promise<{
+    id: string;
+    poll?: { urn: string; endpoint: 'videos' | 'images' | 'documents' };
+    grace?: boolean;
+  }> {
     // Determine the appropriate endpoint based on file type
-    const isVideo = hasMediaExtension(fileName, 'mp4');
-    const isPdf = hasMediaExtension(fileName, 'pdf');
+    const isVideo = hasExtension(fileName, 'mp4');
+    const isPdf = hasExtension(fileName, 'pdf');
 
-    if (!isVideo && !Buffer.isBuffer(picture)) {
-      throw new BadBody(
-        'linkedin-error-upload',
-        '{}',
-        Buffer.from('{}'),
-        'LinkedIn images and documents must be uploaded from a buffer'
-      );
-    }
-
-    const videoSizeBytes = isVideo
-      ? Buffer.isBuffer(picture)
-        ? picture.length
-        : await this.videoSize(picture.path)
-      : 0;
+    const fileSizeBytes = Buffer.isBuffer(picture)
+      ? picture.length
+      : await this.mediaSize(picture.path, this.identifier);
 
     let endpoint: string;
     if (isVideo) {
@@ -306,7 +342,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
                   : `urn:li:organization:${personId}`,
               ...(isVideo
                 ? {
-                    fileSizeBytes: videoSizeBytes,
+                    fileSizeBytes,
                     uploadCaptions: false,
                     uploadThumbnail: false,
                   }
@@ -320,14 +356,23 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     const sendUrlRequest = uploadInstructions?.[0]?.uploadUrl || uploadUrl;
     const finalOutput = video || image || document;
 
-    const etags: (string | null)[] = [];
+    const etags = [];
     if (isVideo) {
-      const chunkSize = 2 * 1024 * 1024;
-      for (let start = 0; start < videoSizeBytes; start += chunkSize) {
-        const end = Math.min(start + chunkSize, videoSizeBytes) - 1;
+      // Only the Videos API uses multipart chunked uploads. Each 2MB part is
+      // PUT separately and the returned etags are passed to finalizeUpload.
+      // Each part is read on demand (mediaChunk) so only one 2MB chunk is ever
+      // resident in memory instead of the whole video.
+      const chunkSize = 1024 * 1024 * 2;
+      for (let i = 0; i < fileSizeBytes; i += chunkSize) {
         const body = Buffer.isBuffer(picture)
-          ? picture.slice(start, end + 1)
-          : await this.videoChunk(picture.path, start, end);
+          ? picture.slice(i, i + chunkSize)
+          : await this.mediaChunk(
+              picture.path,
+              i,
+              Math.min(i + chunkSize, fileSizeBytes) - 1,
+              this.identifier
+            );
+
         const upload = await this.fetch(
           sendUrlRequest,
           {
@@ -348,6 +393,10 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
         etags.push(upload.headers.get('etag'));
       }
     } else {
+      // Images and documents (PDF carousels) use a single-shot upload URL and
+      // must be sent as one PUT of the whole file. Chunking here would send
+      // multiple overwriting PUTs to the same URL, leaving LinkedIn with only
+      // the final chunk and corrupting anything larger than 2MB.
       await this.fetch(
         sendUrlRequest,
         {
@@ -358,6 +407,8 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
             Authorization: `Bearer ${accessToken}`,
             ...(isPdf ? { 'Content-Type': 'application/pdf' } : {}),
           },
+          // Only videos arrive as a { path } descriptor; images and documents
+          // are always a Buffer.
           body: picture as Buffer,
         },
         'linkedin',
@@ -388,7 +439,31 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
       );
     }
 
-    return finalOutput;
+    // Every media type is processed asynchronously after the upload and must
+    // reach AVAILABLE before it is attached to a post, otherwise LinkedIn
+    // rejects the post with a processing error. The waiting itself happens in
+    // checkPostStatus, this method only describes what to wait for: videos can
+    // be polled by any token, images and documents only by organization
+    // tokens - a w_member_social (personal) token is write-only for those
+    // endpoints, so the caller waits a grace period instead of polling.
+    if (isVideo) {
+      return {
+        id: finalOutput,
+        poll: { urn: finalOutput, endpoint: 'videos' as const },
+      };
+    }
+
+    if (type === 'company') {
+      return {
+        id: finalOutput,
+        poll: {
+          urn: finalOutput,
+          endpoint: (isPdf ? 'documents' : 'images') as 'documents' | 'images',
+        },
+      };
+    }
+
+    return { id: finalOutput, grace: true };
   }
 
   protected fixText(text: string) {
@@ -491,50 +566,65 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     accessToken: string,
     personId: string,
     type: 'company' | 'personal'
-  ): Promise<Record<string, string[]>> {
-    const mediaUploads = await Promise.all(
-      postDetails.flatMap(
-        (post) =>
-          post.media?.map(async (media) => {
-            let mediaBuffer: Buffer | { path: string };
+  ): Promise<{
+    mediaUploads: Record<string, string[]>;
+    poll: { urn: string; endpoint: 'videos' | 'images' | 'documents' }[];
+    graceChecks: number;
+  }> {
+    // Media is uploaded sequentially on purpose: uploading everything with
+    // Promise.all holds every file in memory at the same time.
+    const mediaUploads: Record<string, string[]> = {};
+    const poll: { urn: string; endpoint: 'videos' | 'images' | 'documents' }[] =
+      [];
+    let graceChecks = 0;
+    for (const post of postDetails) {
+      for (const media of post.media || []) {
+        let mediaBuffer: Buffer | { path: string };
 
-            // Check if media has a buffer (from PDF conversion)
-            if (
-              media &&
-              typeof media === 'object' &&
-              'buffer' in media &&
-              Buffer.isBuffer(media.buffer)
-            ) {
-              mediaBuffer = (media as any).buffer;
-            } else if (hasMediaExtension(media.path, 'mp4')) {
-              mediaBuffer = { path: media.path };
-            } else {
-              mediaBuffer = await this.prepareMediaBuffer(media.path);
-            }
+        // Check if media has a buffer (from PDF conversion)
+        if (
+          media &&
+          typeof media === 'object' &&
+          'buffer' in media &&
+          Buffer.isBuffer(media.buffer)
+        ) {
+          mediaBuffer = (media as any).buffer;
+        } else if (hasExtension(media.path, 'mp4')) {
+          // Videos are never buffered: uploadPicture streams them from the
+          // source chunk-by-chunk.
+          mediaBuffer = { path: media.path };
+        } else {
+          mediaBuffer = await this.prepareMediaBuffer(media.path);
+        }
 
-            const uploadedMediaId = await this.uploadPicture(
-              media.path,
-              accessToken,
-              personId,
-              mediaBuffer,
-              type
-            );
+        const uploaded = await this.uploadPicture(
+          media.path,
+          accessToken,
+          personId,
+          mediaBuffer,
+          type
+        );
 
-            return {
-              id: uploadedMediaId,
-              postId: post.id,
-            };
-          }) || []
-      )
-    );
+        if (!uploaded?.id) {
+          continue;
+        }
 
-    return mediaUploads.reduce((acc, upload) => {
-      if (!upload?.id) return acc;
+        mediaUploads[post.id] = mediaUploads[post.id] || [];
+        mediaUploads[post.id].push(uploaded.id);
 
-      acc[upload.postId] = acc[upload.postId] || [];
-      acc[upload.postId].push(upload.id);
-      return acc;
-    }, {} as Record<string, string[]>);
+        if (uploaded.poll) {
+          poll.push(uploaded.poll);
+        }
+
+        // Unpollable media (personal images/documents): wait one durable check
+        // cycle before attaching it, replacing the old inline timer.
+        if (uploaded.grace) {
+          graceChecks = 1;
+        }
+      }
+    }
+
+    return { mediaUploads, poll, graceChecks };
   }
 
   private async videoSize(path: string): Promise<number> {
@@ -609,15 +699,28 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   }
 
   private async prepareMediaBuffer(mediaUrl: string): Promise<Buffer> {
-    const mediaLookupPath = mediaPathname(mediaUrl);
-    const isGif = lookup(mediaLookupPath) === 'image/gif';
+    const isGif = lookup(mediaUrl) === 'image/gif';
 
+    // GIFs pass through untouched (sharp would break animation). Videos never
+    // reach this function - they are streamed by uploadPicture instead.
     if (isGif) {
+      // Buffer.from keeps the return type a real Buffer regardless of what
+      // readOrFetch yields - uploadPicture branches on Buffer.isBuffer.
       return Buffer.from(await this.readOrFetch(mediaUrl));
     }
 
-    const mime = lookup(mediaLookupPath);
+    const mime = lookup(mediaUrl);
+    // PNG and JPEG (covers both .jpg and .jpeg) keep their original format;
+    // anything else (webp, tiff, ...) is converted to jpeg for compatibility.
     const keepFormat = mime === 'image/png' || mime === 'image/jpeg';
+
+    // Always downscale to stay under LinkedIn's 36,152,320-pixel cap: fit within
+    // a 6000x6000 box (max 36,000,000 px for any aspect ratio) while preserving
+    // the aspect ratio and never enlarging smaller images (downscale-only).
+    // NOTE: this guard is required for self-hosted instances running with
+    // DISABLE_IMAGE_COMPRESSION=true, where the frontend no longer shrinks
+    // uploads and full-size images reach LinkedIn directly. Do not remove it on
+    // the assumption that the frontend compression already caps dimensions.
     const pipeline = sharp(await this.readOrFetch(mediaUrl), {
       animated: false,
     }).resize({
@@ -627,7 +730,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
       withoutEnlargement: true,
     });
 
-    return (keepFormat ? pipeline : pipeline.toFormat('jpeg')).toBuffer();
+    return await (keepFormat ? pipeline : pipeline.toFormat('jpeg')).toBuffer();
   }
 
   private buildPostContent(
@@ -686,21 +789,18 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   }
 
   private async createMainPost(
-    id: string,
+    authorId: string,
     accessToken: string,
-    firstPost: PostDetails<LinkedinDto>,
+    message: string,
     mediaIds: string[],
     type: 'company' | 'personal',
-    isPdf: boolean
+    isPdf: boolean,
+    pdfTitle?: string
   ): Promise<string> {
-    const pdfTitle = isPdf
-      ? firstPost.settings?.carousel_name || 'slides'
-      : undefined;
-
     const postPayload = this.createLinkedInPostPayload(
-      id,
+      authorId,
       type,
-      firstPost.message,
+      message,
       mediaIds,
       isPdf,
       pdfTitle
@@ -718,7 +818,12 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     });
 
     if (response.status !== 201 && response.status !== 200) {
-      throw new Error('Error posting to LinkedIn');
+      throw new BadBody(
+        this.identifier,
+        '{}',
+        JSON.stringify(postPayload),
+        'Error posting to LinkedIn'
+      );
     }
 
     return response.headers.get('x-restli-id')!;
@@ -735,12 +840,14 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
       type === 'personal' ? `urn:li:person:${id}` : `urn:li:organization:${id}`;
 
     const response = await this.fetch(
-      `https://api.linkedin.com/v2/socialActions/${encodeURIComponent(
+      `https://api.linkedin.com/rest/socialActions/${encodeURIComponent(
         parentPostId
       )}/comments`,
       {
         method: 'POST',
         headers: {
+          'LinkedIn-Version': '202306',
+          'X-Restli-Protocol-Version': '2.0.0',
           'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
@@ -782,44 +889,57 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     integration: Integration,
     type = 'personal' as 'company' | 'personal'
   ): Promise<PostResponse[]> {
-    let processedPostDetails = postDetails;
-    const [firstPost] = postDetails;
-
-    // Check if we should convert images to PDF carousel
-    if (this.assetBoolean(firstPost.settings?.post_as_images_carousel)) {
-      processedPostDetails = await this.convertImagesToPdfCarousel(
-        postDetails,
-        firstPost
-      );
-    }
-
-    const [processedFirstPost] = processedPostDetails;
-
-    // Process and upload media for the first post only
-    const uploadedMedia = await this.processMediaForPosts(
-      [processedFirstPost],
-      accessToken,
+    const [response] = await this.postPending(
       id,
+      accessToken,
+      postDetails,
+      integration,
       type
     );
 
-    // Get media IDs for the main post
-    const mainPostMediaIds = (
-      uploadedMedia[processedFirstPost.id] || []
-    ).filter(Boolean);
+    let pendingData = response.pendingData;
+    const started = Date.now();
 
-    // Create the main LinkedIn post
-    const mainPostId = await this.createMainPost(
-      id,
-      accessToken,
-      processedFirstPost,
-      mainPostMediaIds,
-      type,
-      this.assetBoolean(firstPost.settings?.post_as_images_carousel)
-    );
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method: failing here is safe (the post is only created once all
+      // the media is ready), timing the activity out is not - a retried
+      // activity would upload and publish again.
+      if (Date.now() - started > 8 * 60 * 1000) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          '{}',
+          'LinkedIn took too long to process the media, please try again'
+        );
+      }
 
-    // Return response for main post only
-    return [this.createPostResponse(mainPostId, processedFirstPost.id, true)];
+      const check = await this.checkPostStatus(
+        accessToken,
+        pendingData,
+        integration
+      );
+
+      if (check.status === 'pending') {
+        pendingData = check.pendingData;
+        await timer(20000);
+        continue;
+      }
+
+      const result =
+        check.status === 'ready'
+          ? await this.finalizePost(accessToken, check.pendingData, integration)
+          : check;
+
+      if (result.status === 'completed') {
+        return [this.createPostResponse(result.postId, response.id, true)];
+      }
+
+      // finalize only armed the handshake (nothing to wait for), loop straight
+      // into the witnessing check
+      pendingData = result.pendingData;
+    }
   }
 
   async comment(
@@ -955,5 +1075,261 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
 
   mentionFormat(idOrHandle: string, name: string) {
     return `@[${name.replace('@', '')}](urn:li:organization:${idOrHandle})`;
+  }
+
+  override async checkValidity(
+    posts: Array<ValidityMedia[]>,
+    vals: any
+  ): Promise<string | true> {
+    const [firstPost, ...restPosts] = posts ?? [];
+
+    if (
+      this.assetBoolean(vals?.post_as_images_carousel) &&
+      ((firstPost?.length ?? 0) < 2 ||
+        firstPost?.some((p) => (p?.path?.indexOf?.('mp4') ?? -1) > -1))
+    ) {
+      return 'Carousel can only be created with 2 or more images and no videos.';
+    }
+
+    if (
+      (firstPost?.length ?? 0) > 1 &&
+      firstPost?.some((p) => (p?.path?.indexOf?.('mp4') ?? -1) > -1)
+    ) {
+      return 'Can have maximum 1 media when selecting a video.';
+    }
+    if (restPosts?.some((p) => (p?.length ?? 0) > 0)) {
+      return 'Comments can only contain text.';
+    }
+    return true;
+  }
+
+  private async mediaProcessingStatus(
+    accessToken: string,
+    urn: string,
+    endpoint: 'videos' | 'images' | 'documents'
+  ): Promise<{ status?: string; processingFailureReason?: string }> {
+    // The full response body is returned (not just the two fields) so a
+    // processing failure can attach LinkedIn's complete answer to the error.
+    return await (
+      await this.fetch(
+        `https://api.linkedin.com/rest/${endpoint}/${encodeURIComponent(urn)}`,
+        {
+          method: 'GET',
+          headers: {
+            'X-Restli-Protocol-Version': '2.0.0',
+            'LinkedIn-Version': '202601',
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      )
+    ).json();
+  }
+
+  async postPending(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails<LinkedinDto>[],
+    integration: Integration,
+    type = 'personal' as 'company' | 'personal'
+  ): Promise<PostResponse[]> {
+    let processedPostDetails = postDetails;
+    const [firstPost] = postDetails;
+    const isPdf = this.assetBoolean(
+      firstPost.settings?.post_as_images_carousel
+    );
+
+    // Check if we should convert images to PDF carousel
+    if (isPdf) {
+      processedPostDetails = await this.convertImagesToPdfCarousel(
+        postDetails,
+        firstPost
+      );
+    }
+
+    const [processedFirstPost] = processedPostDetails;
+
+    // Upload the media now; the asynchronous processing wait moves to
+    // checkPostStatus and the post itself is only created by finalizePost, so
+    // nothing here is irreversible - a failure leaves only orphaned media.
+    const { mediaUploads, poll, graceChecks } = await this.processMediaForPosts(
+      [processedFirstPost],
+      accessToken,
+      id,
+      type
+    );
+
+    return [
+      {
+        id: processedFirstPost.id,
+        releaseURL: '',
+        postId: '',
+        status: 'pending',
+        pendingData: {
+          authorId: id,
+          postType: type,
+          message: processedFirstPost.message,
+          isPdf,
+          ...(isPdf
+            ? { pdfTitle: firstPost.settings?.carousel_name || 'slides' }
+            : {}),
+          mediaIds: (mediaUploads[processedFirstPost.id] || []).filter(Boolean),
+          poll,
+          graceChecks,
+        } as LinkedinPendingData,
+      },
+    ];
+  }
+
+  override async checkPostStatus(
+    accessToken: string,
+    pendingData: LinkedinPendingData,
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    // A confirmed create attempt died without reporting its result: LinkedIn
+    // gives no way to ask whether that post was created, so never run the
+    // create again - stop with an explicit warning instead.
+    if (pendingData.attempting && pendingData.confirmed) {
+      throw new BadBody(
+        this.identifier,
+        '{}',
+        '{}',
+        'LinkedIn may have already published this post, please check your account before posting again to avoid duplicates'
+      );
+    }
+
+    // Check every media that is still processing; keep the ones that have not
+    // reached AVAILABLE yet for the next cycle.
+    const stillProcessing: LinkedinPendingData['poll'] = [];
+    for (const media of pendingData.poll || []) {
+      let status: { status?: string; processingFailureReason?: string };
+      try {
+        status = await this.mediaProcessingStatus(
+          accessToken,
+          media.urn,
+          media.endpoint
+        );
+
+        // A 200 without a status field can never reach AVAILABLE: count it
+        // like a failed read instead of polling it forever.
+        if (!status.status) {
+          throw new Error('LinkedIn answered without a media status');
+        }
+      } catch (err) {
+        if (err instanceof RefreshToken) {
+          throw err;
+        }
+
+        // Persistent failures mean the media will never be confirmed ready:
+        // fail with an accurate message - the post is only created after the
+        // media is ready, so nothing was published.
+        if ((pendingData.statusStalls || 0) >= 10) {
+          throw new BadBody(
+            this.identifier,
+            '{}',
+            '{}',
+            'LinkedIn kept failing the media status check, nothing was published, please try again'
+          );
+        }
+
+        // Transient status-check error: the media may finish processing just
+        // fine, keep polling.
+        return {
+          status: 'pending',
+          pendingData: {
+            ...pendingData,
+            statusStalls: (pendingData.statusStalls || 0) + 1,
+          },
+        };
+      }
+
+      if (status.status === 'PROCESSING_FAILED') {
+        const label =
+          media.endpoint === 'videos'
+            ? 'video'
+            : media.endpoint === 'documents'
+            ? 'document'
+            : 'image';
+        throw new BadBody(
+          this.identifier,
+          JSON.stringify(status),
+          '{}',
+          `LinkedIn ${label} processing failed${
+            status.processingFailureReason
+              ? `: ${status.processingFailureReason}`
+              : ''
+          }`
+        );
+      }
+
+      if (status.status !== 'AVAILABLE') {
+        stillProcessing.push(media);
+      }
+    }
+
+    if (stillProcessing.length) {
+      // every media answered with a real status: the endpoint works, reset
+      // the stall counter
+      return {
+        status: 'pending',
+        pendingData: { ...pendingData, poll: stillProcessing, statusStalls: 0 },
+      };
+    }
+
+    // Unpollable media (personal images/documents are write-only endpoints):
+    // wait the remaining grace cycles before attaching them to the post.
+    if (pendingData.graceChecks > 0) {
+      return {
+        status: 'pending',
+        pendingData: {
+          ...pendingData,
+          poll: [],
+          graceChecks: pendingData.graceChecks - 1,
+        },
+      };
+    }
+
+    // witness the armed create so finalizePost knows the attempt is uniquely
+    // accounted for before it mutates anything
+    if (pendingData.attempting && !pendingData.confirmed) {
+      return {
+        status: 'ready',
+        pendingData: { ...pendingData, poll: [], confirmed: true },
+      };
+    }
+
+    return { status: 'ready', pendingData: { ...pendingData, poll: [] } };
+  }
+
+  override async finalizePost(
+    accessToken: string,
+    pendingData: LinkedinPendingData,
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    // Create with an arm -> confirm -> publish handshake: the create only runs
+    // after checkPostStatus witnessed the intent, so a run that dies
+    // mid-create is detectable and the post is never published twice.
+    if (!pendingData.attempting || !pendingData.confirmed) {
+      return {
+        status: 'pending',
+        pendingData: { ...pendingData, attempting: true, confirmed: false },
+      };
+    }
+
+    const mainPostId = await this.createMainPost(
+      pendingData.authorId,
+      accessToken,
+      pendingData.message,
+      (pendingData.mediaIds || []).filter(Boolean),
+      pendingData.postType,
+      pendingData.isPdf,
+      pendingData.pdfTitle
+    );
+
+    return {
+      status: 'completed',
+      postId: mainPostId,
+      releaseURL: `https://www.linkedin.com/feed/update/${mainPostId}`,
+    };
   }
 }

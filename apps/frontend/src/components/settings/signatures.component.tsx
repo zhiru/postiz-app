@@ -1,4 +1,4 @@
-import React, { FC, Fragment, useCallback } from 'react';
+import React, { FC, useCallback } from 'react';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import useSWR from 'swr';
 import { Button } from '@gitroom/react/form/button';
@@ -28,7 +28,9 @@ export const SignaturesComponent: FC<{
   const addSignature = useCallback(
     (data?: any) => () => {
       modal.openModal({
-        title: data ? t('top_title_edit_signature', 'Edit Signature') : t('top_title_add_signature', 'Add Signature'),
+        title: data
+          ? t('top_title_edit_signature', 'Edit Signature')
+          : t('top_title_add_signature', 'Add Signature'),
         withCloseButton: true,
         children: <AddOrRemoveSignature data={data} reload={mutate} />,
       });
@@ -51,7 +53,10 @@ export const SignaturesComponent: FC<{
           method: 'DELETE',
         });
         mutate();
-        toaster.show(t('signature_deleted', 'Signature deleted successfully'), 'success');
+        toaster.show(
+          t('signature_deleted', 'Signature deleted successfully'),
+          'success'
+        );
       }
     },
     []
@@ -66,7 +71,7 @@ export const SignaturesComponent: FC<{
           'You can add signatures to your account to be used in your posts.'
         )}
       </div>
-      <div className="my-[16px] mt-[16px] bg-sixth border-fifth items-center border rounded-[4px] p-[24px] flex gap-[24px]">
+      <div className="my-[16px] mt-[16px] bg-sixth border-fifth items-center border rounded-[4px] p-[24px] mobile:p-[12px] flex gap-[24px]">
         <div className="flex flex-col w-full">
           {!!data?.length && (
             <div
@@ -74,19 +79,31 @@ export const SignaturesComponent: FC<{
                 !!appendSignature
                   ? 'grid-cols-[1fr,1fr,1fr,1fr,1fr]'
                   : 'grid-cols-[1fr,1fr,1fr,1fr]'
-              } w-full gap-y-[10px]`}
+              } mobile:grid-cols-1 w-full gap-y-[10px] mobile:gap-y-[8px]`}
             >
-              <div>{t('content', 'Content')}</div>
-              <div className="text-center">{t('auto_add', 'Auto Add?')}</div>
+              <div className="mobile:hidden">{t('content', 'Content')}</div>
+              <div className="text-center mobile:hidden">
+                {t('auto_add', 'Auto Add?')}
+              </div>
               {!!appendSignature && (
-                <div className="text-center">{t('actions', 'Actions')}</div>
+                <div className="text-center mobile:hidden">
+                  {t('actions', 'Actions')}
+                </div>
               )}
-              <div className="text-center">{t('edit', 'Edit')}</div>
-              <div className="text-center">{t('delete', 'Delete')}</div>
+              <div className="text-center mobile:hidden">
+                {t('edit', 'Edit')}
+              </div>
+              <div className="text-center mobile:hidden">
+                {t('delete', 'Delete')}
+              </div>
               {data?.map((p: any) => (
-                <Fragment key={p.id}>
-                  <div className="relative flex-1 me-[20px] overflow-x-hidden">
-                    <div className="absolute start-0 line-clamp-1 top-[50%] -translate-y-[50%] text-ellipsis">
+                // a row of the table, a card on phones
+                <div
+                  key={p.id}
+                  className="contents mobile:flex mobile:flex-wrap mobile:gap-[8px] mobile:p-[12px] mobile:rounded-[8px] mobile:border mobile:border-newColColor"
+                >
+                  <div className="relative flex-1 me-[20px] overflow-x-hidden mobile:basis-full mobile:me-0">
+                    <div className="absolute start-0 line-clamp-1 top-[50%] -translate-y-[50%] text-ellipsis mobile:static mobile:translate-y-0">
                       {p.content.slice(0, 15) + '...'}
                     </div>
                   </div>
@@ -96,34 +113,46 @@ export const SignaturesComponent: FC<{
                     </div>
                   </div>
                   {!!appendSignature && (
-                    <div className="flex justify-center">
-                      <Button onClick={() => appendSignature(p.content)}>
+                    <div className="flex justify-center mobile:basis-full">
+                      <Button
+                        className="mobile:w-full mobile:px-[12px]"
+                        onClick={() => appendSignature(p.content)}
+                      >
                         {t('use_signature', 'Use Signature')}
                       </Button>
                     </div>
                   )}
-                  <div className="flex justify-center">
-                    <div>
-                      <Button onClick={addSignature(p)}>
+                  <div className="flex justify-center mobile:flex-1">
+                    <div className="mobile:w-full">
+                      <Button
+                        className="mobile:w-full mobile:px-[12px]"
+                        onClick={addSignature(p)}
+                      >
                         {t('edit', 'Edit')}
                       </Button>
                     </div>
                   </div>
-                  <div className="flex justify-center">
-                    <div>
-                      <Button onClick={deleteSignature(p)}>
+                  <div className="flex justify-center mobile:flex-1">
+                    <div className="mobile:w-full">
+                      <Button
+                        className="mobile:w-full mobile:px-[12px]"
+                        onClick={deleteSignature(p)}
+                      >
                         {t('delete', 'Delete')}
                       </Button>
                     </div>
                   </div>
-                </Fragment>
+                </div>
               ))}
             </div>
           )}
           <div>
             <Button
               onClick={addSignature()}
-              className={clsx((data?.length || 0) > 0 && 'my-[16px]')}
+              className={clsx(
+                (data?.length || 0) > 0 && 'my-[16px]',
+                'mobile:w-full'
+              )}
             >
               {t('add_a_signature', 'Add a signature')}
             </Button>
@@ -208,7 +237,10 @@ const AddOrRemoveSignature: FC<{
               onChange={(e) => {
                 form.setValue('content', e.target.value);
               }}
-              placeholder={t('write_signature_placeholder', 'Write your signature...')}
+              placeholder={t(
+                'write_signature_placeholder',
+                'Write your signature...'
+              )}
               autosuggestionsConfig={{
                 textareaPurpose: `Assist me in writing social media signature`,
                 chatApiConfigs: {},
@@ -222,12 +254,8 @@ const AddOrRemoveSignature: FC<{
               setValueAs: (value) => value === 'true',
             })}
           >
-            <option value="false">
-              {t('no', 'No')}
-            </option>
-            <option value="true">
-              {t('yes', 'Yes')}
-            </option>
+            <option value="false">{t('no', 'No')}</option>
+            <option value="true">{t('yes', 'Yes')}</option>
           </Select>
 
           <Button type="submit">{t('save', 'Save')}</Button>

@@ -1,8 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpException,
+  Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -13,9 +16,10 @@ import { sign } from 'jsonwebtoken';
 import { Organization, User } from '@prisma/client';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
-import { StripeService } from '@gitroom/nestjs-libraries/services/stripe.service';
+import { PaymentService } from '@gitroom/nestjs-libraries/services/payment/payment.service';
 import { Response, Request } from 'express';
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
+import { AuthService as AuthChecker } from '@gitroom/helpers/auth/auth.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { ProfileService } from '@gitroom/nestjs-libraries/database/prisma/profiles/profile.service';
 import { GetProfileFromRequest } from '@gitroom/nestjs-libraries/user/profile.from.request';
@@ -26,6 +30,8 @@ import { getCookieUrlFromDomain } from '@gitroom/helpers/subdomain/subdomain.man
 import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 import { ApiTags } from '@nestjs/swagger';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
+import { CreateOrganizationDto } from '@gitroom/nestjs-libraries/dtos/organizations/create.organization.dto';
+import { OrganizationNameDto } from '@gitroom/nestjs-libraries/dtos/settings/organization-name.dto';
 import { UserDetailDto } from '@gitroom/nestjs-libraries/dtos/users/user.details.dto';
 import { EmailNotificationsDto } from '@gitroom/nestjs-libraries/dtos/users/email-notifications.dto';
 import { HttpForbiddenException } from '@gitroom/nestjs-libraries/services/exception.filter';
@@ -34,7 +40,10 @@ import { UserAgent } from '@gitroom/nestjs-libraries/user/user.agent';
 import { TrackEnum } from '@gitroom/nestjs-libraries/user/track.enum';
 import { TrackService } from '@gitroom/nestjs-libraries/track/track.service';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+import {
+  AuthorizationActions,
+  Sections,
+} from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 @ApiTags('User')
 // Rotas de identidade/sessao precisam responder para org USER sem perfil
@@ -45,28 +54,43 @@ import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/p
 export class UsersController {
   constructor(
     private _subscriptionService: SubscriptionService,
-    private _stripeService: StripeService,
+    private _paymentService: PaymentService,
     private _authService: AuthService,
     private _orgService: OrganizationService,
     private _userService: UsersService,
     private _trackService: TrackService,
     private _profileService: ProfileService
   ) {}
-  @Get('/agent-media-sso')
-  async getAgentMediaSsoUrl(
+
+  @Get('/chatbase-token')
+  async getChatbaseToken(
     @GetUserFromRequest() user: User,
     @GetOrgFromRequest() organization: Organization
   ) {
-    if (!process.env.AGENT_MEDIA_SSO_KEY) {
-      throw new HttpException('Agent Media SSO is not configured', 400);
+    if (!process.env.CHATBASE_TOKEN) {
+      throw new HttpException('Chatbase SSO is not configured', 400);
     }
 
     const token = sign(
-      { id: organization.id, displayName: organization.name },
-      process.env.AGENT_MEDIA_SSO_KEY
+      {
+        user_id: organization.id,
+        email: user.email,
+        ...(organization.paymentId
+          ? {
+              stripe_accounts: [
+                {
+                  label: organization.name,
+                  stripe_id: organization.paymentId,
+                },
+              ],
+            }
+          : {}),
+      },
+      process.env.CHATBASE_TOKEN,
+      { expiresIn: '1h' }
     );
 
-    return { url: `https://agent-media.ai/sso/${token}` };
+    return { token };
   }
 
   @Get('/self')
@@ -85,17 +109,23 @@ export class UsersController {
     return {
       ...user,
       orgId: organization.id,
-      // @ts-ignore
-      totalChannels: !process.env.STRIPE_PUBLISHABLE_KEY ? 10000 : organization?.subscription?.totalChannels || pricing.FREE.channel,
-      // @ts-ignore
-      tier: organization?.subscription?.subscriptionTier || (!process.env.STRIPE_PUBLISHABLE_KEY ? 'ULTIMATE' : 'FREE'),
+      totalChannels: !process.env.STRIPE_PUBLISHABLE_KEY
+        ? 10000
+        : // @ts-ignore
+          organization?.subscription?.totalChannels || pricing.FREE.channel,
+      tier:
+        // @ts-ignore
+        organization?.subscription?.subscriptionTier ||
+        (!process.env.STRIPE_PUBLISHABLE_KEY ? 'ULTIMATE' : 'FREE'),
       // @ts-ignore
       role: organization?.users[0]?.role,
       // @ts-ignore
       isLifetime: !!organization?.subscription?.isLifetime,
       admin: !!user.isSuperAdmin,
       impersonate: !!impersonate,
-      isTrailing: !process.env.STRIPE_PUBLISHABLE_KEY ? false : organization?.isTrailing,
+      isTrailing: !process.env.STRIPE_PUBLISHABLE_KEY
+        ? false
+        : organization?.isTrailing,
       allowTrial: organization?.allowTrial,
       streakSince: organization?.streakSince || null,
       // @ts-ignore
@@ -157,6 +187,51 @@ export class UsersController {
     }
   }
 
+  @Post('/switch')
+  async switchUser(
+    @GetUserFromRequest() user: User,
+    @Body('id') id: string,
+    @Req() req: Request
+  ) {
+    if (!user.isSuperAdmin) {
+      throw new HttpException('Unauthorized', 400);
+    }
+
+    // `user` is the impersonated account, so the admin id comes from the token.
+    // Require an active impersonation session and never allow the admin's own
+    // account in the swap — either would trade away the admin's login.
+    const adminId = this.getRequestUserId(req);
+    if (
+      !id ||
+      !adminId ||
+      id === user.id ||
+      adminId === user.id ||
+      adminId === id
+    ) {
+      throw new HttpException('Invalid user to switch to', 400);
+    }
+
+    const { kept, switched } = await this._userService.switchUser(
+      user.id,
+      id,
+      adminId
+    );
+
+    await this._paymentService.syncCustomerEmailsAfterSwitch([kept, switched]);
+
+    return { success: true };
+  }
+
+  private getRequestUserId(req: Request): string | null {
+    try {
+      const auth = (req.headers.auth as string) || req.cookies?.auth;
+      const payload = AuthChecker.verifyJWT(auth) as { id?: string } | null;
+      return payload?.id || null;
+    } catch {
+      return null;
+    }
+  }
+
   @Post('/personal')
   async changePersonal(
     @GetUserFromRequest() user: User,
@@ -187,10 +262,9 @@ export class UsersController {
   @Get('/subscription')
   @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
   async getSubscription(@GetOrgFromRequest() organization: Organization) {
-    const subscription =
-      await this._subscriptionService.getSubscriptionByOrganizationId(
-        organization.id
-      );
+    const subscription = await this._paymentService.getSubscription(
+      organization.id
+    );
 
     return subscription ? { subscription } : { subscription: undefined };
   }
@@ -198,7 +272,7 @@ export class UsersController {
   @Get('/subscription/tiers')
   @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
   async tiers() {
-    return this._stripeService.getPackages();
+    return this._paymentService.getDefaultProvider('web').getPackages();
   }
 
   @Post('/join-org')
@@ -229,9 +303,67 @@ export class UsersController {
 
   @Get('/organizations')
   async getOrgs(@GetUserFromRequest() user: User) {
-    return (await this._orgService.getOrgsByUserId(user.id)).filter(
-      (f) => !f.users[0].disabled
+    return (await this._orgService.getOrgsByUserId(user.id))
+      .filter((f) => !f.users[0].disabled)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        users: p.users,
+        subscription: p.subscription,
+      }));
+  }
+
+  @Post('/organizations')
+  createOrg(
+    @GetUserFromRequest() user: User,
+    @Req() req: Request,
+    @Body() body: CreateOrganizationDto
+  ) {
+    this.assertNotImpersonating(req);
+    return this._orgService.createOrgForUser(user.id, body);
+  }
+
+  @Patch('/organizations/:id')
+  renameOrg(
+    @GetUserFromRequest() user: User,
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: OrganizationNameDto
+  ) {
+    this.assertNotImpersonating(req);
+    return this._orgService.renameOwnedOrganization(user.id, id, body.name);
+  }
+
+  @Delete('/organizations/:id')
+  async deleteOrg(
+    @GetUserFromRequest() user: User,
+    @GetOrgFromRequest() organization: Organization,
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) response: Response
+  ) {
+    this.assertNotImpersonating(req);
+    const orgToDelete = await this._orgService.getOrgToDelete(user.id, id);
+
+    if (process.env.STRIPE_PUBLISHABLE_KEY && orgToDelete.paymentId) {
+      throw new HttpException(
+        'Cancel the subscription of this organization before deleting it',
+        400
+      );
+    }
+
+    await this._orgService.deleteOwnedOrganization(orgToDelete.id, user.id);
+
+    const remaining = (await this._orgService.getOrgsByUserId(user.id)).filter(
+      (item) => !item.users[0].disabled
     );
+    const nextOrg =
+      remaining.find((item) => item.id === organization.id) || remaining[0];
+    if (nextOrg) {
+      this.setShowOrgCookie(response, nextOrg.id);
+    }
+
+    return { id: nextOrg?.id };
   }
 
   @Post('/change-org')
@@ -239,6 +371,20 @@ export class UsersController {
     @Body('id') id: string,
     @Res({ passthrough: true }) response: Response
   ) {
+    this.setShowOrgCookie(response, id);
+    response.status(200).send();
+  }
+
+  private assertNotImpersonating(req: Request) {
+    if (req.cookies?.impersonate || req.headers.impersonate) {
+      throw new HttpException(
+        'Organizations cannot be changed while impersonating',
+        400
+      );
+    }
+  }
+
+  private setShowOrgCookie(response: Response, id: string) {
     response.cookie('showorg', id, {
       domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
       ...(!process.env.NOT_SECURED
@@ -254,8 +400,48 @@ export class UsersController {
     if (process.env.NOT_SECURED) {
       response.header('showorg', id);
     }
+  }
 
-    response.status(200).send();
+  @Get('/delete-account-info')
+  getDeleteAccountInfo(@GetUserFromRequest() user: User) {
+    return this._userService.getDeleteAccountInfo(user.id);
+  }
+
+  @Post('/delete-account')
+  async deleteAccount(
+    @GetUserFromRequest() user: User,
+    @Req() req: Request,
+    @Res({ passthrough: true }) response: Response
+  ) {
+    const impersonate = req.cookies.impersonate || req.headers.impersonate;
+    if (impersonate) {
+      throw new HttpException(
+        'Account cannot be deleted while impersonating',
+        400
+      );
+    }
+
+    // Cancel billing before scrubbing the account — once the account is
+    // deleted there is no way to retry a failed cancellation
+    const ownedOrgs = await this._userService.getOrgsToDeleteForAccount(
+      user.id
+    );
+
+    for (const org of ownedOrgs) {
+      try {
+        await this._paymentService.cancelAllSubscriptions(org.id);
+      } catch (err) {
+        console.log(err);
+        throw new HttpException(
+          'Could not cancel your subscription, please try again or contact support',
+          400
+        );
+      }
+    }
+
+    await this._userService.deleteAccount(user.id);
+
+    return this.logout(response);
   }
 
   @Post('/change-profile')

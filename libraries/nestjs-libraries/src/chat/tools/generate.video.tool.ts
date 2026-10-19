@@ -14,6 +14,7 @@ export class GenerateVideoTool implements AgentToolInterface {
   run() {
     return createTool({
       id: 'generateVideoTool',
+      mcp: { annotations: { title: 'Generate Video', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
       description: `Generate a video to attach to a post via the configured Kie.ai provider (Seedance 2.0 / Veo 3.1).
 The model itself is fixed in Settings > AI Models > Video; you only choose mode + aspect ratio + (optionally) the reference image.
 
@@ -33,15 +34,20 @@ Pick based on the target platform; ask the user when ambiguous.
 
 Note: video generation is slow (can take up to ~10 minutes due to provider polling). Inform the user of the wait when calling this tool.`,
       inputSchema: z.object({
+        identifier: z.string().optional().describe('Generator identifier from generateVideoOptions; starts a background job, poll videoStatusTool. Omit to use the configured workspace AI video provider.'),
+        output: z.enum(['vertical', 'horizontal']).optional(),
+        customParams: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
         prompt: z
           .string()
           .min(3)
           .max(2000)
+          .optional()
           .describe(
             'Detailed visual description of the desired video — scene, action, mood. The agent enriches this further if enrichPrompt=true.'
           ),
         mode: z
           .enum(['T2V', 'I2V'])
+          .optional()
           .describe(
             "'T2V' = text-to-video (no image), 'I2V' = animate a reference image (referenceImageUrl required)."
           ),
@@ -54,6 +60,7 @@ Note: video generation is slow (can take up to ~10 minutes due to provider polli
           ),
         aspectRatio: z
           .enum(['1:1', '9:16', '16:9'])
+          .optional()
           .describe(
             'Target aspect ratio. 1:1 = Instagram feed, 9:16 = Stories/Reels/TikTok, 16:9 = YouTube/LinkedIn.'
           ),
@@ -65,6 +72,7 @@ Note: video generation is slow (can take up to ~10 minutes due to provider polli
           ),
       }),
       outputSchema: z.object({
+        jobId: z.string().optional(),
         id: z.string().optional(),
         path: z.string().optional(),
         error: z.string().optional(),
@@ -76,6 +84,21 @@ Note: video generation is slow (can take up to ~10 minutes due to provider polli
         const profileId = requestContext.get('profileId') as string | undefined;
 
         try {
+          if (input.identifier) {
+            if (profileId) return { error: 'Use o provedor de video configurado do perfil; geradores legados exigem uma chave da organizacao.' };
+            const value = await this._mediaService.startGenerateVideo(org, {
+              type: input.identifier,
+              output: input.output || 'vertical',
+              customParams: (input.customParams || []).reduce((all: Record<string, unknown>, item: { key: string; value: string }) => {
+                try { all[item.key] = JSON.parse(item.value); } catch { all[item.key] = item.value; }
+                return all;
+              }, {}),
+            });
+            return { jobId: value.jobId };
+          }
+          if (!input.prompt || !input.mode || !input.aspectRatio) {
+            return { error: 'Informe prompt, mode e aspectRatio para gerar com o provedor do perfil.' };
+          }
           return await this._mediaService.generateAiVideo(
             org,
             {

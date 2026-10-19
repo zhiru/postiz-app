@@ -24,6 +24,7 @@ import { MoltbookDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-sett
 import { SkoolDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/skool.dto';
 import { WhopDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/whop.dto';
 import { MeweDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/mewe.dto';
+import { TumblrDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/tumblr.dto';
 
 export type ProviderExtension<T extends string, M> = { __type: T } & M;
 export type AllProvidersSettings =
@@ -33,6 +34,7 @@ export type AllProvidersSettings =
   | ProviderExtension<'pinterest', PinterestSettingsDto>
   | ProviderExtension<'dribbble', DribbbleDto>
   | ProviderExtension<'tiktok', TikTokDto>
+  | ProviderExtension<'tiktok-business', TikTokDto>
   | ProviderExtension<'discord', DiscordDto>
   | ProviderExtension<'slack', SlackDto>
   | ProviderExtension<'kick', KickDto>
@@ -59,6 +61,7 @@ export type AllProvidersSettings =
   | ProviderExtension<'vk', None>
   | ProviderExtension<'skool', SkoolDto>
   | ProviderExtension<'mewe', MeweDto>
+  | ProviderExtension<'tumblr', TumblrDto>
   | ProviderExtension<'whop', WhopDto>
   | ProviderExtension<'zernio-tiktok', TikTokDto>
   | ProviderExtension<'zernio-instagram', InstagramDto>
@@ -84,6 +87,7 @@ export const allProviders = (setEmpty?: any) => {
     { value: PinterestSettingsDto, name: 'pinterest' },
     { value: DribbbleDto, name: 'dribbble' },
     { value: TikTokDto, name: 'tiktok' },
+    { value: TikTokDto, name: 'tiktok-business' },
     { value: DiscordDto, name: 'discord' },
     { value: SlackDto, name: 'slack' },
     { value: KickDto, name: 'kick' },
@@ -111,6 +115,7 @@ export const allProviders = (setEmpty?: any) => {
     { value: SkoolDto, name: 'skool' },
     { value: WhopDto, name: 'whop' },
     { value: MeweDto, name: 'mewe' },
+    { value: TumblrDto, name: 'tumblr' },
     { value: TikTokDto, name: 'zernio-tiktok' },
     { value: InstagramDto, name: 'zernio-instagram' },
     { value: YoutubeSettingsDto, name: 'zernio-youtube' },

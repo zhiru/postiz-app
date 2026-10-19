@@ -1,11 +1,26 @@
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service',
+  () => ({ IntegrationService: class IntegrationServiceMock {} })
+);
+jest.mock('@gitroom/nestjs-libraries/ai/ai-text.service', () => ({
+  AiTextService: class AiTextServiceMock {},
+}));
+jest.mock('@gitroom/nestjs-libraries/openai/openai.service', () => ({
+  OpenaiService: class OpenaiServiceMock {},
+}));
+
+jest.mock('@gitroom/nestjs-libraries/upload/upload.factory', () => ({
+  UploadFactory: { createStorage: jest.fn().mockReturnValue({}) },
+}));
+
+import { CreationMethod } from '@prisma/client';
 // Mocks topo-de-modulo: PostsService importa IntegrationManager (carrega
 // nostr.provider, ESM-only que quebra ts-jest), MediaService (alias
 // @gitroom/backend nao mapeado no jest das libraries) e ShortLinkService.
 // Nada disso e usado pelo caminho de derivacao de profileId em createPost.
-jest.mock(
-  '@gitroom/nestjs-libraries/integrations/integration.manager',
-  () => ({ IntegrationManager: class IntegrationManagerMock {} })
-);
+jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
+  IntegrationManager: class IntegrationManagerMock {},
+}));
 jest.mock(
   '@gitroom/nestjs-libraries/integrations/refresh.integration.service',
   () => ({ RefreshIntegrationService: class RefreshIntegrationServiceMock {} })
@@ -14,10 +29,9 @@ jest.mock(
   '@gitroom/nestjs-libraries/database/prisma/media/media.service',
   () => ({ MediaService: class MediaServiceMock {} })
 );
-jest.mock(
-  '@gitroom/nestjs-libraries/short-linking/short.link.service',
-  () => ({ ShortLinkService: class ShortLinkServiceMock {} })
-);
+jest.mock('@gitroom/nestjs-libraries/short-linking/short.link.service', () => ({
+  ShortLinkService: class ShortLinkServiceMock {},
+}));
 
 import { PostsService } from './posts.service';
 import { createMock } from '@gitroom/nestjs-libraries/test';
@@ -44,13 +58,14 @@ const buildService = (
 ) => {
   const service = new PostsService(
     repo as any,
-    null as any, // integrationManager
+    { getSocialIntegration: jest.fn().mockReturnValue({}) } as any, // integrationManager
     integrationService as any,
     null as any, // mediaService
     null as any, // shortLinkService
     null as any, // openaiService
     null as any, // temporalService
     null as any, // refreshIntegrationService
+    {} as any, // webhooksService
     null as any, // aiTextService
     {} as any, // encryption
     {} as any // statusEventService
@@ -67,6 +82,7 @@ describe('PostsService.createPost - derivacao de profileId', () => {
   beforeEach(() => {
     repo = createMock<PostsRepository>();
     integrationService = createMock<IntegrationService>();
+    repo.getAnchoredCommentsForPost.mockResolvedValue([]);
     repo.createOrUpdatePost.mockResolvedValue({
       posts: [{ id: 'post-1', state: 'QUEUE' }],
     } as any);
@@ -79,20 +95,36 @@ describe('PostsService.createPost - derivacao de profileId', () => {
     } as any);
     const service = buildService(repo, integrationService);
 
-    await service.createPost('org-1', makeBody() as any);
+    await service.createPost('org-1', makeBody() as any, CreationMethod.WEB);
 
-    expect(integrationService.getIntegrationById).toHaveBeenCalledWith('org-1', 'int-1');
-    const passedProfileId = repo.createOrUpdatePost.mock.calls[0][6];
+    expect(integrationService.getIntegrationById).toHaveBeenCalledWith(
+      'org-1',
+      'int-1'
+    );
+    const passedProfileId = repo.createOrUpdatePost.mock.calls[0][9];
     expect(passedProfileId).toBe('profile-do-canal');
   });
 
-  it('usa o profileId explicito sem consultar o canal', async () => {
+  it('valida o canal e usa o profileId explicito', async () => {
+    integrationService.getIntegrationById.mockResolvedValue({
+      id: 'int-1',
+      profileId: 'profile-explicito',
+    } as any);
     const service = buildService(repo, integrationService);
 
-    await service.createPost('org-1', makeBody() as any, 'profile-explicito');
+    await service.createPost(
+      'org-1',
+      makeBody() as any,
+      CreationMethod.WEB,
+      false,
+      'profile-explicito'
+    );
 
-    expect(integrationService.getIntegrationById).not.toHaveBeenCalled();
-    const passedProfileId = repo.createOrUpdatePost.mock.calls[0][6];
+    expect(integrationService.getIntegrationById).toHaveBeenCalledWith(
+      'org-1',
+      'int-1'
+    );
+    const passedProfileId = repo.createOrUpdatePost.mock.calls[0][9];
     expect(passedProfileId).toBe('profile-explicito');
   });
 
@@ -103,9 +135,9 @@ describe('PostsService.createPost - derivacao de profileId', () => {
     } as any);
     const service = buildService(repo, integrationService);
 
-    await service.createPost('org-1', makeBody() as any);
+    await service.createPost('org-1', makeBody() as any, CreationMethod.WEB);
 
-    const passedProfileId = repo.createOrUpdatePost.mock.calls[0][6];
+    const passedProfileId = repo.createOrUpdatePost.mock.calls[0][9];
     expect(passedProfileId).toBeUndefined();
   });
 });

@@ -5,6 +5,7 @@ import {
   PostDetails,
   PostResponse,
   SocialProvider,
+  ReportMetricsMap,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { google } from 'googleapis';
@@ -12,11 +13,13 @@ import { OAuth2Client } from 'google-auth-library/build/src/auth/oauth2client';
 import {
   BadBody,
   SocialAbstract,
+  ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import * as process from 'node:process';
 import dayjs from 'dayjs';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 import { GmbSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/gmb.settings.dto';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 
 const clientAndGmb = (clientInformation?: ClientInformation) => {
   const client = new google.auth.OAuth2({
@@ -45,16 +48,23 @@ const clientAndGmb = (clientInformation?: ClientInformation) => {
 )
 export class GmbProvider extends SocialAbstract implements SocialProvider {
   override maxConcurrentJob = 3;
+
   identifier = 'gmb';
+
   name = 'Google My Business';
+
   isBetweenSteps = true;
+
   keepReconnectAuthTokens = true;
+
   scopes = [
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/business.manage',
   ];
+
   editor = 'normal' as const;
+
   dto = GmbSettingsDto;
 
   maxLength() {
@@ -141,7 +151,7 @@ export class GmbProvider extends SocialAbstract implements SocialProvider {
   }
 
   async generateAuthUrl(clientInformation?: ClientInformation) {
-    const state = makeId(7);
+    const state = makeSecureId(7);
     const { client } = clientAndGmb(clientInformation);
     return {
       url: client.generateAuthUrl({
@@ -152,7 +162,7 @@ export class GmbProvider extends SocialAbstract implements SocialProvider {
         redirect_uri: `${process.env.FRONTEND_URL}/integrations/social/gmb`,
         scope: this.scopes.slice(0),
       }),
-      codeVerifier: makeId(11),
+      codeVerifier: makeSecureId(11),
       state,
     };
   }
@@ -652,5 +662,35 @@ export class GmbProvider extends SocialAbstract implements SocialProvider {
     // Google My Business local posts don't have detailed individual post analytics
     // The API focuses on location-level metrics rather than post-level metrics
     return [];
+  }
+
+  reportMetrics: ReportMetricsMap = {
+    reach: ['Desktop Map Views', 'Mobile Map Views'],
+    engagement: ['Website Clicks', 'Phone Calls', 'Direction Requests'],
+  };
+
+  override async checkValidity(
+    items: Array<ValidityMedia[]>,
+    settings: any
+  ): Promise<string | true> {
+    // GMB posts can have text only, or text with one image
+    if ((items?.length ?? 0) > 0 && (items?.[0]?.length ?? 0) > 1) {
+      return 'Google My Business posts can only have one image';
+    }
+
+    // Check for video - GMB doesn't support video in local posts
+    if ((items?.length ?? 0) > 0 && (items?.[0]?.length ?? 0) > 0) {
+      const media = items?.[0]?.[0];
+      if ((media?.path?.indexOf?.('mp4') ?? -1) > -1) {
+        return 'Google My Business posts do not support video attachments';
+      }
+    }
+
+    // Event posts require a title
+    if (settings?.topicType === 'EVENT' && !settings?.eventTitle) {
+      return 'Event posts require an event title';
+    }
+
+    return true;
   }
 }

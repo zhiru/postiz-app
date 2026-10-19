@@ -1,3 +1,5 @@
+import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { CommentAutomationDeliveryError } from './social.integrations.interface';
 import { Injectable, Logger } from '@nestjs/common';
 import { CredentialService } from '@gitroom/nestjs-libraries/database/prisma/credentials/credential.service';
 import { InstagramDmButton } from '@gitroom/nestjs-libraries/integrations/social/instagram-dm-button.type';
@@ -91,19 +93,20 @@ export class InstagramMessagingService {
     message: string;
     button?: InstagramDmButton;
     integrationName?: string;
-  }): Promise<void> {
+  }): Promise<{ messageId: string; recipientId?: string }> {
     const state = await this.loadState(params.organizationId, params.profileId);
 
     // Priority 1 — System User Token
     if (state.metaSystemUserToken) {
-      await this.postDm({
-        baseUrl: `${GRAPH_FB}/${params.igBusinessAccountId}/messages`,
+      return this.postDm({
+        baseUrl: `${GRAPH_FB}/${encodeURIComponent(
+          params.igBusinessAccountId
+        )}/messages`,
         token: state.metaSystemUserToken,
         recipientIgsid: params.recipientIgsid,
         message: params.message,
         button: params.button,
       });
-      return;
     }
 
     // Priority 2 — per-account IG User Token
@@ -113,7 +116,9 @@ export class InstagramMessagingService {
 
     if (!entry) {
       throw new Error(
-        `Messaging nao configurado para ${params.integrationName || 'esta conta'}. Acesse Settings > Credenciais > Instagram e configure um System User Token ou um token por conta.`
+        `Messaging nao configurado para ${
+          params.integrationName || 'esta conta'
+        }. Acesse Settings > Credenciais > Instagram e configure um System User Token ou um token por conta.`
       );
     }
 
@@ -124,7 +129,7 @@ export class InstagramMessagingService {
       entry
     );
 
-    await this.postDm({
+    return this.postDm({
       baseUrl: `${GRAPH_IG}/me/messages`,
       token: tokenToUse,
       recipientIgsid: params.recipientIgsid,
@@ -161,7 +166,9 @@ export class InstagramMessagingService {
       );
       if (!entry) {
         throw new Error(
-          `Messaging nao configurado para ${params.integrationName || 'esta conta'}. Acesse Settings > Credenciais > Instagram e configure um System User Token ou um token por conta.`
+          `Messaging nao configurado para ${
+            params.integrationName || 'esta conta'
+          }. Acesse Settings > Credenciais > Instagram e configure um System User Token ou um token por conta.`
         );
       }
       const fresh = await this.ensureFreshIgToken(
@@ -220,16 +227,16 @@ export class InstagramMessagingService {
   ): Promise<boolean | null> {
     try {
       const res = await fetch(
-        `${baseUrl}?fields=is_user_follow_business&access_token=${encodeURIComponent(token)}`
+        `${baseUrl}?fields=is_user_follow_business&access_token=${encodeURIComponent(
+          token
+        )}`
       );
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.error) {
         const detail = body?.error
           ? JSON.stringify(body.error)
           : `HTTP ${res.status} body=${JSON.stringify(body)}`;
-        this._logger.warn(
-          `Follow check error for IGSID=${igsid}: ${detail}`
-        );
+        this._logger.warn(`Follow check error for IGSID=${igsid}: ${detail}`);
         return null;
       }
       const raw = body.is_user_follow_business;
@@ -273,7 +280,9 @@ export class InstagramMessagingService {
 
     try {
       const meRes = await fetch(
-        `${GRAPH_FB}/me?fields=id,name&access_token=${encodeURIComponent(token)}`
+        `${GRAPH_FB}/me?fields=id,name&access_token=${encodeURIComponent(
+          token
+        )}`
       );
       const meBody = await meRes.json().catch(() => ({}));
       if (!meRes.ok || meBody.error) {
@@ -286,7 +295,9 @@ export class InstagramMessagingService {
       }
 
       const businesses = await this.fetchGraphList(
-        `${GRAPH_FB}/me/businesses?fields=id,name&access_token=${encodeURIComponent(token)}`
+        `${GRAPH_FB}/me/businesses?fields=id,name&access_token=${encodeURIComponent(
+          token
+        )}`
       );
       const pages = await this.collectSystemUserPages(token, businesses);
 
@@ -386,7 +397,9 @@ export class InstagramMessagingService {
 
     try {
       const res = await fetch(
-        `${GRAPH_IG}/me?fields=user_id,username&access_token=${encodeURIComponent(token)}`
+        `${GRAPH_IG}/me?fields=user_id,username&access_token=${encodeURIComponent(
+          token
+        )}`
       );
       const body = await res.json();
       if (!res.ok || body.error) {
@@ -473,7 +486,9 @@ export class InstagramMessagingService {
 
     if (age > REFRESH_MAX_AGE) {
       throw new Error(
-        `Token da conta ${entry.username ? '@' + entry.username : entry.igUserId} expirado. Gere um novo no Meta Dashboard e atualize em Settings > Credenciais.`
+        `Token da conta ${
+          entry.username ? '@' + entry.username : entry.igUserId
+        } expirado. Gere um novo no Meta Dashboard e atualize em Settings > Credenciais.`
       );
     }
 
@@ -504,22 +519,22 @@ export class InstagramMessagingService {
       return refreshed;
     } catch (e: any) {
       this._logger.warn(
-        `Lazy refresh failed for igUserId=${entry.igUserId}: ${e?.message || String(e)}. Falling back to existing token.`
+        `Lazy refresh failed for igUserId=${entry.igUserId}; retaining the existing token.`
       );
       return entry.token;
     }
   }
 
   private async callRefresh(currentToken: string): Promise<string | null> {
-    const res = await fetch(
-      `${GRAPH_IG_REFRESH}?grant_type=ig_refresh_token&access_token=${encodeURIComponent(currentToken)}`
+    const res = await ssrfSafeFetch(
+      `${GRAPH_IG_REFRESH}?grant_type=ig_refresh_token&access_token=${encodeURIComponent(
+        currentToken
+      )}`,
+      { signal: AbortSignal.timeout(25000), redirect: 'error' }
     );
     const body = await res.json().catch(() => ({}));
     if (!res.ok || body.error || !body.access_token) {
-      throw new Error(
-        body?.error?.message ||
-          `Meta retornou ${res.status} ao renovar o token.`
-      );
+      throw new Error('Could not refresh the Instagram messaging token.');
     }
     return body.access_token as string;
   }
@@ -558,7 +573,9 @@ export class InstagramMessagingService {
       );
     } catch (e: any) {
       this._logger.warn(
-        `resolveIgUserToken failed for igUserId=${igBusinessAccountId}: ${e?.message || String(e)}`
+        `resolveIgUserToken failed for igUserId=${igBusinessAccountId}: ${
+          e?.message || String(e)
+        }`
       );
       return null;
     }
@@ -579,9 +596,9 @@ export class InstagramMessagingService {
     message: string;
     button?: InstagramDmButton;
     useInstagramGraph?: boolean;
-  }): Promise<void> {
+  }): Promise<{ messageId: string; recipientId?: string }> {
     const base = params.useInstagramGraph ? GRAPH_IG : GRAPH_FB;
-    await this.postDm({
+    return this.postDm({
       baseUrl: `${base}/me/messages`,
       token: params.token,
       recipientIgsid: params.recipientIgsid,
@@ -596,9 +613,7 @@ export class InstagramMessagingService {
     recipientIgsid: string;
     message: string;
     button?: InstagramDmButton;
-  }): Promise<void> {
-    const url = `${params.baseUrl}?access_token=${encodeURIComponent(params.token)}`;
-
+  }): Promise<{ messageId: string; recipientId?: string }> {
     // Meta's button template caps text at 640 chars and button title at 20.
     // When a button is configured, send as an attachment template so the
     // CTA renders natively in Instagram. Otherwise fall back to plain text.
@@ -615,22 +630,41 @@ export class InstagramMessagingService {
         }
       : { text: params.message };
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recipient: { id: params.recipientIgsid },
-        message: messagePayload,
-      }),
-    });
-
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok || body.error) {
-      const metaMsg =
-        body?.error?.message || JSON.stringify(body?.error || body);
-      throw new Error(
-        `Meta rejeitou DM: ${metaMsg}. Verifique se o app esta em Live Mode, se o token tem a scope correta (instagram_manage_messages ou instagram_business_manage_messages) e se o destinatario interagiu nas ultimas 24h.`
-      );
+    try {
+      // A timed-out POST may already have delivered the DM. Never switch tokens or retry it.
+      const res = await ssrfSafeFetch(params.baseUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${params.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recipient: { id: params.recipientIgsid },
+          message: messagePayload,
+        }),
+        signal: AbortSignal.timeout(25000),
+        redirect: 'error',
+      });
+      const body = await res.json().catch(() => undefined);
+      if (!res.ok || body?.error) {
+        throw new CommentAutomationDeliveryError(
+          res.status >= 400 && res.status < 500 && body?.error
+            ? 'rejected'
+            : 'unknown'
+        );
+      }
+      if (typeof body?.message_id !== 'string' || !body.message_id) {
+        throw new CommentAutomationDeliveryError('unknown');
+      }
+      return {
+        messageId: body.message_id,
+        ...(typeof body.recipient_id === 'string'
+          ? { recipientId: body.recipient_id }
+          : {}),
+      };
+    } catch (error) {
+      if (error instanceof CommentAutomationDeliveryError) throw error;
+      throw new CommentAutomationDeliveryError('unknown');
     }
   }
 }

@@ -6,7 +6,7 @@ import 'react-tooltip/dist/react-tooltip.css';
 import '@copilotkit/react-ui/styles.css';
 import LayoutContext from '@gitroom/frontend/components/layout/layout.context';
 import { Fragment, ReactNode } from 'react';
-import { Plus_Jakarta_Sans } from 'next/font/google';
+import { jakartaSans } from '@gitroom/frontend/fonts/plus-jakarta-sans/plus.jakarta.sans.font';
 import PlausibleProvider from 'next-plausible';
 import clsx from 'clsx';
 import { VariableContextComponent } from '@gitroom/react/helpers/variable.context';
@@ -14,6 +14,7 @@ import { PHProvider } from '@gitroom/react/helpers/posthog';
 import UtmSaver from '@gitroom/helpers/utils/utm.saver';
 import { DubAnalytics } from '@gitroom/frontend/components/layout/dubAnalytics';
 import { FacebookComponent } from '@gitroom/frontend/components/layout/facebook.component';
+import { GoogleTagManagerComponent } from '@gitroom/frontend/components/layout/gtm.component';
 import { cookies } from 'next/headers';
 import {
   cookieName,
@@ -22,12 +23,6 @@ import {
 import { HtmlComponent } from '@gitroom/frontend/components/layout/html.component';
 import Script from 'next/script';
 import { ChangeDirClient } from '@gitroom/frontend/components/new-layout/change.dir.client';
-
-const jakartaSans = Plus_Jakarta_Sans({
-  weight: ['600', '500'],
-  style: ['normal', 'italic'],
-  subsets: ['latin'],
-});
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies();
@@ -50,12 +45,13 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             process.env.STORAGE_PROVIDER! as 'local' | 'cloudflare'
           }
           environment={process.env.NODE_ENV!}
-          backendUrl={process.env.NEXT_PUBLIC_BACKEND_URL!}
+          backendUrl={process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/+$/, '')!}
           plontoKey={process.env.NEXT_PUBLIC_POLOTNO!}
           stripeClient={process.env.STRIPE_PUBLISHABLE_KEY!}
+          isChatBase={!!process.env.CHATBASE_TOKEN}
           billingEnabled={!!process.env.STRIPE_PUBLISHABLE_KEY}
           discordUrl={process.env.NEXT_PUBLIC_DISCORD_SUPPORT!}
-          frontEndUrl={process.env.FRONTEND_URL!}
+          frontEndUrl={process.env.FRONTEND_URL?.replace(/\/+$/, '')!}
           isGeneral={!!process.env.IS_GENERAL}
           genericOauth={!!process.env.POSTIZ_GENERIC_OAUTH}
           oauthLogoUrl={process.env.NEXT_PUBLIC_POSTIZ_OAUTH_LOGO_URL!}
@@ -68,14 +64,28 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           facebookPixel={process.env.NEXT_PUBLIC_FACEBOOK_PIXEL!}
           telegramBotName={process.env.TELEGRAM_BOT_NAME!}
           neynarClientId={process.env.NEYNAR_CLIENT_ID!}
+          appleClientId={process.env.APPLE_CLIENT_ID!}
           isSecured={!process.env.NOT_SECURED}
           disableImageCompression={!!process.env.DISABLE_IMAGE_COMPRESSION}
           disableXAnalytics={!!process.env.DISABLE_X_ANALYTICS}
           sentryDsn={process.env.NEXT_PUBLIC_SENTRY_DSN!}
           extensionId={process.env.EXTENSION_ID || ''}
+          googleAdsId={process.env.NEXT_PUBLIC_GTM_ID}
+          googleAdsTrialTracking={process.env.NEXT_PUBLIC_TRACKING_TRIAL}
           language={language}
+          recaptchaSiteKey={process.env.RECAPTCHA_SITE_KEY || ''}
+          mediaProcessing={
+            process.env.STORAGE_PROVIDER === 'cloudflare' &&
+            !!process.env.RUNPOD_API_KEY &&
+            !!process.env.RUNPOD_ENDPOINT_ID
+          }
           transloadit={
-            process.env.TRANSLOADIT_AUTH && process.env.TRANSLOADIT_TEMPLATE
+            // Transloadit templates export to the R2 bucket and save-media builds
+            // the path from CLOUDFLARE_BUCKET_URL, so it only works with cloudflare
+            // storage; with local storage it would silently lose uploads.
+            process.env.STORAGE_PROVIDER === 'cloudflare' &&
+            process.env.TRANSLOADIT_AUTH &&
+            process.env.TRANSLOADIT_TEMPLATE
               ? [
                   process.env.TRANSLOADIT_AUTH!,
                   process.env.TRANSLOADIT_TEMPLATE!,
@@ -89,9 +99,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <DubAnalytics />
             <FacebookComponent />
             {!!process.env.STRIPE_PUBLISHABLE_KEY ? (
-              <PlausibleProvider
-                domain={!!process.env.IS_GENERAL ? '' : ''}
-              >
+              <PlausibleProvider domain={!!process.env.IS_GENERAL ? '' : ''}>
                 <PHProvider
                   phkey={process.env.NEXT_PUBLIC_POSTHOG_KEY}
                   host={process.env.NEXT_PUBLIC_POSTHOG_HOST}

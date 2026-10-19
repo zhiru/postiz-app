@@ -1,3 +1,6 @@
+jest.mock('@gitroom/helpers/auth/auth.service', () => ({
+  AuthService: { fixedDecryption: jest.fn((value) => value) },
+}));
 import { XProvider } from './x.provider';
 
 /**

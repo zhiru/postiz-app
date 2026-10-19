@@ -29,6 +29,6 @@ export default withProvider({
   SettingsComponent: SettingsComponent,
   CustomPreviewComponent: undefined,
   dto: ListmonkDto,
-  checkValidity: undefined,
   maximumCharacters: 300000,
+  inlineImages: true,
 });

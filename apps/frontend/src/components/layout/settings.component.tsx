@@ -3,6 +3,7 @@
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import React, {
   FC,
+  Fragment,
   Ref,
   useCallback,
   useEffect,
@@ -40,6 +41,19 @@ import { AiProviderSettingsSection } from '@gitroom/frontend/components/settings
 import { ProfilePersonaSettingsSection } from '@gitroom/frontend/components/settings/profile-persona.settings.component';
 import { KnowledgeBaseSettingsSection } from '@gitroom/frontend/components/settings/knowledge-base.settings.component';
 import { ProfileMembersSettingsSection } from '@gitroom/frontend/components/settings/profile-members.settings.component';
+import { OrganizationsComponent } from '@gitroom/frontend/components/settings/organizations.component';
+import { AppsComponent } from '@gitroom/frontend/components/settings/apps.component';
+import { ThirdPartyComponent } from '@gitroom/frontend/components/third-parties/third-party.component';
+import { Plugs } from '@gitroom/frontend/components/plugs/plugs';
+import { SocialComments } from '@gitroom/frontend/components/social-comments/social.comments';
+import { AdminCredentialsComponent } from '@gitroom/frontend/components/admin/admin-credentials.component';
+import { AdminStatsComponent } from '@gitroom/frontend/components/admin/admin-stats.component';
+import { AdminErrorsComponent } from '@gitroom/frontend/components/admin/admin-errors.component';
+import {
+  AddAnnouncement,
+  ImportDebugPost,
+  ImpersonateSearch,
+} from '@gitroom/frontend/components/layout/impersonate';
 import { StatusComponent } from '@gitroom/frontend/components/status/status.component';
 export const SettingsPopup: FC<{
   getRef?: Ref<any>;
@@ -97,13 +111,18 @@ export const SettingsPopup: FC<{
     close();
   }, []);
 
-  const [tab, setTab] = useState('global_settings');
-
   const t = useT();
   const list = useMemo(() => {
-    const arr = [];
+    const arr: { tab: string; label: string; section?: string }[] = [];
+    arr.push({
+      tab: 'organizations',
+      label: t('organizations', 'Organizations'),
+    });
     if (isOrgAdmin) {
-      arr.push({ tab: 'global_settings', label: t('global_settings', 'Global Settings') });
+      arr.push({
+        tab: 'global_settings',
+        label: t('global_settings', 'Global Settings'),
+      });
       arr.push({ tab: 'profiles', label: t('profiles_tab', 'Perfis') });
     }
     // Aba unica "Equipe": admin ve o time inteiro da org (todos os perfis);
@@ -115,14 +134,23 @@ export const SettingsPopup: FC<{
       arr.push({ tab: 'teams', label: t('team', 'Equipe') });
     }
     if (isOrgAdmin) {
-      arr.push({ tab: 'credentials', label: t('credentials_tab', 'Credenciais') });
+      arr.push({
+        tab: 'credentials',
+        label: t('credentials_tab', 'Credenciais'),
+      });
     }
     if (canManageAgent) {
       arr.push({ tab: 'ai_agent', label: t('ai_agent_tab', 'Persona de IA') });
     }
     if (isOrgAdmin) {
-      arr.push({ tab: 'ai_credits', label: t('ai_credits_title', 'Créditos de IA') });
-      arr.push({ tab: 'ai_provider', label: t('ai_provider_title', 'Modelos de IA') });
+      arr.push({
+        tab: 'ai_credits',
+        label: t('ai_credits_title', 'Créditos de IA'),
+      });
+      arr.push({
+        tab: 'ai_provider',
+        label: t('ai_provider_title', 'Modelos de IA'),
+      });
     }
     if (user?.tier?.webhooks && isOrgAdmin) {
       arr.push({ tab: 'webhooks', label: t('webhooks_1', 'Webhooks') });
@@ -138,14 +166,44 @@ export const SettingsPopup: FC<{
       arr.push({ tab: 'signatures', label: t('signatures', 'Signatures') });
     }
     if (user?.tier?.public_api && isGeneral && showLogout && isOrgAdmin) {
-      arr.push({ tab: 'api', label: t('integrations_menu', 'Integrações') });
+      arr.push({ tab: 'agents', label: t('integrations_menu', 'Integrações') });
     }
     if (isOrgAdmin) {
-      arr.push({ tab: 'approved_apps', label: t('approved_apps', 'Approved Apps') });
+      arr.push({
+        tab: 'approved_apps',
+        label: t('approved_apps', 'Approved Apps'),
+      });
     }
     // Observabilidade (admin-only): problemas, histórico e saúde da infra.
     if (isOrgAdmin) {
       arr.push({ tab: 'status', label: t('status_title', 'Status') });
+    }
+
+    arr.push({ tab: 'integrations', label: t('integrations', 'Integrations') });
+    arr.push({ tab: 'plugs', label: t('plugs', 'Plugs') });
+    arr.push({ tab: 'comments', label: t('comments_inbox', 'Comments inbox') });
+
+    // instance tools, only for the super admin of the instance
+    if (user?.isSuperAdmin) {
+      arr.push({
+        tab: 'admin_credentials',
+        label: t('view_credentials', 'Credentials'),
+        section: t('administration', 'Administration'),
+      });
+      arr.push({ tab: 'admin_stats', label: t('statistics', 'Statistics') });
+      arr.push({ tab: 'admin_errors', label: t('errors', 'Errors') });
+      arr.push({
+        tab: 'admin_announcements',
+        label: t('announcements', 'Announcements'),
+      });
+      arr.push({
+        tab: 'admin_impersonate',
+        label: t('impersonate', 'Impersonate'),
+      });
+      arr.push({
+        tab: 'admin_import_debug_post',
+        label: t('import_debug_post', 'Import Debug Post'),
+      });
     }
 
     return arr;
@@ -162,6 +220,14 @@ export const SettingsPopup: FC<{
 
   // Se a aba atual nao esta disponivel para este papel, cai na primeira aba
   // permitida (ex.: org-USER nao ve 'global_settings').
+
+  const [tab, setTab] = useState(() => {
+    const requested = url.get('tab');
+    return list.some((p) => p.tab === requested)
+      ? requested!
+      : 'global_settings';
+  });
+
   useEffect(() => {
     if (list.length && !list.find((l) => l.tab === tab)) {
       setTab(list[0].tab);
@@ -174,38 +240,44 @@ export const SettingsPopup: FC<{
 
   return (
     <>
-      <div className="bg-newBgColorInner p-[20px] flex flex-col transition-all w-[260px]">
-        <div className="flex flex-1 flex-col gap-[15px]">
-          {list.map(({ tab: tabKey, label }) => (
-            <div
-              key={tabKey}
-              className={clsx(
-                'cursor-pointer flex items-center gap-[12px] group/profile hover:bg-boxHover rounded-e-[8px]',
-                tabKey === tab && 'bg-boxHover'
+      <div className="bg-newBgColorInner p-[20px] mobile:p-[12px] flex flex-col transition-all w-[260px] mobile:w-full">
+        <div className="flex flex-1 flex-col gap-[15px] mobile:flex-row mobile:gap-[8px] mobile:overflow-x-auto mobile:pb-[6px] scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
+          {list.map(({ tab: tabKey, label, section }) => (
+            <Fragment key={tabKey}>
+              {!!section && (
+                <div className="text-[12px] uppercase opacity-60 mt-[8px] mobile:mt-0 mobile:self-center mobile:shrink-0 mobile:whitespace-nowrap">
+                  {section}
+                </div>
               )}
-              onClick={() => setTab(tabKey)}
-            >
               <div
                 className={clsx(
-                  'h-full w-[4px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity',
-                  tabKey === tab && 'opacity-100'
+                  'cursor-pointer flex items-center gap-[12px] group/profile hover:bg-boxHover rounded-e-[8px] mobile:shrink-0 mobile:whitespace-nowrap mobile:rounded-[8px] mobile:px-[12px] mobile:py-[8px]',
+                  tabKey === tab && 'bg-boxHover'
                 )}
+                onClick={() => setTab(tabKey)}
               >
-                <SVGLine />
+                <div
+                  className={clsx(
+                    'h-full w-[4px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity mobile:hidden',
+                    tabKey === tab && 'opacity-100'
+                  )}
+                >
+                  <SVGLine />
+                </div>
+                {label}
               </div>
-              {label}
-            </div>
+            </Fragment>
           ))}
         </div>
         <div>
           {showLogout && (
-            <div className="mt-4">
+            <div className="mt-4 mobile:mt-[8px]">
               <LogoutComponent />
             </div>
           )}
         </div>
       </div>
-      <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px]">
+      <div className="bg-newBgColorInner flex-1 min-w-0 flex-col flex p-[20px] mobile:p-[12px] gap-[12px]">
         <FormProvider {...form}>
           <form onSubmit={form.handleSubmit(submit)}>
             {!!getRef && (
@@ -222,6 +294,7 @@ export const SettingsPopup: FC<{
                   <GlobalSettings />
                 </div>
               )}
+              {tab === 'organizations' && <OrganizationsComponent />}
               {tab === 'teams' &&
                 (isOrgAdmin
                   ? !!user?.tier?.team_members &&
@@ -262,7 +335,25 @@ export const SettingsPopup: FC<{
                   </div>
                 )}
 
-              {tab === 'api' &&
+              {tab === 'integrations' && (
+                <div>
+                  <ThirdPartyComponent />
+                </div>
+              )}
+
+              {tab === 'plugs' && (
+                <div>
+                  <Plugs />
+                </div>
+              )}
+
+              {tab === 'comments' && (
+                <div>
+                  <SocialComments />
+                </div>
+              )}
+
+              {tab === 'agents' &&
                 !!user?.tier?.public_api &&
                 isGeneral &&
                 showLogout &&
@@ -292,7 +383,6 @@ export const SettingsPopup: FC<{
                 </div>
               )}
 
-
               {tab === 'profiles' && isOrgAdmin && (
                 <div>
                   <ProfilesSettingsComponent />
@@ -306,15 +396,79 @@ export const SettingsPopup: FC<{
               )}
 
               {tab === 'approved_apps' && isOrgAdmin && (
-                <div>
-                  <ApprovedAppsComponent />
-                </div>
+                <ApprovedAppsComponent />
               )}
 
               {tab === 'status' && isOrgAdmin && (
                 <div>
                   <StatusComponent />
                 </div>
+              )}
+              {!!user?.isSuperAdmin && (
+                <>
+                  {tab === 'admin_credentials' && (
+                    <div>
+                      <AdminCredentialsComponent />
+                    </div>
+                  )}
+
+                  {tab === 'admin_stats' && (
+                    <div>
+                      <AdminStatsComponent />
+                    </div>
+                  )}
+
+                  {tab === 'admin_errors' && (
+                    <div>
+                      <AdminErrorsComponent />
+                    </div>
+                  )}
+
+                  {tab === 'admin_announcements' && (
+                    <div className="flex flex-col gap-[12px] items-start">
+                      <div className="text-[20px] font-[600]">
+                        {t('announcements', 'Announcements')}
+                      </div>
+                      <div className="text-[13px] opacity-70">
+                        {t(
+                          'announcements_description',
+                          'Publish a banner shown at the top of the app to every user of this instance.'
+                        )}
+                      </div>
+                      <AddAnnouncement />
+                    </div>
+                  )}
+
+                  {tab === 'admin_impersonate' && (
+                    <div className="flex flex-col gap-[12px]">
+                      <div className="text-[20px] font-[600]">
+                        {t('impersonate', 'Impersonate')}
+                      </div>
+                      <div className="text-[13px] opacity-70">
+                        {t(
+                          'impersonate_description',
+                          'Open the app as another user to debug their account. A banner stays on screen while you do.'
+                        )}
+                      </div>
+                      <ImpersonateSearch />
+                    </div>
+                  )}
+
+                  {tab === 'admin_import_debug_post' && (
+                    <div className="flex flex-col gap-[12px] items-start">
+                      <div className="text-[20px] font-[600]">
+                        {t('import_debug_post', 'Import Debug Post')}
+                      </div>
+                      <div className="text-[13px] opacity-70">
+                        {t(
+                          'import_debug_post_description',
+                          'Recreate a post from a debug code to reproduce a publishing error.'
+                        )}
+                      </div>
+                      <ImportDebugPost />
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </form>

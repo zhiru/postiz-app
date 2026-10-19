@@ -35,6 +35,8 @@ describe('buildTemporalWorkers', () => {
       'main',
       'facebook',
       'reddit',
+      'email',
+      'email-bulk',
     ]);
     expect(workers[0]).toEqual(
       expect.objectContaining({
@@ -91,7 +93,11 @@ describe('buildTemporalWorkers', () => {
   it('exclui filas de provider por nome exato', () => {
     const workers = build({ excludeQueue: ' facebook, reddit ' });
 
-    expect(workers.map((worker) => worker.taskQueue)).toEqual(['main']);
+    expect(workers.map((worker) => worker.taskQueue)).toEqual([
+      'main',
+      'email',
+      'email-bulk',
+    ]);
   });
 
   it('falha no boot se a configuracao tentar excluir a fila main', () => {

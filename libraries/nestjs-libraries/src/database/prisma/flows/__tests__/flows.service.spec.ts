@@ -770,7 +770,7 @@ describe('FlowsService', () => {
 
       expect(mockRepository.updateExecution).toHaveBeenCalledWith('exec-1', {
         status: FlowExecutionStatus.FAILED,
-        error: 'Temporal unavailable',
+        error: 'Could not enqueue automation. The event can be delivered again safely.',
         completedAt: expect.any(Date),
       });
       expect(results).toHaveLength(1);
@@ -1215,7 +1215,9 @@ describe('FlowsService', () => {
       } as any);
       mockRepository.markMetaMidIfUnconsumed.mockResolvedValue(true);
       mockWorkflowStart.mockRejectedValue(
-        new Error('WorkflowAlreadyStarted: duplicate')
+        Object.assign(new Error('Workflow already started'), {
+          name: 'WorkflowExecutionAlreadyStartedError',
+        })
       );
 
       await expect(
@@ -1228,27 +1230,78 @@ describe('FlowsService', () => {
       ).resolves.toBeUndefined();
     });
 
-    it('logs and exits without dispatching when Temporal client is null (orchestrator offline)', async () => {
-      const payload = makeValidPayload();
-      mockRepository.findPostbackByPayload.mockResolvedValue({
-        id: 'pb-offline',
-        status: PendingPostbackStatus.PENDING,
-        expiresAt: new Date(Date.now() + 60_000),
-        organizationId: 'org-1',
-        originExecutionId: 'exec-1',
-      } as any);
-      mockRepository.markMetaMidIfUnconsumed.mockResolvedValue(true);
-      mockTemporalService.client.getRawClient.mockReturnValue(null);
+    it.each(['offline', 'enqueue-error'] as const)(
+      'permite reentrega do mesmo MID apos %s sem alterar a identidade do workflow',
+      async (failure) => {
+        const payload = makeValidPayload();
+        const pending = {
+          id: 'pb-retry',
+          status: PendingPostbackStatus.PENDING,
+          expiresAt: new Date(Date.now() + 60_000),
+          organizationId: 'org-1',
+          originExecutionId: 'exec-1',
+          consumedMetaMid: null as string | null,
+        };
+        mockRepository.findPostbackByPayload.mockImplementation(async () => ({
+          ...pending,
+        }));
+        mockRepository.markMetaMidIfUnconsumed.mockImplementation(
+          async (_payload: string, mid: string) => {
+            if (pending.consumedMetaMid) return false;
+            pending.consumedMetaMid = mid;
+            return true;
+          }
+        );
+        if (failure === 'offline') {
+          mockTemporalService.client.getRawClient.mockReturnValueOnce(null);
+        } else {
+          mockWorkflowStart.mockRejectedValueOnce(
+            new Error('Transport failed: access_token=must-not-be-persisted')
+          );
+        }
+        const input = {
+          payload,
+          metaMid: 'mid-retry',
+          senderIgsid: 'sender-1',
+          igAccountId: 'acct-1',
+        };
 
-      await service.handlePostbackClick({
-        payload,
-        metaMid: 'mid-offline',
-        senderIgsid: 'sender-1',
-        igAccountId: 'acct-1',
-      });
+        await expect(service.handlePostbackClick(input)).resolves.toEqual({
+          retry: true,
+        });
+        expect(pending.consumedMetaMid).toBe('mid-retry');
+        expect(mockRepository.updateExecution).toHaveBeenCalledTimes(1);
+        expect(mockRepository.updateExecution).toHaveBeenCalledWith(
+          'exec-1',
+          expect.objectContaining({
+            status: FlowExecutionStatus.FAILED,
+            error: 'Could not enqueue automation. Waiting for webhook retry.',
+            completedAt: expect.any(Date),
+          })
+        );
 
-      expect(mockWorkflowStart).not.toHaveBeenCalled();
-    });
+        await expect(
+          service.handlePostbackClick(input)
+        ).resolves.toBeUndefined();
+
+        expect(mockRepository.markMetaMidIfUnconsumed).toHaveBeenCalledTimes(2);
+        expect(mockWorkflowStart).toHaveBeenCalledTimes(
+          failure === 'offline' ? 1 : 2
+        );
+        for (const [workflow, options] of mockWorkflowStart.mock.calls) {
+          expect(workflow).toBe('followGateResolveWorkflow');
+          expect(options).toEqual(
+            expect.objectContaining({
+              workflowId: 'follow-gate-resolve-pb-retry',
+              workflowIdReusePolicy: 'REJECT_DUPLICATE',
+              args: [{ pendingPostbackId: 'pb-retry' }],
+            })
+          );
+        }
+        expect(mockRepository.updateExecution).toHaveBeenCalledTimes(1);
+        expect(mockRepository.consumePostback).not.toHaveBeenCalled();
+      }
+    );
   });
 
   // --- Webhook integration check ---

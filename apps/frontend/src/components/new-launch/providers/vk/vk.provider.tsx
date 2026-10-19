@@ -1,5 +1,4 @@
 'use client';
-'use client';
 
 import {
   PostComment,
@@ -11,8 +10,5 @@ export default withProvider({
   SettingsComponent: null,
   CustomPreviewComponent: undefined,
   dto: undefined,
-  checkValidity: async (posts) => {
-    return true;
-  },
   maximumCharacters: 2048,
 });

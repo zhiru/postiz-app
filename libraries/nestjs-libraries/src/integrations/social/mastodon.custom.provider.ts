@@ -5,13 +5,21 @@ import {
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { MastodonProvider } from '@gitroom/nestjs-libraries/integrations/social/mastodon.provider';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import {
+  ssrfSafeFetch,
+  getSsrfSafeDispatcher,
+} from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { Integration } from '@prisma/client';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { AuthService } from '@gitroom/helpers/auth/auth.service';
 
 export class MastodonCustomProvider extends MastodonProvider {
   override identifier = 'mastodon-custom';
+
   override name = 'M. Instance';
-  override maxConcurrentJob = 5; // Custom Mastodon instances typically have generous limits
+
+  override maxConcurrentJob = 5;
+
   editor = 'normal' as const;
 
   async externalUrl(url: string) {
@@ -35,11 +43,12 @@ export class MastodonCustomProvider extends MastodonProvider {
       client_secret,
     };
   }
+
   override async generateAuthUrl(
     refresh?: string,
     external?: ClientInformation
   ) {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     const url = this.generateUrlDynamic(
       external?.instanceUrl!,
       state,
@@ -50,7 +59,7 @@ export class MastodonCustomProvider extends MastodonProvider {
 
     return {
       url,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -74,12 +83,13 @@ export class MastodonCustomProvider extends MastodonProvider {
   override async post(
     id: string,
     accessToken: string,
-    postDetails: PostDetails[]
+    postDetails: PostDetails[],
+    integration: Integration
   ): Promise<PostResponse[]> {
     return this.dynamicPost(
       id,
       accessToken,
-      process.env.MASTODON_URL || 'https://mastodon.social',
+      this.instanceUrl(integration),
       postDetails
     );
   }
@@ -97,7 +107,34 @@ export class MastodonCustomProvider extends MastodonProvider {
       postId,
       lastCommentId,
       accessToken,
-      process.env.MASTODON_URL || 'https://mastodon.social',
+      this.instanceUrl(integration),
+      postDetails
+    );
+  }
+
+  private instanceUrl(integration?: Integration) {
+    try {
+      const { instanceUrl } = JSON.parse(
+        AuthService.fixedDecryption(integration?.customInstanceDetails || '')
+      );
+      return (
+        instanceUrl || process.env.MASTODON_URL || 'https://mastodon.social'
+      );
+    } catch (err) {
+      return process.env.MASTODON_URL || 'https://mastodon.social';
+    }
+  }
+
+  override async postPending(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    return this.dynamicPostPending(
+      id,
+      accessToken,
+      this.instanceUrl(integration),
       postDetails
     );
   }

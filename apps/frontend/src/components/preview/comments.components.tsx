@@ -2,532 +2,524 @@
 
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import { Button } from '@gitroom/react/form/button';
-import { FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { Input } from '@gitroom/react/form/input';
+import { Textarea } from '@gitroom/react/form/textarea';
+import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
-import useSWR from 'swr';
-import { useForm } from 'react-hook-form';
+import { FormProvider, useForm } from 'react-hook-form';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
-import { useProfilePermissions } from '@gitroom/frontend/hooks/use-profile-permissions';
+import { useModals } from '@gitroom/frontend/components/layout/new-modal';
+import { useVariables } from '@gitroom/react/helpers/variable.context';
+import { useToaster } from '@gitroom/react/toaster/toaster';
+import clsx from 'clsx';
+import dayjs from 'dayjs';
+import {
+  PreviewComment,
+  usePreviewComments,
+} from '@gitroom/frontend/components/preview/preview.comments.context';
 
-type ReviewInfo =
-  | { valid: false }
-  | { valid: true; allowComment: boolean; allowApprove: boolean; expiresAt: string | null };
+const REVIEWER_NAME_KEY = 'preview-reviewer-name';
 
-type CommentItem = {
-  id: string;
-  content: string;
-  userId: string | null;
-  guestName: string | null;
-  kind: 'COMMENT' | 'APPROVAL' | 'CHANGE_REQUEST';
-  createdAt: string;
-  // Presente apenas no caminho autenticado (nao no publico/guest).
-  user?: { email?: string | null; name?: string | null } | null;
+// Invisible reCAPTCHA v2: one widget for the page. Google only shows a puzzle
+// when it considers the visitor risky; otherwise the token comes back at once.
+// Google does not report a dismissed puzzle, so an attempt stays pending until
+// it gets a token, expires, errors, or the reviewer clicks Post again (which
+// abandons the previous attempt with null).
+let recaptchaWidget: {
+  id: number;
+  resolve?: (token: string | null) => void;
+} | null = null;
+
+const loadRecaptchaToken = async (siteKey: string) => {
+  if (!(window as any).grecaptcha?.render) {
+    await new Promise<void>((resolve, reject) => {
+      (window as any).onPreviewRecaptchaLoad = () => resolve();
+      const script = document.createElement('script');
+      script.src =
+        'https://www.google.com/recaptcha/api.js?onload=onPreviewRecaptchaLoad&render=explicit';
+      script.async = true;
+      script.onerror = () => reject(new Error('recaptcha failed to load'));
+      document.head.appendChild(script);
+    });
+  }
+  const grecaptcha = (window as any).grecaptcha;
+  if (!recaptchaWidget) {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const widget: NonNullable<typeof recaptchaWidget> = { id: 0 };
+    const settle = (token: string | null) => {
+      const resolve = widget.resolve;
+      widget.resolve = undefined;
+      resolve?.(token);
+    };
+    widget.id = grecaptcha.render(container, {
+      sitekey: siteKey,
+      size: 'invisible',
+      callback: (token: string) => settle(token),
+      'expired-callback': () => settle(null),
+      'error-callback': () => settle(null),
+    });
+    recaptchaWidget = widget;
+  }
+  const widget = recaptchaWidget;
+  widget.resolve?.(null);
+  grecaptcha.reset(widget.id);
+  return new Promise<string | null>((resolve) => {
+    widget.resolve = resolve;
+    grecaptcha.execute(widget.id);
+  });
 };
 
-const GUEST_NAME_KEY = 'robo-multipost:guest-name';
-const GUEST_EMAIL_KEY = 'robo-multipost:guest-email';
+const ReviewerNameForm: FC<{ onConfirm: (name: string) => void }> = ({
+  onConfirm,
+}) => {
+  const t = useT();
+  const form = useForm({
+    values: {
+      name:
+        (typeof window !== 'undefined' &&
+          localStorage.getItem(REVIEWER_NAME_KEY)) ||
+        '',
+    },
+    mode: 'onChange',
+  });
+  const submit = useCallback(
+    (values: { name: string }) => {
+      const name = values.name.trim();
+      if (!name) {
+        return;
+      }
+      localStorage.setItem(REVIEWER_NAME_KEY, name);
+      onConfirm(name);
+    },
+    [onConfirm]
+  );
 
-function readGuestDefaults() {
-  if (typeof window === 'undefined') return { name: '', email: '' };
-  try {
-    return {
-      name: window.localStorage.getItem(GUEST_NAME_KEY) || '',
-      email: window.localStorage.getItem(GUEST_EMAIL_KEY) || '',
-    };
-  } catch {
-    return { name: '', email: '' };
-  }
-}
+  return (
+    <FormProvider {...form}>
+      <form onSubmit={form.handleSubmit(submit)}>
+        <div className="relative flex gap-[10px] flex-col flex-1">
+          <div className="text-[14px] text-textItemBlur">
+            {t(
+              'preview_comment_name_required',
+              'We can only post your comment if you provide your name.'
+            )}
+          </div>
+          <Input
+            label={t('preview_comment_your_name', 'Your name')}
+            placeholder={t('preview_comment_your_name', 'Your name')}
+            name="name"
+            maxLength={80}
+            autoFocus={true}
+          />
+          <Button type="submit">{t('continue', 'Continue')}</Button>
+        </div>
+      </form>
+    </FormProvider>
+  );
+};
 
-function persistGuestDefaults(name: string, email: string) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(GUEST_NAME_KEY, name);
-    window.localStorage.setItem(GUEST_EMAIL_KEY, email);
-  } catch {
-    // ignore
-  }
-}
+const CommentComposer: FC<{
+  parentId?: string;
+  onDone?: () => void;
+}> = ({ parentId, onDone }) => {
+  const t = useT();
+  const user = useUser();
+  const fetch = useFetch();
+  const toast = useToaster();
+  const modals = useModals();
+  const { recaptchaSiteKey } = useVariables();
+  const { previewId, pending, setPending, mutate } = usePreviewComments();
+  const [loading, setLoading] = useState(false);
+  const form = useForm({ values: { content: '' } });
+  const anchor = parentId ? null : pending;
 
-const CommentsList: FC<{
-  comments: CommentItem[];
-  anonymousUserMap: Record<string, number>;
-}> = ({ comments, anonymousUserMap }) => {
+  const askForName = useCallback(
+    () =>
+      new Promise<string | null>((resolve) => {
+        modals.openModal({
+          classNames: {
+            modal: 'bg-transparent text-textColor',
+          },
+          title: t('preview_comment_your_name', 'Your name'),
+          withCloseButton: true,
+          onClose: () => resolve(null),
+          children: (close) => (
+            <ReviewerNameForm
+              onConfirm={(name) => {
+                resolve(name);
+                close();
+              }}
+            />
+          ),
+        });
+      }),
+    [t]
+  );
+
+  const submit = useCallback(
+    async (values: { content: string }) => {
+      const content = values.content.trim();
+      if (!content) {
+        return;
+      }
+
+      let displayName: string | undefined;
+      let recaptchaToken: string | undefined;
+      if (!user?.id) {
+        const name = await askForName();
+        if (!name) {
+          return;
+        }
+        displayName = name;
+
+        if (recaptchaSiteKey) {
+          const token = await loadRecaptchaToken(recaptchaSiteKey).catch(() => {
+            toast.show(
+              t('preview_comment_failed', 'Could not post the comment'),
+              'warning'
+            );
+            return null;
+          });
+          if (!token) {
+            return;
+          }
+          recaptchaToken = token;
+        }
+      }
+
+      setLoading(true);
+      try {
+        const response = await fetch(
+          user?.id
+            ? `/posts/${previewId}/comments`
+            : `/public/posts/${previewId}/comments`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              content,
+              ...(parentId ? { parentId } : {}),
+              ...(anchor
+                ? {
+                    postId: anchor.postId,
+                    anchorStart: anchor.start,
+                    anchorEnd: anchor.end,
+                    anchorQuote: anchor.quote,
+                  }
+                : {}),
+              ...(displayName ? { displayName } : {}),
+              ...(recaptchaToken ? { recaptchaToken } : {}),
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          toast.show(
+            body?.message ||
+              t('preview_comment_failed', 'Could not post the comment'),
+            'warning'
+          );
+          return;
+        }
+
+        form.reset({ content: '' });
+        if (anchor) {
+          setPending(null);
+        }
+        await mutate();
+        onDone?.();
+      } finally {
+        setLoading(false);
+      }
+    },
+    [user?.id, recaptchaSiteKey, previewId, parentId, anchor, askForName]
+  );
+
+  return (
+    <FormProvider {...form}>
+      <form
+        className="flex flex-col gap-[8px]"
+        onSubmit={form.handleSubmit(submit)}
+      >
+        {!!anchor && (
+          <div className="flex items-start gap-[8px] border-s-[3px] border-btnPrimary ps-[8px] text-[12px] text-textItemBlur">
+            <div className="flex-1 italic truncate">{anchor.quote}</div>
+            <button
+              type="button"
+              className="hover:text-newTextColor"
+              onClick={() => setPending(null)}
+              aria-label={t('cancel', 'Cancel')}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        <Textarea
+          label={
+            parentId ? t('reply', 'Reply') : t('add_a_comment', 'Add a comment')
+          }
+          name="content"
+          className="!min-h-[90px] resize-none"
+          placeholder={
+            parentId
+              ? t('write_a_reply', 'Write a reply...')
+              : t('add_a_comment_placeholder', 'Add a comment...')
+          }
+          maxLength={2000}
+        />
+        <div className="flex items-center justify-end gap-[10px] -mt-[14px]">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width={16}
+            height={16}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-textItemBlur cursor-help"
+            data-tooltip-id="tooltip"
+            data-tooltip-content={t(
+              'preview_comment_detach_hint',
+              'Comments on selected text lose their highlight if the text is edited later.'
+            )}
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4" />
+            <path d="M12 8h.01" />
+          </svg>
+          {!!onDone && (
+            <Button type="button" secondary={true} onClick={onDone}>
+              {t('cancel', 'Cancel')}
+            </Button>
+          )}
+          <Button type="submit" loading={loading}>
+            {parentId ? t('reply', 'Reply') : t('post', 'Post')}
+          </Button>
+        </div>
+      </form>
+    </FormProvider>
+  );
+};
+
+const CommentBody: FC<{ comment: PreviewComment }> = ({ comment }) => {
   const t = useT();
   return (
-    <div className="space-y-4">
-      {!!comments.length && (
-        <h3 className="text-lg font-semibold">{t('comments', 'Comments')}</h3>
-      )}
-      {comments.map((comment) => {
-        const isGuest = !comment.userId;
-        // No caminho autenticado o comentario traz user.name/email (autor
-        // real); no publico/guest cai no rotulo anonimo "Usuario N".
-        const realName = comment.user?.name || comment.user?.email || null;
-        const authorLabel = isGuest
-          ? comment.guestName || t('guest', 'Guest')
-          : realName ||
-            `${t('user', 'User')}${
-              comment.userId ? anonymousUserMap[comment.userId] || '' : ''
-            }`;
-        const badge =
-          comment.kind === 'APPROVAL'
-            ? t('approved', 'Approved')
-            : comment.kind === 'CHANGE_REQUEST'
-            ? t('changes_requested', 'Changes requested')
-            : null;
-        return (
-          <div
-            key={comment.id}
-            className="flex space-x-3 border-t border-tableBorder py-3"
-          >
-            <div className="flex-1 space-y-1">
-              <div className="flex items-center space-x-2">
-                <h3 className="text-sm font-semibold">{authorLabel}</h3>
-                {isGuest && (
-                  <span className="text-[10px] uppercase text-gray-400 border border-tableBorder px-1 rounded">
-                    {t('guest', 'Guest')}
-                  </span>
-                )}
-                {badge && (
-                  <span
-                    className={`text-[10px] uppercase px-1 rounded ${
-                      comment.kind === 'APPROVAL'
-                        ? 'bg-green-900 text-green-200'
-                        : 'bg-yellow-900 text-yellow-200'
-                    }`}
-                  >
-                    {badge}
-                  </span>
-                )}
-              </div>
-              {(() => {
-                const isLegacyDefault =
-                  comment.kind !== 'COMMENT' &&
-                  (comment.content === 'Approved' ||
-                    comment.content === 'Changes requested');
-                const body =
-                  !comment.content || isLegacyDefault ? '' : comment.content;
-                if (!body) return null;
-                return (
-                  <p className="text-sm text-gray-300 whitespace-pre-wrap">
-                    {body}
-                  </p>
-                );
-              })()}
-            </div>
-          </div>
-        );
-      })}
+    <div className="flex flex-col gap-[4px]">
+      <div className="text-[14px] whitespace-pre-wrap break-words">
+        {comment.content}
+      </div>
+      <div className="text-[12px] text-textItemBlur">
+        {comment.name || t('reviewer', 'Reviewer')} ·{' '}
+        {dayjs(comment.createdAt).format('MMM D, YYYY HH:mm')}
+      </div>
     </div>
   );
 };
 
-const LoggedRenderComponents: FC<{
-  postId: string;
-}> = ({ postId }) => {
-  const fetch = useFetch();
-  // Visualizador (cliente convidado) tambem aprova/pede alteracao aqui, na
-  // mesma tela onde ve o post na integra.
-  const { isViewer } = useProfilePermissions();
-  // Caminho autenticado: traz o autor real (nome/e-mail), escopado por org e
-  // perfil no backend. O publico/guest continua no endpoint anonimo.
-  const fetchComments = useCallback(async () => {
-    return { comments: await (await fetch(`/posts/${postId}/comments`)).json() };
-  }, [postId]);
-  const { data, mutate, isLoading } = useSWR(
-    `comments-auth-${postId}`,
-    fetchComments
-  );
-  const anonymousUserMap = useMemo(() => {
-    return ((data?.comments || []) as CommentItem[]).reduce(
-      (all: any, current: CommentItem) => {
-        if (current.userId) {
-          all.users[current.userId] =
-            all.users[current.userId] || all.counter++;
-        }
-        return all;
-      },
-      { users: {}, counter: 1 }
-    ).users;
-  }, [data]);
-  const { register, setValue, getValues } = useForm();
+const ThreadCard: FC<{
+  comment: PreviewComment;
+  replies: PreviewComment[];
+  canResolve: boolean;
+}> = ({ comment, replies, canResolve }) => {
   const t = useT();
-  const [submitting, setSubmitting] = useState<
-    null | 'COMMENT' | 'APPROVAL' | 'CHANGE_REQUEST'
-  >(null);
-
-  const submitKind = useCallback(
-    (kind: 'COMMENT' | 'APPROVAL' | 'CHANGE_REQUEST') => async () => {
-      const comment = (getValues('comment') || '').trim();
-      if (kind === 'COMMENT' && !comment) {
-        return;
-      }
-      setSubmitting(kind);
-      try {
-        await fetch(`/posts/${postId}/comments`, {
-          method: 'POST',
-          body: JSON.stringify({ kind, comment }),
-        });
-        setValue('comment', '');
-        await mutate();
-      } finally {
-        setSubmitting(null);
-      }
-    },
-    [postId, mutate, setValue, getValues]
-  );
-
-  if (isLoading) return <></>;
-
-  return (
-    <>
-      <div className="mb-6 flex space-x-3">
-        <div className="flex-1 space-y-2">
-          <textarea
-            {...register('comment')}
-            className="flex w-full px-3 py-2 h-[98px] text-sm ring-offset-background placeholder:text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-[80px] resize-none text-white bg-third border border-tableBorder placeholder-gray-500 focus:ring-0"
-            placeholder={t('add_a_comment_dot', 'Add a comment...')}
-            defaultValue={''}
-            maxLength={2000}
-          />
-          <div className="flex flex-wrap gap-2 justify-end">
-            <Button
-              type="button"
-              onClick={submitKind('COMMENT')}
-              loading={submitting === 'COMMENT'}
-              secondary={isViewer}
-            >
-              {t('post', 'Post')}
-            </Button>
-            {isViewer && (
-              <>
-                <Button
-                  type="button"
-                  onClick={submitKind('CHANGE_REQUEST')}
-                  loading={submitting === 'CHANGE_REQUEST'}
-                  className="!bg-amber-600 hover:!bg-amber-700 !text-white"
-                >
-                  {t('request_changes', 'Pedir alterações')}
-                </Button>
-                <Button
-                  type="button"
-                  onClick={submitKind('APPROVAL')}
-                  loading={submitting === 'APPROVAL'}
-                  className="!bg-green-600 hover:!bg-green-700 !text-white"
-                >
-                  {t('approve', 'Aprovar')}
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-      <CommentsList
-        comments={(data?.comments || []) as CommentItem[]}
-        anonymousUserMap={anonymousUserMap}
-      />
-    </>
-  );
-};
-
-const GuestRenderComponents: FC<{
-  postId: string;
-  token: string;
-  allowComment: boolean;
-  allowApprove: boolean;
-}> = ({ postId, token, allowComment, allowApprove }) => {
   const fetch = useFetch();
-  const t = useT();
-  const fetchComments = useCallback(async () => {
-    return (await fetch(`/public/posts/${postId}/comments`)).json();
-  }, [postId]);
-  const { data, mutate, isLoading } = useSWR(
-    `comments-${postId}`,
-    fetchComments
-  );
-  const defaults = useMemo(() => readGuestDefaults(), []);
-  const [guestName, setGuestName] = useState(defaults.name);
-  const [guestEmail, setGuestEmail] = useState(defaults.email);
-  const [content, setContent] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState<
-    null | 'comment' | 'approve' | 'changes'
-  >(null);
-  const [linkInvalid, setLinkInvalid] = useState(false);
+  const toast = useToaster();
+  const ref = useRef<HTMLDivElement>(null);
+  const [replying, setReplying] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [flash, setFlash] = useState(false);
+  const {
+    mutate,
+    activeThread,
+    setActiveThread,
+    hoveredThread,
+    setHoveredThread,
+  } = usePreviewComments();
+  const resolved = !!comment.resolvedAt;
+  const anchored = comment.anchorStart !== null && comment.anchorEnd !== null;
 
-  // Client-side re-validation on mount: server-rendered reviewInfo can be stale
-  // if the owner revokes the link after the page was rendered.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(
-          `/public/posts/${postId}/review?token=${encodeURIComponent(token)}`
-        );
-        if (!res.ok) {
-          if (!cancelled) setLinkInvalid(true);
-          return;
-        }
-        const body = await res.json();
-        if (!cancelled && body?.valid !== true) {
-          setLinkInvalid(true);
-        }
-      } catch {
-        // Keep form available; any subsequent POST will also enforce
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [postId, token, fetch]);
+    if (activeThread?.id !== comment.id || activeThread.source !== 'mark') {
+      return;
+    }
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFlash(true);
+    const timer = setTimeout(() => setFlash(false), 1500);
+    return () => clearTimeout(timer);
+  }, [activeThread, comment.id]);
 
-  const anonymousUserMap = useMemo(() => {
-    return ((data?.comments || []) as CommentItem[]).reduce(
-      (all: any, current: CommentItem) => {
-        if (current.userId) {
-          all.users[current.userId] =
-            all.users[current.userId] || all.counter++;
-        }
-        return all;
-      },
-      { users: {}, counter: 1 }
-    ).users;
-  }, [data]);
-
-  const validate = useCallback(
-    (requireContent: boolean) => {
-      if (!guestName.trim() || !guestEmail.trim()) {
-        setError(
-          t('guest_name_email_required', 'Name and email are required')
-        );
-        return false;
-      }
-      const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail);
-      if (!emailOk) {
-        setError(t('guest_invalid_email', 'Invalid email address'));
-        return false;
-      }
-      if (requireContent && !content.trim()) {
-        setError(t('comment_required', 'Comment is required'));
-        return false;
-      }
-      setError(null);
-      return true;
-    },
-    [guestName, guestEmail, content, t]
-  );
-
-  const submitAction = useCallback(
-    async (
-      kind: 'comment' | 'approve' | 'changes',
-      endpoint: string,
-      extra: Record<string, unknown> = {}
-    ) => {
-      if (!validate(kind === 'comment')) return;
-      setSubmitting(kind);
-      try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          body: JSON.stringify({
-            token,
-            guestName: guestName.trim(),
-            guestEmail: guestEmail.trim(),
-            ...extra,
-          }),
-        });
-        if (!res.ok) {
-          if (res.status === 429) {
-            setError(
-              t(
-                'too_many_requests',
-                'Muitas requisições. Tente novamente em instantes.'
-              )
-            );
-          } else if (res.status === 404) {
-            setLinkInvalid(true);
-          } else {
-            setError(
-              t('request_failed', 'Falha na requisição. Tente novamente.')
-            );
-          }
-          return;
-        }
-        persistGuestDefaults(guestName.trim(), guestEmail.trim());
-        setContent('');
-        mutate();
-      } catch {
-        setError(t('request_failed', 'Request failed. Try again.'));
-      } finally {
-        setSubmitting(null);
-      }
-    },
-    [fetch, token, guestName, guestEmail, validate, mutate, t]
-  );
-
-  const onComment = useCallback(
-    () =>
-      submitAction('comment', `/public/posts/${postId}/review/comment`, {
-        content: content.trim(),
-      }),
-    [submitAction, postId, content]
-  );
-
-  const onApprove = useCallback(
-    () =>
-      submitAction('approve', `/public/posts/${postId}/review/approve`, {
-        decision: 'APPROVED',
-        note: content.trim(),
-      }),
-    [submitAction, postId, content]
-  );
-
-  const onRequestChanges = useCallback(
-    () =>
-      submitAction('changes', `/public/posts/${postId}/review/approve`, {
-        decision: 'CHANGE_REQUESTED',
-        note: content.trim(),
-      }),
-    [submitAction, postId, content]
-  );
-
-  if (isLoading) return <></>;
-
-  if (linkInvalid) {
-    return (
-      <div className="mb-6 p-4 border border-red-800 bg-red-950/40 rounded text-center space-y-2">
-        <p className="text-sm font-semibold text-red-300">
-          {t('review_link_invalid_title', 'Link de revisão indisponível')}
-        </p>
-        <p className="text-xs text-red-200">
-          {t(
-            'review_link_invalid_body',
-            'Este link foi revogado ou expirou. Solicite um novo link ao responsável do post.'
-          )}
-        </p>
-      </div>
-    );
-  }
+  const toggleResolved = useCallback(async () => {
+    const response = await fetch(`/posts/comments/${comment.id}/resolve`, {
+      method: 'PUT',
+      body: JSON.stringify({ resolved: !resolved }),
+    });
+    if (!response.ok) {
+      toast.show(
+        t('preview_comment_failed', 'Could not post the comment'),
+        'warning'
+      );
+      return;
+    }
+    mutate();
+  }, [comment.id, resolved]);
 
   return (
-    <>
-      <div className="mb-6 space-y-3 border border-tableBorder rounded p-3 bg-third">
-        <h3 className="text-sm font-semibold">
-          {t('client_review', 'Client review')}
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <input
-            type="text"
-            placeholder={t('your_name', 'Your name')}
-            className="w-full h-[40px] px-3 text-sm bg-input border border-fifth rounded text-inputText placeholder-inputText outline-none"
-            value={guestName}
-            onChange={(e) => setGuestName(e.target.value)}
-            maxLength={80}
-          />
-          <input
-            type="email"
-            placeholder={t('your_email', 'Your email')}
-            className="w-full h-[40px] px-3 text-sm bg-input border border-fifth rounded text-inputText placeholder-inputText outline-none"
-            value={guestEmail}
-            onChange={(e) => setGuestEmail(e.target.value)}
-            maxLength={254}
-          />
-        </div>
-        <textarea
-          placeholder={t(
-            'guest_note_placeholder',
-            'Comentário ou observação opcional para aprovação/alterações...'
-          )}
-          className="w-full px-3 py-2 text-sm bg-input border border-fifth rounded text-inputText placeholder-inputText outline-none min-h-[80px] resize-none"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          maxLength={2000}
-        />
-        {error && <p className="text-xs text-red-400">{error}</p>}
-        <div className="flex flex-wrap gap-2 justify-end">
-          {allowComment && (
-            <Button
-              type="button"
-              onClick={onComment}
-              loading={submitting === 'comment'}
-              secondary={true}
-              className="!bg-newColColor !text-white border border-tableBorder"
-            >
-              {t('send_comment', 'Enviar comentário')}
-            </Button>
-          )}
-          {allowApprove && (
-            <>
-              <Button
-                type="button"
-                onClick={onRequestChanges}
-                loading={submitting === 'changes'}
-                className="!bg-amber-600 hover:!bg-amber-700 !text-white"
-              >
-                {t('request_changes', 'Pedir alterações')}
-              </Button>
-              <Button
-                type="button"
-                onClick={onApprove}
-                loading={submitting === 'approve'}
-                className="!bg-green-600 hover:!bg-green-700 !text-white"
-              >
-                {t('approve', 'Aprovar')}
-              </Button>
-            </>
-          )}
-        </div>
+    <div
+      ref={ref}
+      onMouseEnter={() => !resolved && setHoveredThread(comment.id)}
+      onMouseLeave={() => setHoveredThread(null)}
+      className={clsx(
+        'flex flex-col gap-[8px] rounded-[8px] border p-[12px] transition-colors',
+        resolved && 'opacity-50',
+        flash || hoveredThread === comment.id || activeThread?.id === comment.id
+          ? 'border-btnPrimary'
+          : 'border-newTableBorder'
+      )}
+    >
+      <div className="flex items-center gap-[6px] flex-wrap">
+        {resolved && (
+          <div className="text-[11px] rounded-[4px] px-[6px] py-[2px] bg-btnSimple">
+            {t('resolved', 'Resolved')}
+          </div>
+        )}
+        {!!comment.anchorQuote && !anchored && !resolved && (
+          <div className="text-[11px] rounded-[4px] px-[6px] py-[2px] bg-btnSimple">
+            {t('preview_comment_text_changed', 'Text changed')}
+          </div>
+        )}
       </div>
-      <CommentsList
-        comments={(data?.comments || []) as CommentItem[]}
-        anonymousUserMap={anonymousUserMap}
-      />
-    </>
+      {!!comment.anchorQuote && (
+        <div
+          className={clsx(
+            'border-s-[3px] border-btnPrimary ps-[8px] text-[12px] italic text-textItemBlur truncate',
+            anchored && !resolved && 'cursor-pointer hover:text-newTextColor'
+          )}
+          onClick={() =>
+            anchored &&
+            !resolved &&
+            setActiveThread({ id: comment.id, source: 'card' })
+          }
+        >
+          {comment.anchorQuote}
+        </div>
+      )}
+      {resolved && !expanded ? (
+        <div
+          className="text-[14px] truncate cursor-pointer"
+          onClick={() => setExpanded(true)}
+        >
+          {comment.content}
+        </div>
+      ) : (
+        <CommentBody comment={comment} />
+      )}
+      {(!resolved || expanded) && !!replies.length && (
+        <div className="flex flex-col gap-[8px] ps-[12px] border-s border-newTableBorder">
+          {replies.map((reply) => (
+            <CommentBody key={reply.id} comment={reply} />
+          ))}
+        </div>
+      )}
+      {(!resolved || expanded) && (
+        <div className="flex gap-[12px] text-[12px]">
+          {!resolved && (
+            <button
+              type="button"
+              className="text-textItemBlur hover:text-newTextColor"
+              onClick={() => setReplying(!replying)}
+            >
+              {t('reply', 'Reply')}
+            </button>
+          )}
+          {canResolve && (
+            <button
+              type="button"
+              className="text-textItemBlur hover:text-newTextColor"
+              onClick={toggleResolved}
+            >
+              {resolved ? t('reopen', 'Reopen') : t('resolve', 'Resolve')}
+            </button>
+          )}
+          {resolved && (
+            <button
+              type="button"
+              className="text-textItemBlur hover:text-newTextColor"
+              onClick={() => setExpanded(false)}
+            >
+              {t('collapse', 'Collapse')}
+            </button>
+          )}
+        </div>
+      )}
+      {replying && !resolved && (
+        <CommentComposer
+          parentId={comment.id}
+          onDone={() => setReplying(false)}
+        />
+      )}
+    </div>
   );
 };
 
-export const CommentsComponents: FC<{
-  postId: string;
-  token?: string;
-  reviewInfo?: ReviewInfo;
-}> = ({ postId, token, reviewInfo }) => {
-  const user = useUser();
+export const CommentsComponents: FC<{ previewId: string }> = () => {
   const t = useT();
+  const user = useUser();
+  const { comments, isLoading, postIds, organizationId } = usePreviewComments();
+  const canResolve = !!user?.id && user?.orgId === organizationId;
 
-  const hasValidToken =
-    !!token && !!reviewInfo && reviewInfo.valid === true;
+  const threads = useMemo(() => {
+    const replies = comments.reduce((all, current) => {
+      if (current.parentId) {
+        all[current.parentId] = [...(all[current.parentId] || []), current];
+      }
+      return all;
+    }, {} as Record<string, PreviewComment[]>);
 
-  if (hasValidToken) {
-    const info = reviewInfo as Extract<ReviewInfo, { valid: true }>;
-    return (
-      <GuestRenderComponents
-        postId={postId}
-        token={token!}
-        allowComment={info.allowComment}
-        allowApprove={info.allowApprove}
-      />
-    );
-  }
-
-  if (!user?.id) {
-    const goToLogin = () => {
-      window.location.href = `/auth?returnUrl=${encodeURIComponent(
-        window.location.href
-      )}`;
+    const rank = (c: PreviewComment) => {
+      if (c.resolvedAt) {
+        return [2, 0, dayjs(c.createdAt).valueOf()];
+      }
+      if (c.anchorStart !== null && c.anchorEnd !== null) {
+        return [0, postIds.indexOf(c.postId), c.anchorStart];
+      }
+      return [1, 0, dayjs(c.createdAt).valueOf()];
     };
-    return (
-      <Button
-        onClick={goToLogin}
-        className="!h-auto min-h-[40px] py-[10px] text-center"
-        innerClassName="whitespace-normal text-center leading-snug"
-      >
-        {t(
-          'login_register_to_add_comments',
-          'Login / Register to add comments'
-        )}
-      </Button>
-    );
-  }
 
-  return <LoggedRenderComponents postId={postId} />;
+    return comments
+      .filter((c) => !c.parentId)
+      .sort((a, b) => {
+        const ra = rank(a);
+        const rb = rank(b);
+        return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2];
+      })
+      .map((comment) => ({ comment, replies: replies[comment.id] || [] }));
+  }, [comments, postIds]);
+
+  return (
+    <div className="flex flex-col gap-[16px]">
+      <div className="text-[18px] font-[600]">{t('comments', 'Comments')}</div>
+      <CommentComposer />
+      {!isLoading && !threads.length && (
+        <div className="text-[13px] text-textItemBlur">
+          {t(
+            'preview_no_comments_yet',
+            'No comments yet. Select some text in the post to comment on it, or add a general comment.'
+          )}
+        </div>
+      )}
+      <div className="flex flex-col gap-[10px]">
+        {threads.map(({ comment, replies }) => (
+          <ThreadCard
+            key={comment.id}
+            comment={comment}
+            replies={replies}
+            canResolve={canResolve}
+          />
+        ))}
+      </div>
+    </div>
+  );
 };

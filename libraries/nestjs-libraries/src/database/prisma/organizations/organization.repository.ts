@@ -1,5 +1,6 @@
-import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import { PrismaRepository, PrismaTransaction } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import {
+  Prisma,
   ProfileRole,
   Role,
   ShortLinkPreference,
@@ -17,7 +18,8 @@ export class OrganizationRepository {
     private _organization: PrismaRepository<'organization'>,
     private _userOrg: PrismaRepository<'userOrganization'>,
     private _user: PrismaRepository<'user'>,
-    private _profileMember: PrismaRepository<'profileMember'>
+    private _profileMember: PrismaRepository<'profileMember'>,
+    private _transaction: PrismaTransaction
   ) {}
 
   createMaxUser(id: string, name: string, saasName: string, email: string) {
@@ -57,7 +59,7 @@ export class OrganizationRepository {
                   : `${saasName}+` + makeId(10) + '@postiz.com',
                 name: name ? `${name}###${id}` : `Unnamed User###${id}`,
                 providerName: 'LOCAL',
-                password: AuthService.hashPassword(makeId(500)),
+                password: AuthService.hashPassword(makeSecureId(500)),
                 timezone: 0,
               },
             },
@@ -71,6 +73,7 @@ export class OrganizationRepository {
     return this._organization.model.organization.findFirst({
       where: {
         apiKey: api,
+        deletedAt: null,
       },
       include: {
         subscription: {
@@ -86,6 +89,35 @@ export class OrganizationRepository {
 
   getCount() {
     return this._organization.model.organization.count();
+  }
+
+  getSuperAdminUser(orgId: string) {
+    return this._userOrg.model.userOrganization.findFirst({
+      where: {
+        organizationId: orgId,
+        disabled: false,
+        user: {
+          isSuperAdmin: true,
+          deletedAt: null,
+        },
+      },
+    });
+  }
+
+  getPrivilegedNonSuperAdminUser(orgId: string) {
+    return this._userOrg.model.userOrganization.findFirst({
+      where: {
+        organizationId: orgId,
+        disabled: false,
+        role: {
+          in: [Role.SUPERADMIN, Role.ADMIN],
+        },
+        user: {
+          isSuperAdmin: false,
+          deletedAt: null,
+        },
+      },
+    });
   }
 
   getUserOrg(id: string) {
@@ -128,6 +160,38 @@ export class OrganizationRepository {
             },
           },
           {
+            organization: {
+              OR: [
+                {
+                  paymentId: {
+                    equals: name,
+                  },
+                },
+                {
+                  subscription: {
+                    identifier: {
+                      equals: name,
+                    },
+                  },
+                },
+                {
+                  Integration: {
+                    some: {
+                      id: name,
+                    },
+                  },
+                },
+                {
+                  post: {
+                    some: {
+                      id: name,
+                    },
+                  },
+                },
+              ],
+            },
+          },
+          {
             user: {
               OR: [
                 {
@@ -154,9 +218,23 @@ export class OrganizationRepository {
       },
       select: {
         id: true,
+        role: true,
+        disabled: true,
         organization: {
           select: {
             id: true,
+            name: true,
+            paymentId: true,
+            deletedAt: true,
+            subscription: {
+              select: {
+                subscriptionTier: true,
+                identifier: true,
+                isLifetime: true,
+                period: true,
+                cancelAt: true,
+              },
+            },
           },
         },
         user: {
@@ -164,6 +242,9 @@ export class OrganizationRepository {
             id: true,
             name: true,
             email: true,
+            activated: true,
+            providerName: true,
+            deletedAt: true,
           },
         },
       },
@@ -184,6 +265,7 @@ export class OrganizationRepository {
   async getOrgsByUserId(userId: string) {
     return this._organization.model.organization.findMany({
       where: {
+        deletedAt: null,
         users: {
           some: {
             userId,
@@ -228,6 +310,124 @@ export class OrganizationRepository {
     return !!existing;
   }
 
+  getOrgByIdWithSubscription(id: string) {
+    return this._organization.model.organization.findUnique({
+      where: {
+        id,
+      },
+      include: {
+        subscription: {
+          select: {
+            subscriptionTier: true,
+            totalChannels: true,
+            isLifetime: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+  }
+
+  async getAccountOverview(orgId: string) {
+    const [organization, members] = await Promise.all([
+      this._organization.model.organization.findUnique({
+        where: {
+          id: orgId,
+        },
+        select: {
+          id: true,
+          name: true,
+          createdAt: true,
+          deletedAt: true,
+          allowTrial: true,
+          isTrailing: true,
+          subscription: {
+            select: {
+              subscriptionTier: true,
+              period: true,
+              identifier: true,
+              totalChannels: true,
+              isLifetime: true,
+              cancelAt: true,
+              createdAt: true,
+              updatedAt: true,
+              deletedAt: true,
+            },
+          },
+        },
+      }),
+      this._userOrg.model.userOrganization.findMany({
+        where: {
+          organizationId: orgId,
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+        select: {
+          role: true,
+          disabled: true,
+          createdAt: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              activated: true,
+              providerName: true,
+              lastOnline: true,
+              createdAt: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    if (!organization) {
+      return null;
+    }
+
+    const owner = members.find((member) => member.role === Role.SUPERADMIN);
+    const lastOnlineMax = members.reduce<Date | null>(
+      (latest, member) =>
+        !latest || member.user.lastOnline > latest
+          ? member.user.lastOnline
+          : latest,
+      null
+    );
+
+    return {
+      organization: {
+        id: organization.id,
+        name: organization.name,
+        createdAt: organization.createdAt,
+        deletedAt: organization.deletedAt,
+        allowTrial: organization.allowTrial,
+        isTrailing: organization.isTrailing,
+      },
+      subscription: organization.subscription || null,
+      owner: owner
+        ? {
+            ...owner.user,
+            role: owner.role,
+            memberSince: owner.createdAt,
+          }
+        : null,
+      users: {
+        total: members.length,
+        activated: members.filter((member) => member.user.activated).length,
+        disabled: members.filter((member) => member.disabled).length,
+        lastOnlineMax,
+      },
+    };
+  }
+
+  getUsersByEmail(email: string) {
+    return this._user.model.user.findMany({
+      where: {
+        email,
+      },
+    });
+  }
+
   async addUserToOrg(
     userId: string,
     id: string,
@@ -248,11 +448,17 @@ export class OrganizationRepository {
       await this._organization.model.organization.findFirst({
         where: {
           id: orgId,
+          deletedAt: null,
         },
         select: {
           subscription: true,
         },
       });
+
+    // the organization was deleted after the invite was sent
+    if (!checkForSubscription) {
+      return false;
+    }
 
     if (
       process.env.STRIPE_PUBLISHABLE_KEY &&
@@ -419,6 +625,32 @@ export class OrganizationRepository {
     } catch (err) {}
   }
 
+  async getLastPublishDate(organizationId: string) {
+    const org = await this._organization.model.organization.findUnique({
+      where: {
+        id: organizationId,
+      },
+      select: {
+        post: {
+          where: {
+            state: 'PUBLISHED',
+          },
+          orderBy: {
+            publishDate: 'desc',
+          },
+          take: 1,
+          select: {
+            publishDate: true,
+          },
+        },
+      },
+    });
+
+    const publishDate = org?.post?.[0]?.publishDate;
+    // Never in the future, the streak workflow sleeps until a day after it
+    return publishDate ? Math.min(publishDate.getTime(), Date.now()) : null;
+  }
+
   async getTeam(orgId: string) {
     return this._organization.model.organization.findUnique({
       where: {
@@ -428,6 +660,7 @@ export class OrganizationRepository {
         users: {
           select: {
             role: true,
+            disabled: true,
             user: {
               select: {
                 email: true,
@@ -633,6 +866,7 @@ export class OrganizationRepository {
       data: {
         language,
       },
+      select: { language: true },
     });
   }
 
@@ -669,6 +903,7 @@ export class OrganizationRepository {
     return this._organization.model.organization.update({
       where: { id: orgId },
       data: { zernioApiKey: encryptedKey },
+      select: { id: true },
     });
   }
 
@@ -676,6 +911,7 @@ export class OrganizationRepository {
     return this._organization.model.organization.update({
       where: { id: orgId },
       data: { zernioApiKey: null },
+      select: { id: true },
     });
   }
 
@@ -690,6 +926,7 @@ export class OrganizationRepository {
     return this._organization.model.organization.update({
       where: { id: orgId },
       data: { shareZernioWithProfiles: enabled },
+      select: { shareZernioWithProfiles: true },
     });
   }
 
@@ -706,6 +943,84 @@ export class OrganizationRepository {
     return this._organization.model.organization.update({
       where: { id: orgId },
       data: { shareProviderCredentialsWithProfiles: enabled },
+      select: { shareProviderCredentialsWithProfiles: true },
     });
   }
+
+  // soft-deletes the organization only if the user keeps at least one other
+  // enabled organization; serializable so two parallel deletes can't remove both
+  deleteOrganizationIfNotLast(orgId: string, userId: string) {
+    return this._transaction.model
+      .$transaction(
+        async (tx) => {
+          const enabledOrgs = await tx.userOrganization.count({
+            where: {
+              userId,
+              disabled: false,
+              organization: {
+                deletedAt: null,
+              },
+            },
+          });
+
+          if (enabledOrgs <= 1) {
+            return null;
+          }
+
+          return tx.organization.update({
+            where: {
+              id: orgId,
+            },
+            data: {
+              deletedAt: new Date(),
+            },
+            select: { id: true },
+          });
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        }
+      )
+      .catch((err) => {
+        if (err?.code === 'P2034') {
+          return null;
+        }
+        throw err;
+      });
+  }
+  deleteOrganization(orgId: string) {
+    return this._organization.model.organization.update({
+      where: {
+        id: orgId,
+      },
+      data: {
+        deletedAt: new Date(),
+      },
+      select: { id: true },
+    });
+  }
+
+  getOrganizationName(orgId: string) {
+    return this._organization.model.organization.findUnique({
+      where: {
+        id: orgId,
+      },
+      select: {
+        name: true,
+      },
+    });
+  }
+
+  updateOrganizationName(orgId: string, name: string) {
+    return this._organization.model.organization.update({
+      where: {
+        id: orgId,
+      },
+      data: {
+        name,
+      },
+      select: { id: true, name: true },
+    });
+  }
+
 }

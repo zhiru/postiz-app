@@ -23,9 +23,7 @@ import {
   QuickCreateFlowDto,
 } from '@gitroom/nestjs-libraries/dtos/flows/flow.dto';
 import { TemporalService } from 'nestjs-temporal-core';
-import {
-  organizationId as orgSearchAttr,
-} from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
+import { organizationId as orgSearchAttr } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
 import { TypedSearchAttributes } from '@temporalio/common';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { ProfileService } from '@gitroom/nestjs-libraries/database/prisma/profiles/profile.service';
@@ -275,8 +273,7 @@ export class FlowsService {
     const noIgButReadable =
       !primaryAttempt.error &&
       !fallbackAttempt.error &&
-      (primaryAttempt.subs?.length ?? 0) +
-        (fallbackAttempt.subs?.length ?? 0) >
+      (primaryAttempt.subs?.length ?? 0) + (fallbackAttempt.subs?.length ?? 0) >
         0;
 
     if (bothHostsErrored) {
@@ -393,7 +390,9 @@ export class FlowsService {
       return {
         ok: false,
         error:
-          `App Meta ${appId} (${host}): webhook instagram configurado, mas faltam os campos: ${missing.join(', ')}. ` +
+          `App Meta ${appId} (${host}): webhook instagram configurado, mas faltam os campos: ${missing.join(
+            ', '
+          )}. ` +
           'Abra Casos de uso > instagram_manage_comments > Configurar webhooks e ative comments e messages ' +
           '(necessarios para responder comentarios e enviar DMs).',
       };
@@ -451,7 +450,12 @@ export class FlowsService {
     return Array.isArray(body.data) ? body.data : [];
   }
 
-  updateFlow(orgId: string, id: string, body: UpdateFlowDto, profileId?: string) {
+  updateFlow(
+    orgId: string,
+    id: string,
+    body: UpdateFlowDto,
+    profileId?: string
+  ) {
     return this._flowsRepository.updateFlow(orgId, id, body, profileId);
   }
 
@@ -459,7 +463,12 @@ export class FlowsService {
     return this._flowsRepository.deleteFlow(orgId, id, profileId);
   }
 
-  saveCanvas(orgId: string, id: string, body: SaveCanvasDto, profileId?: string) {
+  saveCanvas(
+    orgId: string,
+    id: string,
+    body: SaveCanvasDto,
+    profileId?: string
+  ) {
     return this._flowsRepository.saveCanvas(
       orgId,
       id,
@@ -545,7 +554,9 @@ export class FlowsService {
         'instagram'
       ) as unknown as InstagramProvider;
       if (!provider) {
-        this._logger.warn('Instagram provider not found, skipping webhook subscription');
+        this._logger.warn(
+          'Instagram provider not found, skipping webhook subscription'
+        );
         return;
       }
 
@@ -614,7 +625,12 @@ export class FlowsService {
     }
   }
 
-  async quickUpdateFlow(orgId: string, id: string, body: QuickCreateFlowDto, profileId?: string) {
+  async quickUpdateFlow(
+    orgId: string,
+    id: string,
+    body: QuickCreateFlowDto,
+    profileId?: string
+  ) {
     const current = await this._flowsRepository.getFlow(orgId, id, profileId);
     if (!current) {
       throw new BadRequestException('Flow not found');
@@ -624,10 +640,21 @@ export class FlowsService {
     // simetria com o caminho de criacao (mesmo guard).
     await this.assertIntegrationAccess(orgId, current.integrationId, profileId);
     this.assertDmButtonUrl(body.dmButtonUrl);
-    await this._flowsRepository.updateFlow(orgId, id, { name: body.name }, profileId);
+    await this._flowsRepository.updateFlow(
+      orgId,
+      id,
+      { name: body.name },
+      profileId
+    );
 
     const triggerType = body.triggerType ?? 'comment_on_post';
-    const nodes: Array<{ type: string; label?: string; positionX: number; positionY: number; data: string }> = [];
+    const nodes: Array<{
+      type: string;
+      label?: string;
+      positionX: number;
+      positionY: number;
+      data: string;
+    }> = [];
     const edges: Array<{ sourceIndex: number; targetIndex: number }> = [];
 
     const triggerConfig = this.buildTriggerConfig(body);
@@ -642,9 +669,16 @@ export class FlowsService {
     let lastIndex = 0;
 
     if (triggerType === 'comment_on_post') {
-      const replyMsgs = body.replyMessages?.filter(Boolean) ?? (body.replyMessage ? [body.replyMessage] : []);
+      const replyMsgs =
+        body.replyMessages?.filter(Boolean) ??
+        (body.replyMessage ? [body.replyMessage] : []);
       if (replyMsgs.length) {
-        nodes.push({ type: 'REPLY_COMMENT', positionX: 250, positionY: 50 + nodes.length * 150, data: JSON.stringify({ message: replyMsgs[0], messages: replyMsgs }) });
+        nodes.push({
+          type: 'REPLY_COMMENT',
+          positionX: 250,
+          positionY: 50 + nodes.length * 150,
+          data: JSON.stringify({ message: replyMsgs[0], messages: replyMsgs }),
+        });
         edges.push({ sourceIndex: lastIndex, targetIndex: nodes.length - 1 });
         lastIndex = nodes.length - 1;
       }
@@ -654,14 +688,36 @@ export class FlowsService {
       const dmData: Record<string, any> = { message: body.dmMessage };
       if (body.dmButtonText) dmData.buttonText = body.dmButtonText;
       if (body.dmButtonUrl) dmData.buttonUrl = body.dmButtonUrl;
-      nodes.push({ type: 'SEND_DM', positionX: 250, positionY: 50 + nodes.length * 150, data: JSON.stringify(dmData) });
+      nodes.push({
+        type: 'SEND_DM',
+        positionX: 250,
+        positionY: 50 + nodes.length * 150,
+        data: JSON.stringify(dmData),
+      });
       edges.push({ sourceIndex: lastIndex, targetIndex: nodes.length - 1 });
     }
 
-    const flowNodes = nodes.map((n, i) => ({ id: `temp-${i}`, type: n.type as any, label: n.label, positionX: n.positionX, positionY: n.positionY, data: n.data }));
-    const flowEdges = edges.map((e, i) => ({ id: `temp-edge-${i}`, sourceNodeId: `temp-${e.sourceIndex}`, targetNodeId: `temp-${e.targetIndex}` }));
+    const flowNodes = nodes.map((n, i) => ({
+      id: `temp-${i}`,
+      type: n.type as any,
+      label: n.label,
+      positionX: n.positionX,
+      positionY: n.positionY,
+      data: n.data,
+    }));
+    const flowEdges = edges.map((e, i) => ({
+      id: `temp-edge-${i}`,
+      sourceNodeId: `temp-${e.sourceIndex}`,
+      targetNodeId: `temp-${e.targetIndex}`,
+    }));
 
-    await this._flowsRepository.saveCanvas(orgId, id, flowNodes, flowEdges, profileId);
+    await this._flowsRepository.saveCanvas(
+      orgId,
+      id,
+      flowNodes,
+      flowEdges,
+      profileId
+    );
 
     // Auto-activate on first wizard save: if the flow was still DRAFT (created
     // via the popup hub which makes an empty draft before the wizard runs),
@@ -679,7 +735,11 @@ export class FlowsService {
     return this._flowsRepository.getFlow(orgId, id, profileId);
   }
 
-  async quickCreateFlow(orgId: string, body: QuickCreateFlowDto, profileId?: string) {
+  async quickCreateFlow(
+    orgId: string,
+    body: QuickCreateFlowDto,
+    profileId?: string
+  ) {
     await this.assertIntegrationAccess(orgId, body.integrationId, profileId);
     this.assertDmButtonUrl(body.dmButtonUrl);
     const check = await this.checkIntegrationWebhook(orgId, body.integrationId);
@@ -730,7 +790,9 @@ export class FlowsService {
 
     // Reply Comment node (only for comment_on_post — stories have no public reply)
     if (triggerType === 'comment_on_post') {
-      const replyMsgs = body.replyMessages?.filter(Boolean) ?? (body.replyMessage ? [body.replyMessage] : []);
+      const replyMsgs =
+        body.replyMessages?.filter(Boolean) ??
+        (body.replyMessage ? [body.replyMessage] : []);
       if (replyMsgs.length) {
         nodes.push({
           type: 'REPLY_COMMENT',
@@ -781,7 +843,12 @@ export class FlowsService {
     );
 
     // Auto-activate new flows created via wizard
-    await this._flowsRepository.updateFlowStatus(orgId, flow.id, FlowStatus.ACTIVE, profileId);
+    await this._flowsRepository.updateFlowStatus(
+      orgId,
+      flow.id,
+      FlowStatus.ACTIVE,
+      profileId
+    );
 
     return this._flowsRepository.getFlow(orgId, flow.id, profileId);
   }
@@ -852,7 +919,11 @@ export class FlowsService {
   private isPendingNextPublication(
     flow: {
       triggerPostIds?: string | null;
-      nodes?: Array<{ type: string; label?: string | null; data: string | null }>;
+      nodes?: Array<{
+        type: string;
+        label?: string | null;
+        data: string | null;
+      }>;
     },
     triggerType: 'comment_on_post' | 'story_reply' = 'comment_on_post'
   ): boolean {
@@ -979,10 +1050,7 @@ export class FlowsService {
     }
   }
 
-  async getInstagramStoriesByIntegration(
-    orgId: string,
-    integrationId: string
-  ) {
+  async getInstagramStoriesByIntegration(orgId: string, integrationId: string) {
     const integration = await this._integrationService.getIntegrationById(
       orgId,
       integrationId
@@ -1022,19 +1090,37 @@ export class FlowsService {
     }
   }
 
-  getExecution(orgId: string, id: string) {
-    return this._flowsRepository.getExecution(id, orgId);
+  getExecution(orgId: string, id: string, flowId?: string, profileId?: string) {
+    return this._flowsRepository.getExecution(id, orgId, flowId, profileId);
   }
 
   appendExecutionLog(
     id: string,
-    entry: { nodeId: string; nodeType: string; status: string; timestamp: string; error?: string }
+    entry: {
+      nodeId: string;
+      nodeType: string;
+      status: string;
+      timestamp: string;
+      error?: string;
+    }
   ) {
     return this._flowsRepository.appendExecutionLog(id, entry);
   }
 
-  getExecutions(orgId: string, flowId: string, page?: number, limit?: number) {
-    return this._flowsRepository.getExecutions(flowId, orgId, page, limit);
+  getExecutions(
+    orgId: string,
+    flowId: string,
+    page?: number,
+    limit?: number,
+    profileId?: string
+  ) {
+    return this._flowsRepository.getExecutions(
+      flowId,
+      orgId,
+      page,
+      limit,
+      profileId
+    );
   }
 
   async updateExecution(
@@ -1100,11 +1186,10 @@ export class FlowsService {
     commentText: string;
     organizationId: string;
   }) {
-    let activeFlows =
-      await this._flowsRepository.getActiveFlowsForIntegration(
-        payload.integrationId,
-        payload.igMediaId
-      );
+    let activeFlows = await this._flowsRepository.getActiveFlowsForIntegration(
+      payload.integrationId,
+      payload.igMediaId
+    );
 
     // Only feed/reel (comment_on_post) flows react to comment webhooks.
     activeFlows = activeFlows.filter(
@@ -1176,7 +1261,7 @@ export class FlowsService {
         flow.id,
         payload.igCommentId
       );
-      if (existing) continue;
+      if (existing && existing.status !== FlowExecutionStatus.FAILED) continue;
 
       const workflowId = `flow-exec-${flow.id}-${payload.igCommentId}`;
 
@@ -1207,32 +1292,38 @@ export class FlowsService {
 
       try {
         await temporalClient.workflow.start('flowExecutionWorkflow', {
-            workflowId,
-            taskQueue: 'main',
-            args: [
-              {
-                executionId: execution.id,
-                flowId: flow.id,
-                triggerType: 'comment_on_post',
-                igCommentId: payload.igCommentId,
-                igCommenterId: payload.igCommenterId,
-                igCommenterName: payload.igCommenterName,
-                igMediaId: payload.igMediaId,
-                commentText: payload.commentText,
-                integrationId: payload.integrationId,
-              },
-            ],
-            typedSearchAttributes: new TypedSearchAttributes([
-              {
-                key: orgSearchAttr,
-                value: payload.organizationId,
-              },
-            ]),
-          });
+          workflowId,
+          workflowIdReusePolicy: 'REJECT_DUPLICATE' as any,
+          taskQueue: 'main',
+          args: [
+            {
+              executionId: execution.id,
+              flowId: flow.id,
+              triggerType: 'comment_on_post',
+              igCommentId: payload.igCommentId,
+              igCommenterId: payload.igCommenterId,
+              igCommenterName: payload.igCommenterName,
+              igMediaId: payload.igMediaId,
+              commentText: payload.commentText,
+              integrationId: payload.integrationId,
+            },
+          ],
+          typedSearchAttributes: new TypedSearchAttributes([
+            {
+              key: orgSearchAttr,
+              value: payload.organizationId,
+            },
+          ]),
+        });
       } catch (err) {
+        if ((err as Error).name === 'WorkflowExecutionAlreadyStartedError') {
+          results.push(execution);
+          continue;
+        }
         await this.updateExecution(execution.id, {
           status: FlowExecutionStatus.FAILED,
-          error: err instanceof Error ? err.message : 'Failed to start workflow',
+          error:
+            'Could not enqueue automation. The event can be delivered again safely.',
           completedAt: new Date(),
         });
       }
@@ -1286,7 +1377,8 @@ export class FlowsService {
         `Temporal client unavailable — enrichment de UnmatchedComment ${unmatched.id} adiada`
       );
       await this._flowsRepository.updateUnmatchedMetadata(unmatched.id, {
-        enrichmentError: 'orchestrator offline (sera retentado na proxima chamada)',
+        enrichmentError:
+          'orchestrator offline (sera retentado na proxima chamada)',
       });
       return;
     }
@@ -1363,11 +1455,7 @@ export class FlowsService {
     return this._flowsRepository.listAliasesByFlow(orgId, flowId);
   }
 
-  lookupAliasFlows(
-    orgId: string,
-    integrationId: string,
-    aliasMediaId: string
-  ) {
+  lookupAliasFlows(orgId: string, integrationId: string, aliasMediaId: string) {
     return this._flowsRepository.findFlowsByAlias(
       orgId,
       integrationId,
@@ -1386,11 +1474,10 @@ export class FlowsService {
     messageText: string;
     reaction?: string;
   }) {
-    let activeFlows =
-      await this._flowsRepository.getActiveFlowsForIntegration(
-        payload.integrationId,
-        payload.igStoryId
-      );
+    let activeFlows = await this._flowsRepository.getActiveFlowsForIntegration(
+      payload.integrationId,
+      payload.igStoryId
+    );
 
     // Only story_reply flows react to story webhooks.
     activeFlows = activeFlows.filter(
@@ -1428,7 +1515,11 @@ export class FlowsService {
     });
 
     // Keyword / reaction matching honoring node config
-    const triggerText = (payload.messageText || payload.reaction || '').toLowerCase();
+    const triggerText = (
+      payload.messageText ||
+      payload.reaction ||
+      ''
+    ).toLowerCase();
     const isReaction = !!payload.reaction && !payload.messageText;
     const finalFlows = matchingFlows.filter((flow) => {
       const trigger = flow.nodes?.find((n) => n.type === 'TRIGGER');
@@ -1442,7 +1533,9 @@ export class FlowsService {
 
       if (isReaction && cfg.matchReactions === false) return false;
 
-      const keywords: string[] = Array.isArray(cfg.keywords) ? cfg.keywords : [];
+      const keywords: string[] = Array.isArray(cfg.keywords)
+        ? cfg.keywords
+        : [];
       if (!keywords.length) return true;
 
       const normalized = keywords.map((k) => String(k).toLowerCase());
@@ -1459,7 +1552,7 @@ export class FlowsService {
           flow.id,
           payload.igMessageId
         );
-      if (existing) continue;
+      if (existing && existing.status !== FlowExecutionStatus.FAILED) continue;
 
       const workflowId = `flow-exec-${flow.id}-${payload.igMessageId}`;
 
@@ -1491,34 +1584,40 @@ export class FlowsService {
 
       try {
         await temporalClient.workflow.start('flowExecutionWorkflow', {
-            workflowId,
-            taskQueue: 'main',
-            args: [
-              {
-                executionId: execution.id,
-                flowId: flow.id,
-                triggerType: 'story_reply',
-                igSenderId: payload.igSenderId,
-                igSenderName: payload.igSenderName,
-                igStoryId: payload.igStoryId,
-                igThreadId: payload.igThreadId,
-                igMessageId: payload.igMessageId,
-                messageText: payload.messageText,
-                reaction: payload.reaction,
-                integrationId: payload.integrationId,
-              },
-            ],
-            typedSearchAttributes: new TypedSearchAttributes([
-              {
-                key: orgSearchAttr,
-                value: payload.organizationId,
-              },
-            ]),
-          });
+          workflowId,
+          workflowIdReusePolicy: 'REJECT_DUPLICATE' as any,
+          taskQueue: 'main',
+          args: [
+            {
+              executionId: execution.id,
+              flowId: flow.id,
+              triggerType: 'story_reply',
+              igSenderId: payload.igSenderId,
+              igSenderName: payload.igSenderName,
+              igStoryId: payload.igStoryId,
+              igThreadId: payload.igThreadId,
+              igMessageId: payload.igMessageId,
+              messageText: payload.messageText,
+              reaction: payload.reaction,
+              integrationId: payload.integrationId,
+            },
+          ],
+          typedSearchAttributes: new TypedSearchAttributes([
+            {
+              key: orgSearchAttr,
+              value: payload.organizationId,
+            },
+          ]),
+        });
       } catch (err) {
+        if ((err as Error).name === 'WorkflowExecutionAlreadyStartedError') {
+          results.push(execution);
+          continue;
+        }
         await this.updateExecution(execution.id, {
           status: FlowExecutionStatus.FAILED,
-          error: err instanceof Error ? err.message : 'Failed to start workflow',
+          error:
+            'Could not enqueue automation. The event can be delivered again safely.',
           completedAt: new Date(),
         });
       }
@@ -1670,7 +1769,7 @@ export class FlowsService {
     metaMid?: string;
     senderIgsid: string;
     igAccountId: string;
-  }): Promise<void> {
+  }): Promise<void | { retry: true }> {
     if (!input.payload.startsWith('pb_')) return;
 
     if (!this.verifyPostbackPayload(input.payload)) {
@@ -1699,7 +1798,9 @@ export class FlowsService {
 
     if (pending.expiresAt.getTime() < Date.now()) {
       this._logger.log(
-        `Postback ${pending.id} expired at ${pending.expiresAt.toISOString()}, marking EXPIRED`
+        `Postback ${
+          pending.id
+        } expired at ${pending.expiresAt.toISOString()}, marking EXPIRED`
       );
       await this._flowsRepository.expirePendingPostbacks();
       return;
@@ -1712,7 +1813,7 @@ export class FlowsService {
         input.payload,
         input.metaMid
       );
-      if (!isFirst) {
+      if (!isFirst && pending.consumedMetaMid !== input.metaMid) {
         this._logger.log(
           `Postback ${pending.id}: duplicate Meta delivery mid=${input.metaMid}, ignoring`
         );
@@ -1726,36 +1827,39 @@ export class FlowsService {
       this._logger.error(
         `Temporal client unavailable — orchestrator offline? Postback ${pending.id} not dispatched`
       );
-      return;
+      await this.updateExecution(pending.originExecutionId, {
+        status: FlowExecutionStatus.FAILED,
+        error: 'Could not enqueue automation. Waiting for webhook retry.',
+        completedAt: new Date(),
+      });
+      return { retry: true };
     }
     try {
       await temporalClient.workflow.start('followGateResolveWorkflow', {
-          workflowId,
-          taskQueue: 'main',
-          args: [{ pendingPostbackId: pending.id }],
-          typedSearchAttributes: new TypedSearchAttributes([
-            {
-              key: orgSearchAttr,
-              value: pending.organizationId,
-            },
-          ]),
-        });
+        workflowId,
+        workflowIdReusePolicy: 'REJECT_DUPLICATE' as any,
+        taskQueue: 'main',
+        args: [{ pendingPostbackId: pending.id }],
+        typedSearchAttributes: new TypedSearchAttributes([
+          {
+            key: orgSearchAttr,
+            value: pending.organizationId,
+          },
+        ]),
+      });
       this._logger.log(
         `Postback ${pending.id}: dispatched ${workflowId} for execution ${pending.originExecutionId}`
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      // Workflow ID already running means Meta delivered the same click to
-      // a second worker before the mid dedupe caught it — safe to ignore.
-      if (msg.includes('WorkflowAlreadyStarted') || msg.includes('already started')) {
-        this._logger.log(
-          `Postback ${pending.id}: workflow ${workflowId} already running (expected on retry)`
-        );
+      if ((err as Error).name === 'WorkflowExecutionAlreadyStartedError')
         return;
-      }
-      this._logger.warn(
-        `Postback ${pending.id}: failed to start resolve workflow: ${msg}`
-      );
+      await this.updateExecution(pending.originExecutionId, {
+        status: FlowExecutionStatus.FAILED,
+        error: 'Could not enqueue automation. Waiting for webhook retry.',
+        completedAt: new Date(),
+      });
+      this._logger.warn('Could not enqueue postback automation');
+      return { retry: true };
     }
   }
 }

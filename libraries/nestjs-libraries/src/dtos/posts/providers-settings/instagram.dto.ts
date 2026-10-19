@@ -3,7 +3,10 @@ import {
   IsArray,
   IsDefined,
   IsIn,
+  IsNumber,
   IsString,
+  Max,
+  Min,
   ValidateNested,
   IsOptional,
 } from 'class-validator';
@@ -13,6 +16,38 @@ export class Collaborators {
   @IsDefined()
   @IsString()
   label: string;
+}
+
+export class InstagramAudio {
+  @IsDefined()
+  @IsString()
+  id: string;
+
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  artist?: string;
+
+  @IsOptional()
+  @IsString()
+  image?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  audio_volume?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  video_volume?: number;
 }
 export class InstagramDto {
   @IsIn(['post', 'story'])
@@ -36,4 +71,9 @@ export class InstagramDto {
   @ValidateNested()
   @Type(() => MediaDto)
   cover?: MediaDto;
+
+  @Type(() => InstagramAudio)
+  @ValidateNested()
+  @IsOptional()
+  audio?: InstagramAudio;
 }

@@ -7,6 +7,7 @@ import { ModuleRef } from '@nestjs/core';
 import { toolList } from '@gitroom/nestjs-libraries/chat/tools/tool.list';
 import { renderPersonaPrompt } from '@gitroom/nestjs-libraries/chat/helpers/persona.prompt';
 import { AgentModelResolver } from '@gitroom/nestjs-libraries/chat/agent.model.resolver';
+import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import dayjs from 'dayjs';
 
 export const AgentState = object({
@@ -25,11 +26,16 @@ export class LoadToolsService {
     private _agentModelResolver: AgentModelResolver
   ) {}
 
-  async loadTools() {
+  async loadTools(mcpOnly = false) {
     return (
       await Promise.all<{ name: string; tool: any }>(
         toolList
-          .map((p) => this._moduleRef.get(p, { strict: false }))
+          .map(
+            (p) =>
+              this._moduleRef.get(p, { strict: false }) as AgentToolInterface
+          )
+          .filter((p) => !!p.mcpOnly === mcpOnly)
+          .filter((p) => !p.available || p.available())
           .map(async (p) => ({
             name: p.name as string,
             tool: await p.run(),
@@ -44,13 +50,25 @@ export class LoadToolsService {
     );
   }
 
+  // Tools a self-hosted instance must have to connect through the relay
+  // (every install has them, whatever features it configured)
+  coreToolNames() {
+    return toolList
+      .map(
+        (p) => this._moduleRef.get(p, { strict: false }) as AgentToolInterface
+      )
+      .filter((p) => !p.mcpOnly && !p.available && !p.optionalOnSelfHosted)
+      .map((p) => p.name);
+  }
+
   async agent() {
     const tools = await this.loadTools();
     const modelResolver = this._agentModelResolver;
     return new Agent({
       id: 'postiz',
       name: 'postiz',
-      description: 'Agent that helps manage and schedule social media posts for users',
+      description:
+        'Agent that helps schedule, list and delete social media posts for users',
       instructions: ({ requestContext }) => {
         const ui: string = requestContext.get('ui' as never);
         const personaRaw: string = requestContext.get('persona' as never);
@@ -69,6 +87,9 @@ export class LoadToolsService {
 
       You are an agent that helps manage and schedule social media posts for users, you can:
         - Schedule posts into the future, or now, adding texts, images and videos
+        - List the posts scheduled between two dates (postsListTool)
+        - Update the settings of a scheduled post or draft that was not published yet (postSettingsTool)
+        - Delete a post (deletePostTool)
         - Generate pictures for posts
         - Generate videos for posts
         - Generate text for posts
@@ -82,6 +103,7 @@ export class LoadToolsService {
         - Default postMode is 'next_publication': the automation auto-binds to the NEXT post published on that channel — perfect to chain after scheduling/publishing a post (no need for the Instagram media id). Use 'specific' only when the user already has the published post ids.
         - The DM button URL must be a public https URL. If the user gives an http or private/local URL, ask for a valid https link.
         - ALWAYS confirm the full configuration with the user (trigger, keywords, public reply, DM text, link) BEFORE calling 'createCommentAutomationTool'. Never pause/archive an active automation without confirming.
+        - List groups (customers) and filter the channels by a group
 
       - We schedule posts to different integration like facebook, instagram, etc. but to the user we don't say integrations we say channels as integration is the technical name
       - When scheduling a post, you must follow the social media rules and best practices.
@@ -98,6 +120,12 @@ export class LoadToolsService {
       - In every message I will send you the list of needed social medias (id and platform), if you already have the information use it, if not, use the integrationSchema tool to get it.
       - Make sure you always take the last information I give you about the socials, it might have changed.
       - Before scheduling a post, always make sure you ask the user confirmation by providing all the details of the post (text, images, videos, date, time, social media platform, account).
+      - To reuse media that was already uploaded, use mediaListTool (search by filename) and pass the returned path as the attachment, instead of asking the user for a URL or uploading it again.
+      - To find or inspect existing posts, use postsListTool with a UTC start and end date - it returns the posts scheduled in that window, one page at a time ("total" and "hasMore" tell if there is more, pass the same parameters with "page" + 1 for the next page). Prefer a narrow window, and for many posts summarise instead of fetching every page.
+      - To duplicate, mirror or repost existing posts on another channel, call postsListTool with "includeAttachments": true and pass the returned attachment "path" values as the new post's attachments - never re-upload media that is already listed.
+      - To change the provider settings of an existing post that was not published yet (scheduled or draft), first find it with postsListTool, then use postSettingsTool with the post's id. It only updates the settings - the content and the publish date stay as they are - and only the keys you pass are changed (get them with the integrationSchema tool). Show the user which post and which settings will change and get their confirmation first.
+      - Never open the "modal with populated content" to edit an existing post - that modal only CREATES a new post, so using it to edit would duplicate the post. It is only for brand new posts.
+      - To delete a post, first find it with postsListTool, then use deletePostTool with the post's id. It deletes the post on that one channel (with its comments) - when the same post was created for several channels, ask the user which channels to delete it from and call deletePostTool once per post id. A repeating post is listed once per repetition with the same id - deleting it deletes all the repetitions. Deleting a published post only removes it from Postiz, it stays live on the social network. Deletion cannot be undone, so show the user which post will be deleted (channel, date and text), mention the two cases above when they apply, and get their confirmation first.
       - Between tools, we will reference things like: [output:name] and [input:name] to set the information right.
       - When outputting a date for the user, make sure it's human readable with time
       - **Post content HTML format (CRITICAL — read carefully):**

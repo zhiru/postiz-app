@@ -1,7 +1,7 @@
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { checkAuth } from '@gitroom/nestjs-libraries/chat/auth.context';
@@ -17,6 +17,7 @@ export class GenerateImageTool implements AgentToolInterface {
   run() {
     return createTool({
       id: 'generateImageTool',
+      mcp: { annotations: { title: 'Generate Image', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
       description: `Generate an image to attach to a post via the configured Image provider (gpt-image-2 / Gemini Nano Banana / Flux / etc).
 
 When to use:
@@ -103,6 +104,7 @@ manualPrompt: keep default (false) unless the user gave you a fully crafted prom
           ? `${parts.join(' ')} ${input.prompt}`
           : input.prompt;
 
+        try {
         const image = await this._mediaService.generateImage(
           styledPrompt,
           org,
@@ -119,13 +121,16 @@ manualPrompt: keep default (false) unless the user gave you a fully crafted prom
           'data:image/png;base64,' + image
         );
 
-        return this._mediaService.saveFile(
+        return await this._mediaService.saveFile(
           org.id,
           file.split('/').pop(),
           file,
           undefined,
           profileId
         );
+        } catch (error) {
+          return { error: error instanceof HttpException ? error.message : 'Nao foi possivel gerar a imagem. Tente novamente.' };
+        }
       },
     });
   }

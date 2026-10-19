@@ -6,10 +6,17 @@ import {
   PostDetails,
   PostResponse,
   SocialProvider,
+  ReportMetricsMap,
+  PendingCheckResponse,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { lookup } from 'mime-types';
 import sharp from 'sharp';
-import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  SocialAbstract,
+  BadBody,
+  RefreshToken,
+  stripQuery,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
 import { Integration } from '@prisma/client';
 import { timer } from '@gitroom/helpers/utils/timer';
@@ -20,20 +27,64 @@ import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validatio
 import { XDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/x.dto';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
+import { createHmac, randomBytes } from 'crypto';
+import { parseFragment } from 'parse5';
+import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
+import { stripLinks as removeLinks } from '@gitroom/helpers/utils/strip.links';
+import { hasExtension } from '@gitroom/helpers/utils/has.extension';
+import { isAllowedUploadPath } from '@gitroom/helpers/utils/valid.url.path';
+
+type XPendingData = {
+  message: string;
+  settings: {
+    who_can_reply_post?:
+      | 'everyone'
+      | 'following'
+      | 'mentionedUsers'
+      | 'subscribers'
+      | 'verified';
+    community?: string;
+    made_with_ai?: boolean;
+    paid_partnership?: boolean;
+    post_type?: 'post' | 'article';
+    article_title?: string;
+    article_status?: 'draft' | 'published';
+  };
+  mediaIds: string[];
+  // Article cover selected in the settings, uploaded separately from the post
+  // media (which is embedded in the article body).
+  coverMediaId?: string;
+  // Pictures placed inside the article body, by their src.
+  inlineMediaIds?: Record<string, string>;
+  // Media still transcoding on X's side, waiting for STATUS = succeeded.
+  processingIds: string[];
+  // Arm -> confirm -> publish handshake (same as the Facebook story flow):
+  // finalizePost arms without mutating, checkPostStatus witnesses, and only a
+  // witnessed attempt runs the create - so a create that dies with an unknown
+  // outcome is detected instead of run again (X has no idempotency key).
+  attempting?: boolean;
+  confirmed?: boolean;
+};
 
 @Rules(
   'X can have maximum 4 pictures, or maximum one video, it can also be without attachments'
 )
 export class XProvider extends SocialAbstract implements SocialProvider {
   identifier = 'x';
+
   name = 'X';
+
   isBetweenSteps = false;
+
   scopes = [] as string[];
-  override maxConcurrentJob = 1; // X has strict rate limits (300 posts per 3 hours)
+
+  override maxConcurrentJob = 1;
+
   toolTip =
     'You will be logged in into your current account, if you would like a different account, change it first on X';
 
-  editor = 'normal' as const;
+  editor = 'html' as const;
+
   dto = XDto;
 
   maxLength(isTwitterPremium: boolean) {
@@ -120,12 +171,6 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     return undefined;
   }
 
-  /**
-   * Monta o payload final aceito pelo client.v2.tweet, omitindo campos
-   * opcionais quando nao usados — alguns campos como `made_with_ai` e
-   * `paid_partnership` podem ser rejeitados pela API quando enviados em
-   * contas sem o feature habilitado, entao so incluimos quando true.
-   */
   buildTweetPayload(input: {
     text: string;
     media_ids: string[];
@@ -199,7 +244,15 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     id: string,
     fields: { likesAmount: string }
   ) {
-    const client = await this.getClient(integration.token, integration);
+    // @ts-ignore
+    // eslint-disable-next-line prefer-rest-params
+    const [accessTokenSplit, accessSecretSplit] = integration.token.split(':');
+    const client = new TwitterApi({
+      appKey: process.env.X_API_KEY!,
+      appSecret: process.env.X_API_SECRET!,
+      accessToken: accessTokenSplit,
+      accessSecret: accessSecretSplit,
+    });
 
     if (
       (await client.v2.tweetLikedBy(id)).meta.result_count >=
@@ -226,7 +279,13 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     postId: string,
     information: any
   ) {
-    const client = await this.getClient(integration.token, integration);
+    const [accessTokenSplit, accessSecretSplit] = integration.token.split(':');
+    const client = new TwitterApi({
+      appKey: process.env.X_API_KEY!,
+      appSecret: process.env.X_API_SECRET!,
+      accessToken: accessTokenSplit,
+      accessSecret: accessSecretSplit,
+    });
 
     const {
       data: { id },
@@ -269,7 +328,15 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     id: string,
     fields: { likesAmount: string; post: string }
   ) {
-    const client = await this.getClient(integration.token, integration);
+    // @ts-ignore
+    // eslint-disable-next-line prefer-rest-params
+    const [accessTokenSplit, accessSecretSplit] = integration.token.split(':');
+    const client = new TwitterApi({
+      appKey: process.env.X_API_KEY!,
+      appSecret: process.env.X_API_SECRET!,
+      accessToken: accessTokenSplit,
+      accessSecret: accessSecretSplit,
+    });
 
     if (
       (await client.v2.tweetLikedBy(id)).meta.result_count >=
@@ -277,8 +344,9 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     ) {
       await timer(2000);
 
+      const plugText = stripHtmlValidation('normal', fields.post, true);
       await client.v2.tweet({
-        text: stripHtmlValidation('normal', fields.post, true),
+        text: this.stripLinks() ? removeLinks(plugText) : plugText,
         reply: { in_reply_to_tweet_id: id },
       });
       return true;
@@ -382,15 +450,6 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
-  /**
-   * Resolve as Consumer Keys (appKey/appSecret) para o fluxo OAuth 1.0a do X,
-   * priorizando as credenciais por perfil armazenadas em
-   * `integration.customInstanceDetails` (criptografado). Caso nao existam,
-   * cai no fallback das env vars X_API_KEY / X_API_SECRET.
-   *
-   * Jamais retorna string vazia — lanca erro claro se nada for encontrado,
-   * para facilitar o diagnostico no worker do Temporal.
-   */
   private resolveAppKeys(integration?: Integration): {
     appKey: string;
     appSecret: string;
@@ -441,79 +500,16 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     client: TwitterApi,
     postDetails: PostDetails<any>[]
   ) {
-    return (
-      await Promise.all(
-        postDetails.flatMap((p) =>
-          p?.media?.flatMap(async (m) => {
-            const mime = (lookup(m.path) || '').toString();
-            const isVideo =
-              mime.startsWith('video/') || /\.mp4($|\?)/i.test(m.path);
-            const isGif = mime === 'image/gif';
+    const { media, processingIds } = await this.uploadMediaEntries(
+      client,
+      postDetails
+    );
 
-            // Buffer final + media_type coerentes:
-            // - video: envia bytes crus como video/mp4
-            // - gif animado: preserva GIF (sharp com animated=true)
-            // - demais imagens: redimensiona para 1000px mantendo o formato original
-            //   (o codigo antigo forcava .gif() mas declarava media_type como PNG/JPEG,
-            //   fazendo X rejeitar com erro de media_type)
-            let buffer: Buffer;
-            let mediaType: string;
+    for (const mediaId of processingIds) {
+      await this.waitForMediaProcessing(client, mediaId);
+    }
 
-            if (isVideo) {
-              buffer = Buffer.from(await this.readOrFetch(m.path));
-              mediaType = 'video/mp4';
-            } else if (isGif) {
-              buffer = await sharp(await this.readOrFetch(m.path), {
-                animated: true,
-              })
-                .resize({ width: 1000 })
-                .gif()
-                .toBuffer();
-              mediaType = 'image/gif';
-            } else {
-              const img = sharp(await this.readOrFetch(m.path)).resize({
-                width: 1000,
-              });
-              if (mime === 'image/webp') {
-                buffer = await img.webp().toBuffer();
-                mediaType = 'image/webp';
-              } else if (mime === 'image/png') {
-                buffer = await img.png().toBuffer();
-                mediaType = 'image/png';
-              } else {
-                // fallback: JPEG (cobre image/jpeg, image/jpg e formatos desconhecidos)
-                buffer = await img.jpeg().toBuffer();
-                mediaType = 'image/jpeg';
-              }
-            }
-
-            return {
-              id: await this.runInConcurrent(
-                // v1.1 /media/upload.json: disponivel em todos os tiers do X
-                // (inclusive Free). O endpoint v2 /2/media/upload (usado por
-                // client.v2.uploadMedia) requer tier pago/OAuth2 com escopo
-                // media.write e falha com "Unknown Error" no tier Free.
-                async () =>
-                  client.v1.uploadMedia(buffer, {
-                    mimeType: mediaType,
-                  }),
-                true
-              ),
-              postId: p.id,
-            };
-          })
-        )
-      )
-    ).reduce((acc, val) => {
-      if (!val?.id) {
-        return acc;
-      }
-
-      acc[val.postId] = acc[val.postId] || [];
-      acc[val.postId].push(val.id);
-
-      return acc;
-    }, {} as Record<string, string[]>);
+    return media;
   }
 
   async post(
@@ -532,44 +528,65 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       made_with_ai?: boolean;
       paid_partnership?: boolean;
     }>[],
-    integration?: Integration
+    integration: Integration
   ): Promise<PostResponse[]> {
-    const client = await this.getClient(accessToken, integration);
-    const {
-      data: { username },
-    } = await this.runInConcurrent(async () =>
-      client.v2.me({
-        'user.fields': 'username',
-      })
+    const [response] = await this.postPending(
+      id,
+      accessToken,
+      postDetails,
+      integration
     );
 
-    const [firstPost] = postDetails;
+    let pendingData = response.pendingData;
+    const started = Date.now();
 
-    // upload media for the first post
-    const uploadAll = await this.uploadMedia(client, [firstPost]);
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method: failing here is safe (the tweet is only created once the
+      // media is ready), timing the activity out is not - a retried activity
+      // would upload and publish again.
+      if (Date.now() - started > 8 * 60 * 1000) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          Buffer.from('{}'),
+          'X took too long to process the media, please try again'
+        );
+      }
 
-    const media_ids = (uploadAll[firstPost.id] || []).filter((f) => f);
+      const check = await this.checkPostStatus(
+        accessToken,
+        pendingData,
+        integration
+      );
 
-    const tweetPayload = this.buildTweetPayload({
-      text: firstPost.message,
-      media_ids,
-      settings: firstPost?.settings || {},
-    });
+      if (check.status === 'pending') {
+        pendingData = check.pendingData;
+        await timer(20000);
+        continue;
+      }
 
-    // @ts-ignore
-    const { data }: { data: { id: string } } = await this.runInConcurrent(
-      // @ts-ignore
-      async () => client.v2.tweet(tweetPayload)
-    );
+      const result =
+        check.status === 'ready'
+          ? await this.finalizePost(accessToken, check.pendingData, integration)
+          : check;
 
-    return [
-      {
-        postId: data.id,
-        id: firstPost.id,
-        releaseURL: `https://twitter.com/${username}/status/${data.id}`,
-        status: 'posted',
-      },
-    ];
+      if (result.status === 'completed') {
+        return [
+          {
+            postId: result.postId,
+            id: response.id,
+            releaseURL: result.releaseURL,
+            status: 'posted',
+          },
+        ];
+      }
+
+      // finalize only armed the handshake (nothing to wait for), loop straight
+      // into the witnessing check
+      pendingData = result.pendingData;
+    }
   }
 
   async comment(
@@ -585,15 +602,8 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     }>[],
     integration: Integration
   ): Promise<PostResponse[]> {
+    const [accessTokenSplit, accessSecretSplit] = accessToken.split(':');
     const client = await this.getClient(accessToken, integration);
-    const {
-      data: { username },
-    } = await this.runInConcurrent(async () =>
-      client.v2.me({
-        'user.fields': 'username',
-      })
-    );
-
     const [commentPost] = postDetails;
 
     // upload media for the comment
@@ -603,24 +613,45 @@ export class XProvider extends SocialAbstract implements SocialProvider {
 
     const replyToId = lastCommentId || postId;
 
-    const tweetPayload = this.buildTweetPayload({
-      text: commentPost.message,
-      media_ids,
-      settings: commentPost?.settings || {},
-      replyToId,
-    });
+    // Comments are always tweets - flatten the editor HTML to plain text.
+    const commentText = this.toTweetText(commentPost.message);
 
-    // @ts-ignore
-    const { data }: { data: { id: string } } = await this.runInConcurrent(
-      // @ts-ignore
-      async () => client.v2.tweet(tweetPayload)
-    );
+    const tweetUrl = 'https://api.x.com/2/tweets';
+    const tweetBody = {
+      text: this.stripLinks() ? removeLinks(commentText) : commentText,
+      ...(media_ids.length ? { media: { media_ids } } : {}),
+      reply: { in_reply_to_tweet_id: replyToId },
+      ...(this.assetBoolean(commentPost?.settings?.made_with_ai)
+        ? { made_with_ai: true }
+        : {}),
+      ...(this.assetBoolean(commentPost?.settings?.paid_partnership)
+        ? { paid_partnership: true }
+        : {}),
+    };
+
+    const tweetResponse = await this.fetch(tweetUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: this.signOAuth1(
+          'POST',
+          tweetUrl,
+          accessTokenSplit,
+          accessSecretSplit,
+          integration
+        ),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(tweetBody),
+    });
+    const { data } = (await tweetResponse.json()) as {
+      data: { id: string };
+    };
 
     return [
       {
         postId: data.id,
         id: commentPost.id,
-        releaseURL: `https://twitter.com/${username}/status/${data.id}`,
+        releaseURL: `https://twitter.com/${integration.profile}/status/${data.id}`,
         status: 'posted',
       },
     ];
@@ -646,16 +677,18 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       ...(token ? { pagination_token: token } : {}),
     });
 
-    // X API v2 omite o campo "data" quando result_count === 0 — sem este guard
-    // o spread quebra com "tweets.data.data is not iterable" na primeira consulta
-    // a uma conta sem tweets na janela ou na ultima pagina vazia.
-    const items = tweets.data.data || [];
-    const nextToken = tweets.meta?.next_token;
+    const list = tweets.data.data || [];
 
     return [
-      ...items,
-      ...(items.length === 100 && nextToken
-        ? await this.loadAllTweets(client, id, until, since, nextToken)
+      ...list,
+      ...(list.length === 100 && tweets.meta.next_token
+        ? await this.loadAllTweets(
+            client,
+            id,
+            until,
+            since,
+            tweets.meta.next_token
+          )
         : []),
     ];
   };
@@ -862,5 +895,855 @@ export class XProvider extends SocialAbstract implements SocialProvider {
 
   mentionFormat(idOrHandle: string, name: string) {
     return `@${idOrHandle}`;
+  }
+
+  reportMetrics: ReportMetricsMap = {
+    reach: ['IMPRESSION'],
+    engagement: ['LIKE', 'REPLY', 'RETWEET', 'QUOTE', 'BOOKMARK'],
+  };
+
+  stripLinks = () => !!process.env.STRIP_LINKS_FROM_X_POSTS;
+
+  inlineImages(settings?: any) {
+    return settings?.post_type === 'article';
+  }
+
+  private toTweetText(message: string) {
+    return stripHtmlValidation(
+      'normal',
+      message,
+      true,
+      false,
+      !/<\/?[a-z][\s\S]*>/i.test(message)
+    );
+  }
+
+  override async checkValidity(
+    [firstPost, ...comments]: Array<{ path: string }[]>,
+    settings: any
+  ): Promise<string | true> {
+    if (settings?.post_type !== 'article') {
+      return true;
+    }
+
+    if (
+      [...(firstPost || []), ...comments.flat()].some((m) =>
+        hasExtension(m.path, 'mp4')
+      )
+    ) {
+      return 'X articles only support images';
+    }
+
+    // Replies can only be attached to the seed post a published article
+    // creates - a draft has no post to reply to.
+    if (settings?.article_status !== 'published' && comments.length) {
+      return 'A draft article cannot have thread replies, remove them or publish the article';
+    }
+
+    return true;
+  }
+
+  private signOAuth1(
+    method: string,
+    url: string,
+    accessToken: string,
+    accessSecret: string,
+    integration?: Integration
+  ): string {
+    const { appKey, appSecret } = this.resolveAppKeys(integration);
+    const pct = (s: string) =>
+      encodeURIComponent(s)
+        .replace(/!/g, '%21')
+        .replace(/\*/g, '%2A')
+        .replace(/'/g, '%27')
+        .replace(/\(/g, '%28')
+        .replace(/\)/g, '%29');
+
+    const params: Record<string, string> = {
+      oauth_consumer_key: appKey,
+      oauth_nonce: randomBytes(16).toString('hex'),
+      oauth_signature_method: 'HMAC-SHA1',
+      oauth_timestamp: String(Math.floor(Date.now() / 1000)),
+      oauth_token: accessToken,
+      oauth_version: '1.0',
+    };
+
+    const paramString = Object.keys(params)
+      .sort()
+      .map((k) => `${pct(k)}=${pct(params[k])}`)
+      .join('&');
+
+    const baseString = [
+      method.toUpperCase(),
+      pct(url.split('?')[0]),
+      pct(paramString),
+    ].join('&');
+
+    const signingKey = `${pct(appSecret)}&${pct(accessSecret)}`;
+    params.oauth_signature = createHmac('sha1', signingKey)
+      .update(baseString)
+      .digest('base64');
+
+    return (
+      'OAuth ' +
+      Object.keys(params)
+        .sort()
+        .map((k) => `${pct(k)}="${pct(params[k])}"`)
+        .join(', ')
+    );
+  }
+
+  private static readonly X_UPLOAD_CHUNK_SIZE = 1024 * 1024;
+
+  private async uploadVideoInChunks(client: TwitterApi, path: string) {
+    const totalBytes = await this.mediaSize(path, this.identifier);
+    const mediaType = String(lookup(path) || 'video/mp4');
+
+    // twitter-api-v2 is not this.fetch, so these legs record their own
+    // heartbeat details - otherwise a stall here reports only the generic
+    // "x: publish" stage marker set by the activity.
+    setHeartbeatDetails(`x: upload initialize (${totalBytes} bytes)`);
+    const init = await client.v2.post<{ data: { id: string } }>(
+      'media/upload/initialize',
+      {
+        media_type: mediaType,
+        total_bytes: totalBytes,
+        media_category: 'tweet_video',
+      }
+    );
+    const mediaId = init.data.id;
+
+    const chunkSize = XProvider.X_UPLOAD_CHUNK_SIZE;
+    const totalChunkCount = Math.ceil(totalBytes / chunkSize);
+    for (let i = 0; i < totalChunkCount; i++) {
+      const start = i * chunkSize;
+      const end = Math.min(start + chunkSize, totalBytes) - 1;
+      setHeartbeatDetails(
+        `x: upload append ${i + 1}/${totalChunkCount} media=${mediaId}`
+      );
+      await client.v2.post(
+        `media/upload/${mediaId}/append`,
+        {
+          segment_index: i,
+          media: await this.mediaChunk(path, start, end, this.identifier),
+        },
+        { forceBodyMode: 'form-data' }
+      );
+    }
+
+    setHeartbeatDetails(`x: upload finalize media=${mediaId}`);
+    const finalize = await client.v2.post<{
+      data: {
+        id: string;
+        processing_info?: { state: string; check_after_secs?: number };
+      };
+    }>(`media/upload/${mediaId}/finalize`);
+
+    const processing = finalize.data.processing_info;
+
+    // An explicit rejection right at finalize: the video will never process.
+    if (processing?.state === 'failed') {
+      throw new BadBody(
+        this.identifier,
+        JSON.stringify(processing),
+        Buffer.from('{}'),
+        `X failed to process the uploaded video${
+          (processing as any)?.error?.message
+            ? `: ${(processing as any).error.message}`
+            : ''
+        }`
+      );
+    }
+
+    // Per the docs a missing processing_info means the media is ready to use;
+    // anything else keeps transcoding asynchronously and must reach
+    // `succeeded` before the media_id can be attached to a post.
+    return {
+      mediaId,
+      processing: !!processing && processing.state !== 'succeeded',
+    };
+  }
+
+  private async mediaProcessingStatus(client: TwitterApi, mediaId: string) {
+    setHeartbeatDetails(`x: media status media=${mediaId}`);
+    const status = await client.v2.get<{
+      data: {
+        processing_info?: {
+          state: string;
+          check_after_secs?: number;
+          error?: { message?: string };
+        };
+      };
+    }>('media/upload', { command: 'STATUS', media_id: mediaId });
+
+    return status.data.processing_info;
+  }
+
+  private async waitForMediaProcessing(client: TwitterApi, mediaId: string) {
+    // X drives the pace via check_after_secs; cap on accumulated wait time
+    // (long videos can legitimately process for many minutes) instead of an
+    // attempt count, but never poll forever.
+    let waitedMs = 0;
+    const maxWaitMs = 7 * 60 * 1000;
+    let processing = await this.mediaProcessingStatus(client, mediaId);
+
+    while (processing && processing.state !== 'succeeded') {
+      if (processing.state === 'failed' || waitedMs >= maxWaitMs) {
+        throw new BadBody(
+          this.identifier,
+          JSON.stringify(processing),
+          Buffer.from('{}'),
+          `X failed to process the uploaded video${
+            processing?.error?.message ? `: ${processing.error.message}` : ''
+          }`
+        );
+      }
+
+      const waitMs = (processing.check_after_secs || 1) * 1000;
+      await timer(waitMs);
+      waitedMs += waitMs;
+      processing = await this.mediaProcessingStatus(client, mediaId);
+    }
+  }
+
+  private async uploadWithRateLimitRetry<T>(
+    func: () => Promise<T>,
+    totalRetries = 0
+  ): Promise<T> {
+    try {
+      return await func();
+    } catch (err: any) {
+      if (totalRetries <= 2 && (err?.code === 429 || err?.rateLimitError)) {
+        await timer(5000 * (totalRetries + 1));
+        return this.uploadWithRateLimitRetry(func, totalRetries + 1);
+      }
+
+      throw err;
+    }
+  }
+
+  private async uploadMediaEntries(
+    client: TwitterApi,
+    postDetails: PostDetails<any>[],
+    asArticleImage = false
+  ) {
+    // Media is uploaded sequentially on purpose: uploading everything with
+    // Promise.all holds every file in memory at the same time.
+    const media = {} as Record<string, string[]>;
+    const processingIds: string[] = [];
+    for (const p of postDetails) {
+      for (const m of p?.media || []) {
+        setHeartbeatDetails(`x: upload media ${stripQuery(m.path)}`);
+        const uploaded = await this.runInConcurrent(
+          async () =>
+            hasExtension(m.path, 'mp4')
+              ? this.uploadWithRateLimitRetry(() =>
+                  this.uploadVideoInChunks(client, m.path)
+                )
+              : {
+                  // Articles reject GIF media, so the tweet pipeline (which
+                  // converts every image to GIF) can't be reused for them -
+                  // article images are uploaded as JPEG with the tweet_image
+                  // category the article references them by.
+                  mediaId: await this.uploadWithRateLimitRetry(async () =>
+                    asArticleImage
+                      ? client.v2.uploadMedia(
+                          await sharp(await this.readOrFetch(m.path))
+                            .resize({
+                              width: 1000,
+                            })
+                            .jpeg()
+                            .toBuffer(),
+                          {
+                            media_type: 'image/jpeg' as any,
+                            media_category: 'tweet_image' as any,
+                          }
+                        )
+                      : client.v2.uploadMedia(
+                          await sharp(await this.readOrFetch(m.path), {
+                            animated: lookup(m.path) === 'image/gif',
+                          })
+                            .resize({
+                              width: 1000,
+                            })
+                            .gif()
+                            .toBuffer(),
+                          {
+                            media_type: (lookup(m.path) || '') as any,
+                          }
+                        )
+                  ),
+                  processing: false,
+                },
+          true
+        );
+
+        if (!uploaded?.mediaId) {
+          continue;
+        }
+
+        media[p.id] = media[p.id] || [];
+        media[p.id].push(uploaded.mediaId);
+
+        if (uploaded.processing) {
+          processingIds.push(uploaded.mediaId);
+        }
+      }
+    }
+
+    return { media, processingIds };
+  }
+
+  async postPending(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails<{
+      active_thread_finisher: boolean;
+      thread_finisher: string;
+      community?: string;
+      who_can_reply_post:
+        | 'everyone'
+        | 'following'
+        | 'mentionedUsers'
+        | 'subscribers'
+        | 'verified';
+      made_with_ai?: boolean;
+      paid_partnership?: boolean;
+      post_type?: 'post' | 'article';
+      article_title?: string;
+      article_status?: 'draft' | 'published';
+      article_cover?: { id: string; path: string };
+    }>[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const client = await this.getClient(accessToken, integration);
+    const [firstPost] = postDetails;
+    const isArticle = firstPost?.settings?.post_type === 'article';
+
+    // Upload the media now; the transcoding wait moves to checkPostStatus and
+    // the tweet itself is only created by finalizePost, so nothing here is
+    // irreversible - a failure leaves only orphaned media.
+    const { media, processingIds } = await this.uploadMediaEntries(
+      client,
+      [firstPost],
+      isArticle
+    );
+
+    // The article cover is picked in the settings, separate from the post
+    // media (which is embedded in the article body).
+    const coverPath = isArticle
+      ? firstPost?.settings?.article_cover?.path
+      : undefined;
+    const coverMediaId = coverPath
+      ? (
+          await this.uploadMediaEntries(
+            client,
+            [{ id: 'article-cover', media: [{ path: coverPath }] } as any],
+            true
+          )
+        ).media['article-cover']?.[0]
+      : undefined;
+
+    // Pictures placed in the article body are uploaded the same way and take
+    // the place of their <img> in finalizeArticle.
+    const inlineImages = isArticle
+      ? [...new Set(this.articleImages(parseFragment(firstPost.message)))]
+      : [];
+    const { media: inlineMedia } = await this.uploadMediaEntries(
+      client,
+      inlineImages.map(
+        (path, index) => ({ id: String(index), media: [{ path }] } as any)
+      ),
+      true
+    );
+
+    return [
+      {
+        id: firstPost.id,
+        releaseURL: '',
+        postId: '',
+        status: 'pending',
+        pendingData: {
+          // Articles keep the HTML (converted to Draft.js in finalizePost),
+          // tweets are flattened to plain text.
+          message: isArticle
+            ? firstPost.message
+            : this.toTweetText(firstPost.message),
+          settings: {
+            who_can_reply_post: firstPost?.settings?.who_can_reply_post,
+            community: firstPost?.settings?.community,
+            made_with_ai: firstPost?.settings?.made_with_ai,
+            paid_partnership: firstPost?.settings?.paid_partnership,
+            post_type: firstPost?.settings?.post_type,
+            article_title: firstPost?.settings?.article_title,
+            article_status: firstPost?.settings?.article_status,
+          },
+          mediaIds: (media[firstPost.id] || []).filter((f) => f),
+          ...(coverMediaId ? { coverMediaId } : {}),
+          ...(inlineImages.length
+            ? {
+                inlineMediaIds: Object.fromEntries(
+                  inlineImages.map((path, index) => [
+                    path,
+                    inlineMedia[String(index)]?.[0],
+                  ])
+                ),
+              }
+            : {}),
+          processingIds,
+        } as XPendingData,
+      },
+    ];
+  }
+
+  override async checkPostStatus(
+    accessToken: string,
+    pendingData: XPendingData,
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    // A confirmed create attempt died without reporting its result: X gives
+    // no cheap way to ask whether that tweet was created, so never run the
+    // create again - stop with an explicit warning instead.
+    if (pendingData.attempting && pendingData.confirmed) {
+      throw new BadBody(
+        this.identifier,
+        '{}',
+        Buffer.from('{}'),
+        'X may have already published this post, please check your account before posting again to avoid duplicates'
+      );
+    }
+
+    const client = await this.getClient(accessToken, integration);
+
+    // Check every media still transcoding; keep the ones not succeeded yet.
+    const stillProcessing: string[] = [];
+    for (const mediaId of pendingData.processingIds || []) {
+      let processing:
+        | {
+            state: string;
+            check_after_secs?: number;
+            error?: { message?: string };
+          }
+        | undefined;
+      try {
+        processing = await this.mediaProcessingStatus(client, mediaId);
+      } catch (err: any) {
+        // twitter-api-v2 throws ApiResponseError, which never passes through
+        // this.fetch/handleErrors: classify it here so revoked tokens and
+        // suspended accounts fail properly instead of burning the whole check
+        // budget as "transient".
+        const body = JSON.stringify(err?.data || {});
+        const handleError = this.handleErrors(body);
+
+        if (err?.code === 401 || handleError?.type === 'refresh-token') {
+          throw new RefreshToken(this.identifier, body, Buffer.from('{}'));
+        }
+
+        if (handleError?.type === 'bad-body') {
+          throw new BadBody(
+            this.identifier,
+            body,
+            Buffer.from('{}'),
+            handleError.value
+          );
+        }
+
+        // Transient status-check error: the media may finish transcoding just
+        // fine, keep polling - if X stays broken the workflow exhausts its
+        // checks and warns the user properly.
+        return { status: 'pending', pendingData };
+      }
+
+      if (processing?.state === 'failed') {
+        throw new BadBody(
+          this.identifier,
+          JSON.stringify(processing),
+          Buffer.from('{}'),
+          `X failed to process the uploaded video${
+            processing?.error?.message ? `: ${processing.error.message}` : ''
+          }`
+        );
+      }
+
+      // A missing processing_info means the media is ready to use.
+      if (processing && processing.state !== 'succeeded') {
+        stillProcessing.push(mediaId);
+      }
+    }
+
+    if (stillProcessing.length) {
+      return {
+        status: 'pending',
+        pendingData: { ...pendingData, processingIds: stillProcessing },
+      };
+    }
+
+    // witness the armed create so finalizePost knows the attempt is uniquely
+    // accounted for before it mutates anything
+    if (pendingData.attempting && !pendingData.confirmed) {
+      return {
+        status: 'ready',
+        pendingData: { ...pendingData, processingIds: [], confirmed: true },
+      };
+    }
+
+    return {
+      status: 'ready',
+      pendingData: { ...pendingData, processingIds: [] },
+    };
+  }
+
+  private articleImages(node: any): string[] {
+    if (node.nodeName === 'img') {
+      const src =
+        (node.attrs || []).find((a: any) => a.name === 'src')?.value || '';
+      return /^https?:\/\//i.test(src) && isAllowedUploadPath(src) ? [src] : [];
+    }
+
+    return (node.childNodes || []).flatMap((child: any) =>
+      this.articleImages(child)
+    );
+  }
+
+  private articleContentState(
+    html: string,
+    embeddedMediaIds: string[],
+    inlineMediaIds: Record<string, string> = {}
+  ) {
+    const blocks: any[] = [];
+    const entities: any[] = [];
+
+    const walkInline = (
+      node: any,
+      ctx: { text: string; styles: any[]; entityRanges: any[] }
+    ) => {
+      for (const child of node.childNodes || []) {
+        if (child.nodeName === '#text') {
+          ctx.text += child.value || '';
+          continue;
+        }
+
+        const offset = ctx.text.length;
+        walkInline(child, ctx);
+        const length = ctx.text.length - offset;
+        if (!length) {
+          continue;
+        }
+
+        if (child.nodeName === 'strong') {
+          ctx.styles.push({ offset, length, style: 'bold' });
+        }
+
+        if (child.nodeName === 'a') {
+          const url = (child.attrs || []).find(
+            (a: any) => a.name === 'href'
+          )?.value;
+          if (url) {
+            const key = entities.length;
+            entities.push({
+              key: String(key),
+              value: {
+                type: 'link',
+                mutability: 'mutable',
+                data: { url },
+              },
+            });
+            ctx.entityRanges.push({ offset, length, key });
+          }
+        }
+      }
+    };
+
+    const makeBlock = (
+      text: string,
+      type: string,
+      styles: any[] = [],
+      entityRanges: any[] = []
+    ) => ({
+      key: `b${blocks.length}`,
+      text,
+      type,
+      ...(styles.length ? { inline_style_ranges: styles } : {}),
+      ...(entityRanges.length ? { entity_ranges: entityRanges } : {}),
+    });
+
+    const pushBlock = (node: any, type: string) => {
+      const ctx = { text: '', styles: [] as any[], entityRanges: [] as any[] };
+      walkInline(node, ctx);
+      if (ctx.text.trim()) {
+        blocks.push(makeBlock(ctx.text, type, ctx.styles, ctx.entityRanges));
+      }
+
+      // pictures inside the node (a list item can hold one) follow its text
+      for (const src of this.articleImages(node)) {
+        if (inlineMediaIds[src]) {
+          pushImage(inlineMediaIds[src]);
+        }
+      }
+    };
+
+    const pushImage = (mediaId: string) => {
+      const key = entities.length;
+      entities.push({
+        key: String(key),
+        value: {
+          type: 'image',
+          mutability: 'immutable',
+          data: {
+            media_items: [
+              // Must match the category the media was uploaded with -
+              // lowercase, like the upload endpoint (the uppercase
+              // TWEET_IMAGE in the docs example is wrong).
+              { media_category: 'tweet_image', media_id: mediaId },
+            ],
+          },
+        },
+      });
+      blocks.push(
+        makeBlock(' ', 'atomic', [], [{ offset: 0, length: 1, key }])
+      );
+    };
+
+    const fragment = parseFragment(html) as any;
+    for (const node of fragment.childNodes || []) {
+      switch (node.nodeName) {
+        case 'h1':
+          pushBlock(node, 'header-one');
+          break;
+        case 'h2':
+          pushBlock(node, 'header-two');
+          break;
+        case 'h3':
+          // header-three is documented as valid but X's draft endpoint 503s on
+          // it (https://devcommunity.x.com/t/-/271312), downgrade to header-two
+          // until X fixes their side.
+          pushBlock(node, 'header-two');
+          break;
+        case 'ul':
+        case 'ol':
+          for (const li of (node.childNodes || []).filter(
+            (n: any) => n.nodeName === 'li'
+          )) {
+            pushBlock(
+              li,
+              node.nodeName === 'ol'
+                ? 'ordered-list-item'
+                : 'unordered-list-item'
+            );
+          }
+          break;
+        case '#text':
+          if ((node.value || '').trim()) {
+            blocks.push(makeBlock(node.value, 'unstyled'));
+          }
+          break;
+        default:
+          pushBlock(node, 'unstyled');
+          break;
+      }
+    }
+
+    // The API requires at least one block.
+    if (!blocks.length) {
+      blocks.push(makeBlock(stripHtmlValidation('none', html), 'unstyled'));
+    }
+
+    for (const mediaId of embeddedMediaIds) {
+      pushImage(mediaId);
+    }
+
+    return { blocks, entities };
+  }
+
+  private async finalizeArticle(
+    accessToken: string,
+    pendingData: XPendingData,
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    const [accessTokenSplit, accessSecretSplit] = accessToken.split(':');
+    const settings = pendingData.settings || {};
+    const coverMediaId = pendingData.coverMediaId;
+    // All the post media is embedded in the article body; the cover comes
+    // from its own settings field.
+    const embeddedMediaIds = (pendingData.mediaIds || []).filter((f) => f);
+
+    const draftUrl = 'https://api.x.com/2/articles/draft';
+    const draftResponse = await this.fetch(draftUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: this.signOAuth1(
+          'POST',
+          draftUrl,
+          accessTokenSplit,
+          accessSecretSplit,
+          integration
+        ),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: settings.article_title,
+        content_state: this.articleContentState(
+          pendingData.message,
+          embeddedMediaIds,
+          pendingData.inlineMediaIds
+        ),
+        ...(coverMediaId
+          ? {
+              cover_media: {
+                // Lowercase, matching the category the upload stored.
+                media_category: 'tweet_image',
+                media_id: coverMediaId,
+              },
+            }
+          : {}),
+      }),
+    });
+    const draftJson = (await draftResponse.json()) as {
+      data?: { id: string };
+      errors?: any[];
+    };
+
+    // The articles endpoints can return 2xx with an errors array (e.g. a
+    // rejected cover) - don't swallow it.
+    if (draftJson?.errors?.length) {
+      console.log(
+        'X article draft returned errors:',
+        JSON.stringify(draftJson.errors)
+      );
+    }
+
+    if (!draftJson?.data?.id) {
+      throw new BadBody(
+        this.identifier,
+        JSON.stringify(draftJson),
+        Buffer.from('{}'),
+        'X could not create the article draft'
+      );
+    }
+
+    if (settings.article_status !== 'published') {
+      return {
+        status: 'completed',
+        postId: draftJson.data.id,
+        releaseURL: `https://x.com/i/articles`,
+      };
+    }
+
+    const publishUrl = `https://api.x.com/2/articles/${draftJson.data.id}/publish`;
+    const publishResponse = await this.fetch(publishUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: this.signOAuth1(
+          'POST',
+          publishUrl,
+          accessTokenSplit,
+          accessSecretSplit,
+          integration
+        ),
+        'Content-Type': 'application/json',
+      },
+    });
+    const publishJson = (await publishResponse.json()) as {
+      data?: { post_id: string };
+      errors?: any[];
+    };
+
+    if (publishJson?.errors?.length) {
+      console.log(
+        'X article publish returned errors:',
+        JSON.stringify(publishJson.errors)
+      );
+    }
+
+    if (!publishJson?.data?.post_id) {
+      throw new BadBody(
+        this.identifier,
+        JSON.stringify(publishJson),
+        Buffer.from('{}'),
+        'X created the article draft but could not publish it, check your drafts on X'
+      );
+    }
+
+    return {
+      status: 'completed',
+      postId: publishJson.data.post_id,
+      releaseURL: `https://twitter.com/${integration.profile}/status/${publishJson.data.post_id}`,
+    };
+  }
+
+  override async finalizePost(
+    accessToken: string,
+    pendingData: XPendingData,
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    // Create with an arm -> confirm -> publish handshake: the create only runs
+    // after checkPostStatus witnessed the intent, so a run that dies
+    // mid-create is detectable and the tweet is never published twice. The
+    // same protection covers articles - creating a draft isn't idempotent
+    // either.
+    if (!pendingData.attempting || !pendingData.confirmed) {
+      return {
+        status: 'pending',
+        pendingData: { ...pendingData, attempting: true, confirmed: false },
+      };
+    }
+
+    if (pendingData.settings?.post_type === 'article') {
+      return this.finalizeArticle(accessToken, pendingData, integration);
+    }
+
+    const [accessTokenSplit, accessSecretSplit] = accessToken.split(':');
+    const settings = pendingData.settings || {};
+    const mediaIds = (pendingData.mediaIds || []).filter((f) => f);
+
+    const tweetUrl = 'https://api.x.com/2/tweets';
+    const tweetBody = {
+      ...(!settings.who_can_reply_post ||
+      settings.who_can_reply_post === 'everyone'
+        ? {}
+        : {
+            reply_settings: settings.who_can_reply_post,
+          }),
+      ...(settings.community
+        ? {
+            share_with_followers: true,
+            community_id: settings.community?.split('/').pop() || '',
+          }
+        : {}),
+      text: this.stripLinks()
+        ? removeLinks(pendingData.message)
+        : pendingData.message,
+      ...(mediaIds.length ? { media: { media_ids: mediaIds } } : {}),
+      ...(this.assetBoolean(settings.made_with_ai)
+        ? { made_with_ai: true }
+        : {}),
+      ...(this.assetBoolean(settings.paid_partnership)
+        ? { paid_partnership: true }
+        : {}),
+    };
+
+    const tweetResponse = await this.fetch(tweetUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: this.signOAuth1(
+          'POST',
+          tweetUrl,
+          accessTokenSplit,
+          accessSecretSplit,
+          integration
+        ),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(tweetBody),
+    });
+    const { data } = (await tweetResponse.json()) as {
+      data: { id: string };
+    };
+
+    return {
+      status: 'completed',
+      postId: data.id,
+      releaseURL: `https://twitter.com/${integration.profile}/status/${data.id}`,
+    };
   }
 }

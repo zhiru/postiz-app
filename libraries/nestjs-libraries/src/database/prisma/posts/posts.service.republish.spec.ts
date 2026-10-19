@@ -1,3 +1,19 @@
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service',
+  () => ({ IntegrationService: class IntegrationServiceMock {} })
+);
+jest.mock('@gitroom/nestjs-libraries/ai/ai-text.service', () => ({
+  AiTextService: class AiTextServiceMock {},
+}));
+jest.mock('@gitroom/nestjs-libraries/openai/openai.service', () => ({
+  OpenaiService: class OpenaiServiceMock {},
+}));
+
+jest.mock('@gitroom/nestjs-libraries/upload/upload.factory', () => ({
+  UploadFactory: { createStorage: jest.fn().mockReturnValue({}) },
+}));
+
+import { CreationMethod } from '@prisma/client';
 jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
   IntegrationManager: class IntegrationManagerMock {},
 }));
@@ -58,19 +74,25 @@ const buildService = () => {
   const integrationService = createMock<IntegrationService>();
   const service = new PostsService(
     repository,
-    null as any,
+    { getSocialIntegration: jest.fn().mockReturnValue({}) } as any,
     integrationService,
     null as any,
     null as any,
     null as any,
     null as any,
     null as any,
+    {} as any, // webhooksService
     null as any,
     {} as any,
     {} as any
   );
 
   jest.spyOn(service as any, 'startWorkflow').mockResolvedValue(undefined);
+  integrationService.getIntegrationById.mockResolvedValue({
+    id: 'int-1',
+    profileId: 'profile-1',
+  } as any);
+  repository.getAnchoredCommentsForPost.mockResolvedValue([]);
   repository.getPostById.mockResolvedValue(publishedPost as any);
   repository.createOrUpdatePost.mockResolvedValue({
     posts: [{ id: 'post-1', state: 'QUEUE' }],
@@ -85,7 +107,13 @@ describe('PostsService - republicacao explicita', () => {
     const { service, repository } = buildService();
 
     const result = expect(
-      service.createPost('org-1', makeBody() as any, 'profile-1')
+      service.createPost(
+        'org-1',
+        makeBody() as any,
+        CreationMethod.WEB,
+        false,
+        'profile-1'
+      )
     ).rejects;
     await result.toBeInstanceOf(BadRequestException);
     await result.toThrow("use type 'update'");
@@ -111,7 +139,7 @@ describe('PostsService - republicacao explicita', () => {
     ];
 
     await expect(
-      service.createPost('org-1', body, 'profile-1')
+      service.createPost('org-1', body, CreationMethod.WEB, false, 'profile-1')
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(repository.getPostById).toHaveBeenCalledWith('post-2', 'org-1');
@@ -125,6 +153,8 @@ describe('PostsService - republicacao explicita', () => {
       service.createPost(
         'org-1',
         makeBody({ republish: 'true' }) as any,
+        CreationMethod.WEB,
+        false,
         'profile-1'
       )
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -138,6 +168,8 @@ describe('PostsService - republicacao explicita', () => {
     await service.createPost(
       'org-1',
       makeBody({ republish: true }) as any,
+      CreationMethod.WEB,
+      false,
       'profile-1'
     );
 
@@ -156,6 +188,8 @@ describe('PostsService - republicacao explicita', () => {
       service.createPost(
         'org-1',
         makeBody({ republish: true }) as any,
+        CreationMethod.WEB,
+        false,
         'profile-1'
       )
     ).rejects.toThrow('Post does not belong to this profile');
@@ -176,6 +210,8 @@ describe('PostsService - republicacao explicita', () => {
       service.createPost(
         'org-1',
         makeBody({ type: 'update' }) as any,
+        CreationMethod.WEB,
+        false,
         'profile-1'
       )
     ).rejects.toThrow('Post not found');
@@ -189,7 +225,13 @@ describe('PostsService - republicacao explicita', () => {
     // post com esse id. Nao existe em lugar nenhum, entao nao e sequestro.
     repository.getPostById.mockResolvedValue(null);
 
-    await service.createPost('org-1', makeBody() as any, 'profile-1');
+    await service.createPost(
+      'org-1',
+      makeBody() as any,
+      CreationMethod.WEB,
+      false,
+      'profile-1'
+    );
 
     expect(repository.createOrUpdatePost).toHaveBeenCalledTimes(1);
   });
@@ -201,7 +243,13 @@ describe('PostsService - republicacao explicita', () => {
       state: 'QUEUE',
     } as any);
 
-    await service.createPost('org-1', makeBody() as any, 'profile-1');
+    await service.createPost(
+      'org-1',
+      makeBody() as any,
+      CreationMethod.WEB,
+      false,
+      'profile-1'
+    );
 
     expect(repository.createOrUpdatePost).toHaveBeenCalledTimes(1);
   });
@@ -212,6 +260,8 @@ describe('PostsService - republicacao explicita', () => {
     await service.createPost(
       'org-1',
       makeBody({ type: 'update' }) as any,
+      CreationMethod.WEB,
+      false,
       'profile-1'
     );
 
@@ -219,14 +269,15 @@ describe('PostsService - republicacao explicita', () => {
     expect(repository.createOrUpdatePost).toHaveBeenCalledTimes(1);
   });
 
-  it('usa update como default seguro ao alterar apenas a data', async () => {
+  it('preserva update explicito ao alterar apenas a data', async () => {
     const { service, repository } = buildService();
 
     await service.changeDate(
       'org-1',
       'post-1',
       '2026-09-04T17:00:00.000Z',
-      undefined,
+      'update',
+      false,
       'profile-1'
     );
 
@@ -235,7 +286,8 @@ describe('PostsService - republicacao explicita', () => {
       'post-1',
       '2026-09-04T17:00:00.000Z',
       false,
-      'update'
+      'update',
+      'profile-1'
     );
     expect((service as any).startWorkflow).not.toHaveBeenCalled();
   });
@@ -249,6 +301,7 @@ describe('PostsService - republicacao explicita', () => {
         'post-1',
         '2026-09-04T17:00:00.000Z',
         'schedule',
+        false,
         'profile-1'
       )
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -265,8 +318,8 @@ describe('PostsService - republicacao explicita', () => {
       'post-1',
       '2026-09-04T17:00:00.000Z',
       'schedule',
-      'profile-1',
-      true
+      true,
+      'profile-1'
     );
 
     expect(repository.changeDate).toHaveBeenCalledWith(
@@ -274,7 +327,8 @@ describe('PostsService - republicacao explicita', () => {
       'post-1',
       '2026-09-04T17:00:00.000Z',
       false,
-      'schedule'
+      'schedule',
+      'profile-1'
     );
     expect((service as any).startWorkflow).toHaveBeenCalledTimes(1);
   });
@@ -291,6 +345,7 @@ describe('PostsService - republicacao explicita', () => {
       'post-1',
       '2026-09-04T17:00:00.000Z',
       'schedule',
+      false,
       'profile-1'
     );
 
@@ -307,11 +362,94 @@ describe('PostsService - republicacao explicita', () => {
         'post-1',
         '2026-09-04T17:00:00.000Z',
         'schedule',
-        'profile-1',
-        'true' as any
+        'true' as any,
+        'profile-1'
       )
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(repository.changeDate).not.toHaveBeenCalled();
+  });
+  it('rejeita alterar a data fora do perfil antes de escrever ou iniciar workflow', async () => {
+    const { service, repository } = buildService();
+    await expect(
+      service.changeDate(
+        'org-1',
+        'post-1',
+        '2026-10-19T17:00:00Z',
+        'update',
+        false,
+        'profile-other'
+      )
+    ).rejects.toThrow('Post does not belong to this profile');
+    expect(repository.changeDate).not.toHaveBeenCalled();
+    expect((service as any).startWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('rejeita alterar data de post inexistente sem TypeError nem escrita', async () => {
+    const { service, repository } = buildService();
+    repository.getPostById.mockResolvedValue(null);
+    await expect(
+      service.changeDate('org-1', 'missing', '2026-10-19T17:00:00Z')
+    ).rejects.toThrow('Post not found');
+    expect(repository.changeDate).not.toHaveBeenCalled();
+  });
+
+  it('mantem o historico importado somente leitura mesmo com opt-in', async () => {
+    const { service, repository } = buildService();
+    repository.getPostById.mockResolvedValue({
+      ...publishedPost,
+      importedFromPlatform: true,
+    } as any);
+    await expect(
+      service.changeDate(
+        'org-1',
+        'post-1',
+        '2026-10-19T17:00:00Z',
+        'schedule',
+        true,
+        'profile-1'
+      )
+    ).rejects.toThrow('read-only');
+    expect(repository.changeDate).not.toHaveBeenCalled();
+  });
+
+  it('valida todos os canais antes de escrever o primeiro', async () => {
+    const { service, repository } = buildService();
+    const integrationService = (service as any)._integrationService;
+    integrationService.getIntegrationById
+      .mockResolvedValueOnce({ id: 'int-1', profileId: 'profile-1' })
+      .mockResolvedValueOnce(null);
+    const body = makeBody();
+    body.posts = [
+      body.posts[0],
+      { ...body.posts[0], integration: { id: 'foreign-channel' } },
+    ];
+    await expect(
+      service.createPost(
+        'org-1',
+        { ...body, type: 'update' } as any,
+        CreationMethod.WEB,
+        false,
+        'profile-1'
+      )
+    ).rejects.toThrow('Channel not found');
+    expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+  });
+  it('nao adota uma publicacao sem perfil ao receber um perfil explicito', async () => {
+    const { service, repository } = buildService();
+    repository.getPostById.mockResolvedValue({
+      ...publishedPost,
+      profileId: null,
+    } as any);
+    await expect(
+      service.createPost(
+        'org-1',
+        makeBody({ type: 'update' }) as any,
+        CreationMethod.WEB,
+        false,
+        'profile-1'
+      )
+    ).rejects.toThrow('Post does not belong to this profile');
+    expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
   });
 });

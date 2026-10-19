@@ -2,11 +2,14 @@ import { Body, Controller, Delete, Get, HttpException, Param, Post, Put, Uploade
 import { FileInterceptor } from '@nestjs/platform-express';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
 import { GetProfileFromRequest } from '@gitroom/nestjs-libraries/user/profile.from.request';
-import { Organization, Profile } from '@prisma/client';
+import { Organization, Profile, User } from '@prisma/client';
+import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
 import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { ProfileService } from '@gitroom/nestjs-libraries/database/prisma/profiles/profile.service';
 import { AddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/add.team.member.dto';
+import { AdminAddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/admin.add.team.member.dto';
+import { OrganizationNameDto } from '@gitroom/nestjs-libraries/dtos/settings/organization-name.dto';
 import { ShortlinkPreferenceDto } from '@gitroom/nestjs-libraries/dtos/settings/shortlink-preference.dto';
 import { LanguageDto } from '@gitroom/nestjs-libraries/dtos/settings/language.dto';
 import { UpdateAiCreditsDto } from '@gitroom/nestjs-libraries/dtos/settings/update.ai-credits.dto';
@@ -43,9 +46,23 @@ export class SettingsController {
   )
   async inviteTeamMember(
     @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
     @Body() body: AddTeamMemberDto
   ) {
     return this._organizationService.inviteTeamMember(org.id, body);
+  }
+
+  @Post('/team/add')
+  async addTeamMember(
+    @GetUserFromRequest() user: User,
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: AdminAddTeamMemberDto
+  ) {
+    if (!user.isSuperAdmin) {
+      throw new HttpException('Unauthorized', 400);
+    }
+
+    return this._organizationService.addTeamMemberByEmail(org, body);
   }
 
   @Delete('/team/:id')
@@ -314,5 +331,19 @@ export class SettingsController {
     @Param('documentId') documentId: string
   ) {
     return this._knowledgeService.delete(org.id, profileId, documentId);
+  }
+
+  @Get('/organization-name')
+  async getOrganizationName(@GetOrgFromRequest() org: Organization) {
+    return this._organizationService.getOrganizationName(org.id);
+  }
+
+  @Post('/organization-name')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
+  async updateOrganizationName(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: OrganizationNameDto
+  ) {
+    return this._organizationService.updateOrganizationName(org.id, body.name);
   }
 }

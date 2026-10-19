@@ -4,15 +4,25 @@ import {
   PostDetails,
   PostResponse,
   SocialProvider,
+  ReportMetricsMap,
+  PublishedPostsPage,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import dayjs from 'dayjs';
-import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import {
+  SocialAbstract,
+  ValidityMedia,
+} from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { InstagramDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/instagram.dto';
-import { InstagramProvider } from '@gitroom/nestjs-libraries/integrations/social/instagram.provider';
+import {
+  InstagramProvider,
+  instagramReportMetrics,
+} from '@gitroom/nestjs-libraries/integrations/social/instagram.provider';
 import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 import { META_INSTAGRAM_GRAPH_URL } from '@gitroom/nestjs-libraries/integrations/social/meta-graph.constants';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { META_GRAPH_API_VERSION } from '@gitroom/nestjs-libraries/integrations/social/facebook.provider';
 
 const instagramProvider = new InstagramProvider();
 
@@ -24,9 +34,13 @@ export class InstagramStandaloneProvider
   implements SocialProvider
 {
   identifier = 'instagram-standalone';
+
   name = 'Instagram\n(Standalone)';
+
   isBetweenSteps = false;
+
   refreshCron = true;
+
   scopes = [
     'instagram_business_basic',
     'instagram_business_content_publish',
@@ -34,10 +48,13 @@ export class InstagramStandaloneProvider
     'instagram_business_manage_insights',
     'instagram_business_manage_messages',
   ];
-  override maxConcurrentJob = 200; // Instagram standalone has stricter limits
+
+  override maxConcurrentJob = 200;
+
   dto = InstagramDto;
 
   editor = 'normal' as const;
+
   maxLength() {
     return 2200;
   }
@@ -83,7 +100,7 @@ export class InstagramStandaloneProvider
   async generateAuthUrl(clientInformation?: ClientInformation) {
     const clientId =
       clientInformation?.client_id || process.env.INSTAGRAM_APP_ID;
-    const state = makeId(6);
+    const state = makeSecureId(6);
     return {
       url:
         `https://www.instagram.com/oauth/authorize?enable_fb_login=0&client_id=${clientId}&redirect_uri=${encodeURIComponent(
@@ -95,7 +112,7 @@ export class InstagramStandaloneProvider
         )}&response_type=code&scope=${encodeURIComponent(
           this.scopes.join(',')
         )}` + `&state=${state}`,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -224,6 +241,113 @@ export class InstagramStandaloneProvider
       accessToken,
       postId,
       date,
+      integration,
+      'graph.instagram.com'
+    );
+  }
+
+  canImportPublishedPost(settings: Record<string, unknown>) {
+    return instagramProvider.canImportPublishedPost(settings);
+  }
+
+  reportMetrics: ReportMetricsMap = instagramReportMetrics;
+
+  listPublishedPosts(
+    id: string,
+    token: string,
+    cursor?: string
+  ): Promise<PublishedPostsPage> {
+    return instagramProvider.listPublishedPosts(
+      id,
+      token,
+      cursor,
+      'graph.instagram.com'
+    );
+  }
+
+  override async checkValidity(
+    [firstPost]: Array<ValidityMedia[]>,
+    settings: any
+  ): Promise<string | true> {
+    if (!firstPost?.length) {
+      return 'Should have at least one media';
+    }
+    if (this.assetBoolean(settings?.is_trial_reel)) {
+      if ((firstPost?.length ?? 0) > 1) {
+        return 'Trial Reels can only have one video';
+      }
+      const hasVideo = firstPost?.some(
+        (f) => (f?.path?.indexOf?.('mp4') ?? -1) > -1
+      );
+      if (!hasVideo) {
+        return 'Trial Reels must be a video';
+      }
+    }
+    return true;
+  }
+
+  async postPending(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails<InstagramDto>[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    return instagramProvider.postPending(
+      id,
+      accessToken,
+      postDetails,
+      integration,
+      'graph.instagram.com'
+    );
+  }
+
+  override async checkPostStatus(
+    accessToken: string,
+    pendingData: any,
+    integration: Integration
+  ) {
+    return instagramProvider.checkPostStatus(
+      accessToken,
+      pendingData,
+      integration
+    );
+  }
+
+  override async finalizePost(
+    accessToken: string,
+    pendingData: any,
+    integration: Integration
+  ) {
+    return instagramProvider.finalizePost(
+      accessToken,
+      pendingData,
+      integration
+    );
+  }
+
+  async listComments(
+    accessToken: string,
+    postId: string,
+    integration: Integration
+  ) {
+    return instagramProvider.listComments(
+      accessToken,
+      postId,
+      integration,
+      'graph.instagram.com'
+    );
+  }
+
+  async replyToComment(
+    accessToken: string,
+    commentId: string,
+    message: string,
+    integration: Integration
+  ) {
+    return instagramProvider.replyToComment(
+      accessToken,
+      commentId,
+      message,
       integration,
       'graph.instagram.com'
     );

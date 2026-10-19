@@ -1,16 +1,78 @@
 'use client';
 
-import React, { FC, useCallback, useMemo } from 'react';
+import React, { FC, useCallback, useMemo, useState } from 'react';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import useSWR from 'swr';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import clsx from 'clsx';
+import Link from 'next/link';
+import { useModals } from '@gitroom/frontend/components/layout/new-modal';
+import { Input } from '@gitroom/react/form/input';
+import { Button } from '@gitroom/react/form/button';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { useToaster } from '@gitroom/react/toaster/toaster';
+
+export const CreateOrganization = () => {
+  const t = useT();
+  const fetch = useFetch();
+  const modals = useModals();
+  const toaster = useToaster();
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const create = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { id } = await (
+        await fetch('/user/organizations', {
+          method: 'POST',
+          body: JSON.stringify({ name }),
+        })
+      ).json();
+      if (!id) {
+        toaster.show(
+          t('could_not_create_organization', 'Could not create organization'),
+          'warning'
+        );
+        return;
+      }
+      await fetch('/user/change-org', {
+        method: 'POST',
+        body: JSON.stringify({ id }),
+      });
+      modals.closeAll();
+      window.location.reload();
+    } finally {
+      setLoading(false);
+    }
+  }, [name]);
+  return (
+    <div className="relative flex gap-[10px] flex-col flex-1 p-[16px] pt-0">
+      <Input
+        value={name}
+        disableForm={true}
+        removeError={true}
+        onChange={(e) => setName(e.target.value)}
+        name="name"
+        label={t('organization_name', 'Organization name')}
+        placeholder={t('organization_name', 'Organization name')}
+      />
+      <Button
+        type="button"
+        className="mt-[18px]"
+        onClick={create}
+        disabled={loading}
+      >
+        {t('create', 'Create')}
+      </Button>
+    </div>
+  );
+};
 export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
   asOpenSelect,
 }) => {
-  const fetch = useFetch();
   const t = useT();
+  const modals = useModals();
+  const fetch = useFetch();
   const user = useUser();
   const load = useCallback(async () => {
     return await (await fetch('/user/organizations')).json();
@@ -25,9 +87,23 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
   const current = useMemo(() => {
     return data?.find((d: any) => d.id === user?.orgId);
   }, [data]);
-  const withoutCurrent = useMemo(() => {
-    return data?.filter((d: any) => d.id !== user?.orgId);
-  }, [current, data]);
+  // current organization first, then the others
+  const sorted = useMemo(() => {
+    return [...(data || [])].sort(
+      (a: any, b: any) =>
+        Number(b.id === user?.orgId) - Number(a.id === user?.orgId)
+    ) as {
+      name: string;
+      id: string;
+      users: { role: 'SUPERADMIN' | 'ADMIN' | 'USER' }[];
+    }[];
+  }, [data, user?.orgId]);
+  const roleLabel = (role?: 'SUPERADMIN' | 'ADMIN' | 'USER') =>
+    role === 'SUPERADMIN'
+      ? t('super_admin', 'Super Admin')
+      : role === 'ADMIN'
+      ? t('admin', 'Admin')
+      : t('user', 'User');
   const changeOrg = useCallback(
     (org: { name: string; id: string }) => async () => {
       await fetch('/user/change-org', {
@@ -40,7 +116,17 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
     },
     []
   );
-  if (isLoading || (!isLoading && data?.length === 1)) {
+  const createOrg = useCallback(() => {
+    modals.openModal({
+      classNames: {
+        modal: 'bg-transparent text-textColor',
+      },
+      title: t('create_new_organization', 'Create New Organization'),
+      withCloseButton: true,
+      children: <CreateOrganization />,
+    });
+  }, [t]);
+  if (isLoading) {
     return null;
   }
   return (
@@ -48,12 +134,18 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
       <div className="hover:text-newTextColor">
         <div className="group text-[12px] relative">
           {asOpenSelect && (
-            <div className="bg-btnPrimary !flex !relative max-w-[500px] mx-auto py-[12px] px-[12px]">{t('label_select_organization', 'Select organization')}</div>
+            <div className="bg-btnPrimary !flex !relative max-w-[500px] mx-auto py-[12px] px-[12px]">
+              {t('label_select_organization', 'Select organization')}
+            </div>
           )}
           {!asOpenSelect && (
-            <div className="flex items-center">
+            <div className="flex items-center gap-[6px]">
               <svg
-                className={user?.tier.current === 'FREE' ? 'animate-bounce drop-shadow-glow': ''}
+                className={
+                  user?.tier.current === 'FREE'
+                    ? 'animate-bounce drop-shadow-glow'
+                    : ''
+                }
                 width="24"
                 height="24"
                 viewBox="0 0 26 26"
@@ -65,25 +157,119 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
                   fill="currentColor"
                 />
               </svg>
+              {!!current?.name && (
+                <div className="max-w-[240px] truncate mobile:hidden">
+                  {current?.name}
+                </div>
+              )}
             </div>
           )}
-          {data?.length > 1 && (
+          {(data?.length > 1 || !asOpenSelect) && (
             <div
               className={clsx(
-                'hidden py-[12px] px-[12px] group-hover:flex absolute top-[100%] end-0 bg-third border-tableBorder border gap-[12px] cursor-pointer flex-col',
-                asOpenSelect ? '!flex !relative max-w-[500px] mx-auto mb-[10px]' : '',
+                'hidden group-hover:flex absolute top-[100%] end-0 pt-[8px] z-[400]',
+                asOpenSelect && '!flex !relative justify-center pt-0 mb-[10px]'
               )}
             >
-              {data?.map((org: { name: string; id: string }) => (
-                <div key={org.id} onClick={changeOrg(org)}>
-                  {org.name}
+              <div className="w-[280px] max-w-[90vw] rounded-[12px] bg-newBgColorInner border border-newTableBorder shadow-[0_12px_32px_rgba(0,0,0,0.35)] p-[6px] flex flex-col text-[14px]">
+                <div className="px-[10px] pt-[6px] pb-[4px] text-[11px] uppercase tracking-wider text-textItemBlur">
+                  {t('organizations', 'Organizations')}
                 </div>
-              ))}
+                {sorted.map((org) => {
+                  const isCurrent = org.id === user?.orgId;
+                  return (
+                    <div
+                      key={org.id}
+                      onClick={isCurrent ? undefined : changeOrg(org)}
+                      className={clsx(
+                        'flex items-center gap-[10px] px-[10px] py-[8px] rounded-[8px]',
+                        isCurrent
+                          ? 'bg-boxHover cursor-default'
+                          : 'cursor-pointer hover:bg-boxHover'
+                      )}
+                    >
+                      <div className="w-[28px] h-[28px] rounded-[8px] bg-btnPrimary text-white flex items-center justify-center text-[13px] font-[600] shrink-0">
+                        {org.name?.trim()?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate text-newTextColor">
+                          {org.name}
+                        </div>
+                        <div className="text-[12px] text-textItemBlur">
+                          {roleLabel(org.users?.[0]?.role)}
+                        </div>
+                      </div>
+                      {isCurrent && (
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="text-btnPrimary shrink-0"
+                        >
+                          <path d="M20 6 9 17l-5-5" />
+                        </svg>
+                      )}
+                    </div>
+                  );
+                })}
+                {!asOpenSelect && (
+                  <>
+                    <div className="h-[1px] bg-newTableBorder my-[6px]" />
+                    <div
+                      onClick={createOrg}
+                      className="flex items-center gap-[10px] px-[10px] py-[8px] rounded-[8px] cursor-pointer hover:bg-boxHover text-newTextColor"
+                    >
+                      <div className="w-[28px] h-[28px] rounded-[8px] border border-dashed border-newTableBorder flex items-center justify-center shrink-0">
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                        >
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                      </div>
+                      {t('create_new_organization', 'Create New Organization')}
+                    </div>
+                    <Link
+                      href="/settings?tab=organizations"
+                      className="flex items-center gap-[10px] px-[10px] py-[8px] rounded-[8px] cursor-pointer hover:bg-boxHover text-newTextColor"
+                    >
+                      <div className="w-[28px] h-[28px] flex items-center justify-center shrink-0 text-textItemBlur">
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+                        </svg>
+                      </div>
+                      {t('manage_organizations', 'Manage organizations')}
+                    </Link>
+                  </>
+                )}
+              </div>
             </div>
           )}
         </div>
       </div>
-      {!asOpenSelect && <div className="w-[1px] h-[20px] bg-blockSeparator" />}
+      {!asOpenSelect && (
+        <div className="w-[1px] h-[20px] bg-blockSeparator mobile:hidden" />
+      )}
     </>
   );
 };

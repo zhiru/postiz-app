@@ -72,15 +72,20 @@ interface TraversalContext {
 export async function flowExecutionWorkflow(input: FlowExecutionInput) {
   try {
     const flow = await getFlowWithNodes(input.flowId);
-    if (!flow) {
+    if (!flow || flow.status !== 'ACTIVE') {
       await updateExecution(input.executionId, {
-        status: 'FAILED' as any,
-        error: 'Flow not found',
+        status: 'CANCELLED' as any,
+        error: 'Automation paused or unavailable',
         completedAt: new Date(),
       });
       return;
     }
 
+    await updateExecution(input.executionId, {
+      status: 'RUNNING' as any,
+      error: null,
+      completedAt: null,
+    });
     // Find the TRIGGER node
     const triggerNode = flow.nodes.find((n: any) => n.type === 'TRIGGER');
     if (!triggerNode) {
@@ -127,7 +132,9 @@ export async function flowExecutionWorkflow(input: FlowExecutionInput) {
           input.igSenderId,
           combinedMessage,
           ctx.dmButtonText,
-          ctx.dmButtonUrl
+          ctx.dmButtonUrl,
+          input.igMessageId || input.executionId,
+          input.flowId
         );
       } else if (input.igCommenterId && input.igCommentId) {
         await sendDirectMessage(
@@ -137,13 +144,15 @@ export async function flowExecutionWorkflow(input: FlowExecutionInput) {
           combinedMessage,
           input.igCommentId,
           ctx.dmButtonText,
-          ctx.dmButtonUrl
+          ctx.dmButtonUrl,
+          input.flowId
         );
       }
     }
 
     await updateExecution(input.executionId, {
       status: 'COMPLETED' as any,
+      error: null,
       completedAt: new Date(),
     });
   } catch (err: any) {
@@ -186,259 +195,260 @@ async function traverseNode(
 
   // Execute node based on type
   try {
-  switch (node.type) {
-    case 'TRIGGER': {
-      // If trigger has keywords, evaluate them — skip flow if no match
-      const triggerConfig = safeParseJson(node.data);
-      if (triggerConfig.keywords?.length) {
-        const matches = await evaluateCondition(
-          node.data || '{}',
-          triggerText(input)
-        );
-        if (!matches) {
-          await appendExecutionLog(input.executionId, {
-            nodeId,
-            nodeType: node.type,
-            status: 'skipped',
-            timestamp: new Date().toISOString(),
-            error: 'keywords_not_matched',
-          });
-          return;
-        }
-      }
-
-      // Follow gate 2 etapas para comentarios: is_user_follow_business nao eh
-      // confiavel antes do usuario abrir janela de messaging. Entao:
-      //   1. Responde publicamente no comentario.
-      //   2. Envia DM inicial com botao postback (abre janela ao clicar).
-      //   3. Cria PendingPostback e pausa em WAITING_POSTBACK.
-      //   4. followGateResolveWorkflow retoma quando o clique chegar.
-      // Story replies continuam usando o check direto — a janela ja esta
-      // aberta no momento da resposta.
-      if (
-        triggerConfig.requireFollow &&
-        input.triggerType === 'comment_on_post' &&
-        input.igCommentId &&
-        input.igMediaId &&
-        input.igCommenterId
-      ) {
-        // 1. Resposta publica no comentario (se configurada no flow).
-        const replyNode = nodes.find((n: any) => n.type === 'REPLY_COMMENT');
-        if (replyNode) {
-          const cfg = safeParseJson(replyNode.data);
-          const rawMsg = pickReplyMessage(cfg);
-          const msg = interpolateVariables(rawMsg, input);
-          if (msg) {
-            await replyToComment(
-              integrationId,
-              orgId,
-              input.igCommentId,
-              input.igMediaId,
-              msg
-            );
-          }
-        }
-
-        // 2. Snapshots vindos do nó SEND_DM (se houver) para servir como
-        // conteudo da DM final apos confirmacao do follow.
-        const dmNode = nodes.find((n: any) => n.type === 'SEND_DM');
-        const dmCfg = dmNode ? safeParseJson(dmNode.data) : {};
-        const finalDmMessage = interpolateVariables(
-          dmCfg.message || dmCfg.template || '',
-          input
-        );
-
-        // 3. Cria pending postback e envia opening DM com botao.
-        const pending = await createPendingPostback({
-          flowId: input.flowId,
-          originExecutionId: input.executionId,
-          integrationId,
-          organizationId: orgId,
-          igSenderId: input.igCommenterId,
-          igCommenterName: input.igCommenterName,
-          igMediaId: input.igMediaId,
-          igCommentId: input.igCommentId,
-          kind: 'initial',
-          maxAttempts: triggerConfig.maxGateAttempts ?? 3,
-          snapshotFinalDm: finalDmMessage || undefined,
-          snapshotFinalBtnText: dmCfg.buttonText || undefined,
-          snapshotFinalBtnUrl: dmCfg.buttonUrl || undefined,
-          snapshotGateDm: triggerConfig.followGateMessage || undefined,
-          snapshotAlreadyBtnText:
-            triggerConfig.alreadyFollowedButtonText || undefined,
-          snapshotExhaustedMessage:
-            triggerConfig.gateExhaustedMessage || undefined,
-          openingDmMessage: triggerConfig.openingDmMessage || undefined,
-          openingDmButtonText:
-            triggerConfig.openingDmButtonText || undefined,
-        });
-
-        await sendOpeningDmWithPostback(pending.id);
-
-        // 4. Pausa a execucao ate o clique do usuario chegar.
-        ctx.awaitingPostback = true;
-        await updateExecution(input.executionId, {
-          status: 'WAITING_POSTBACK' as any,
-          currentNodeId: nodeId,
-        });
-        await appendExecutionLog(input.executionId, {
-          nodeId,
-          nodeType: node.type,
-          status: 'awaiting_postback',
-          timestamp: new Date().toISOString(),
-          error: `pendingPostbackId=${pending.id}`,
-        });
-        return;
-      }
-
-      // Follow gate: when the sender doesn't follow the IG business account,
-      // reply with a customizable gate message instead of the configured DM
-      // (and drop any button — the CTA is "follow us and reply again").
-      // Works for both story_reply and comment_on_post triggers.
-      if (triggerConfig.requireFollow) {
-        const senderId =
-          input.triggerType === 'story_reply'
-            ? input.igSenderId
-            : input.igCommenterId;
-        if (senderId) {
-          const source =
-            input.triggerType === 'story_reply' ? 'story_reply' : 'comment';
-          const follows = await checkIgFollowStatus(
-            integrationId,
-            orgId,
-            senderId,
-            source
+    switch (node.type) {
+      case 'TRIGGER': {
+        // If trigger has keywords, evaluate them — skip flow if no match
+        const triggerConfig = safeParseJson(node.data);
+        if (triggerConfig.keywords?.length) {
+          const matches = await evaluateCondition(
+            node.data || '{}',
+            triggerText(input)
           );
-          await appendExecutionLog(input.executionId, {
-            nodeId,
-            nodeType: node.type,
-            status: 'follow_check',
-            timestamp: new Date().toISOString(),
-            error: `source=${source} follows=${follows}`,
-          });
-          if (!follows) {
-            const gateText = interpolateVariables(
-              (triggerConfig.followGateMessage as string | undefined) ||
-                FOLLOW_GATE_DEFAULT,
-              input
-            );
-            ctx.dmMessages.push(gateText);
-            ctx.dmButtonText = undefined;
-            ctx.dmButtonUrl = undefined;
+          if (!matches) {
             await appendExecutionLog(input.executionId, {
               nodeId,
               nodeType: node.type,
-              status: 'completed',
+              status: 'skipped',
               timestamp: new Date().toISOString(),
-              error: 'follow_gate_applied',
+              error: 'keywords_not_matched',
             });
             return;
           }
         }
+
+        // Follow gate 2 etapas para comentarios: is_user_follow_business nao eh
+        // confiavel antes do usuario abrir janela de messaging. Entao:
+        //   1. Responde publicamente no comentario.
+        //   2. Envia DM inicial com botao postback (abre janela ao clicar).
+        //   3. Cria PendingPostback e pausa em WAITING_POSTBACK.
+        //   4. followGateResolveWorkflow retoma quando o clique chegar.
+        // Story replies continuam usando o check direto — a janela ja esta
+        // aberta no momento da resposta.
+        if (
+          triggerConfig.requireFollow &&
+          input.triggerType === 'comment_on_post' &&
+          input.igCommentId &&
+          input.igMediaId &&
+          input.igCommenterId
+        ) {
+          // 1. Resposta publica no comentario (se configurada no flow).
+          const replyNode = nodes.find((n: any) => n.type === 'REPLY_COMMENT');
+          if (replyNode) {
+            const cfg = safeParseJson(replyNode.data);
+            const rawMsg = pickReplyMessage(cfg);
+            const msg = interpolateVariables(rawMsg, input);
+            if (msg) {
+              await replyToComment(
+                integrationId,
+                orgId,
+                input.igCommentId,
+                input.igMediaId,
+                msg,
+                input.flowId,
+                `${input.executionId}:${replyNode.id}`
+              );
+            }
+          }
+
+          // 2. Snapshots vindos do nó SEND_DM (se houver) para servir como
+          // conteudo da DM final apos confirmacao do follow.
+          const dmNode = nodes.find((n: any) => n.type === 'SEND_DM');
+          const dmCfg = dmNode ? safeParseJson(dmNode.data) : {};
+          const finalDmMessage = interpolateVariables(
+            dmCfg.message || dmCfg.template || '',
+            input
+          );
+
+          // 3. Cria pending postback e envia opening DM com botao.
+          const pending = await createPendingPostback({
+            flowId: input.flowId,
+            originExecutionId: input.executionId,
+            integrationId,
+            organizationId: orgId,
+            igSenderId: input.igCommenterId,
+            igCommenterName: input.igCommenterName,
+            igMediaId: input.igMediaId,
+            igCommentId: input.igCommentId,
+            kind: 'initial',
+            maxAttempts: triggerConfig.maxGateAttempts ?? 3,
+            snapshotFinalDm: finalDmMessage || undefined,
+            snapshotFinalBtnText: dmCfg.buttonText || undefined,
+            snapshotFinalBtnUrl: dmCfg.buttonUrl || undefined,
+            snapshotGateDm: triggerConfig.followGateMessage || undefined,
+            snapshotAlreadyBtnText:
+              triggerConfig.alreadyFollowedButtonText || undefined,
+            snapshotExhaustedMessage:
+              triggerConfig.gateExhaustedMessage || undefined,
+            openingDmMessage: triggerConfig.openingDmMessage || undefined,
+            openingDmButtonText: triggerConfig.openingDmButtonText || undefined,
+          });
+
+          // 4. Pausa a execucao ate o clique do usuario chegar.
+          ctx.awaitingPostback = true;
+          await updateExecution(input.executionId, {
+            status: 'WAITING_POSTBACK' as any,
+            currentNodeId: nodeId,
+          });
+          await sendOpeningDmWithPostback(pending.id);
+          await appendExecutionLog(input.executionId, {
+            nodeId,
+            nodeType: node.type,
+            status: 'awaiting_postback',
+            timestamp: new Date().toISOString(),
+            error: `pendingPostbackId=${pending.id}`,
+          });
+          return;
+        }
+
+        // Follow gate: when the sender doesn't follow the IG business account,
+        // reply with a customizable gate message instead of the configured DM
+        // (and drop any button — the CTA is "follow us and reply again").
+        // Works for both story_reply and comment_on_post triggers.
+        if (triggerConfig.requireFollow) {
+          const senderId =
+            input.triggerType === 'story_reply'
+              ? input.igSenderId
+              : input.igCommenterId;
+          if (senderId) {
+            const source =
+              input.triggerType === 'story_reply' ? 'story_reply' : 'comment';
+            const follows = await checkIgFollowStatus(
+              integrationId,
+              orgId,
+              senderId,
+              source
+            );
+            await appendExecutionLog(input.executionId, {
+              nodeId,
+              nodeType: node.type,
+              status: 'follow_check',
+              timestamp: new Date().toISOString(),
+              error: `source=${source} follows=${follows}`,
+            });
+            if (!follows) {
+              const gateText = interpolateVariables(
+                (triggerConfig.followGateMessage as string | undefined) ||
+                  FOLLOW_GATE_DEFAULT,
+                input
+              );
+              ctx.dmMessages.push(gateText);
+              ctx.dmButtonText = undefined;
+              ctx.dmButtonUrl = undefined;
+              await appendExecutionLog(input.executionId, {
+                nodeId,
+                nodeType: node.type,
+                status: 'completed',
+                timestamp: new Date().toISOString(),
+                error: 'follow_gate_applied',
+              });
+              return;
+            }
+          }
+        }
+        break;
       }
-      break;
-    }
 
-    case 'CONDITION': {
-      const matches = await evaluateCondition(
-        node.data || '{}',
-        triggerText(input)
-      );
-
-      // Find the correct outgoing edge based on match result.
-      // Edges without sourceHandle (e.g. from auto-connect) are treated
-      // as "match" edges so the flow still works.
-      const allOutgoing = edges.filter(
-        (e: any) => e.sourceNodeId === nodeId
-      );
-      const matchEdge =
-        allOutgoing.find((e: any) => e.sourceHandle === 'match') ||
-        allOutgoing.find((e: any) => !e.sourceHandle);
-      const noMatchEdge = allOutgoing.find(
-        (e: any) => e.sourceHandle === 'no_match'
-      );
-
-      await appendExecutionLog(input.executionId, {
-        nodeId,
-        nodeType: node.type,
-        status: 'completed',
-        timestamp: new Date().toISOString(),
-        error: matches ? 'branch:match' : 'branch:no_match',
-      });
-
-      const nextEdge = matches ? matchEdge : noMatchEdge;
-      if (nextEdge) {
-        await traverseNode(
-          nextEdge.targetNodeId,
-          nodes,
-          edges,
-          input,
-          integrationId,
-          orgId,
-          depth + 1,
-          ctx
+      case 'CONDITION': {
+        const matches = await evaluateCondition(
+          node.data || '{}',
+          triggerText(input)
         );
-      }
-      return; // Don't fall through to default edge traversal
-    }
 
-    case 'REPLY_COMMENT': {
-      const config = safeParseJson(node.data);
-      const messages = Array.isArray(config.messages) && config.messages.length > 0
-        ? config.messages as string[]
-        : null;
-      const rawMessage = messages
-        ? messages[Math.floor(Math.random() * messages.length)]
-        : (config.message || config.template || '');
-      const message = interpolateVariables(rawMessage, input);
-      if (message) {
-        await replyToComment(
-          integrationId,
-          orgId,
-          input.igCommentId,
-          input.igMediaId,
-          message
+        // Find the correct outgoing edge based on match result.
+        // Edges without sourceHandle (e.g. from auto-connect) are treated
+        // as "match" edges so the flow still works.
+        const allOutgoing = edges.filter((e: any) => e.sourceNodeId === nodeId);
+        const matchEdge =
+          allOutgoing.find((e: any) => e.sourceHandle === 'match') ||
+          allOutgoing.find((e: any) => !e.sourceHandle);
+        const noMatchEdge = allOutgoing.find(
+          (e: any) => e.sourceHandle === 'no_match'
         );
+
+        await appendExecutionLog(input.executionId, {
+          nodeId,
+          nodeType: node.type,
+          status: 'completed',
+          timestamp: new Date().toISOString(),
+          error: matches ? 'branch:match' : 'branch:no_match',
+        });
+
+        const nextEdge = matches ? matchEdge : noMatchEdge;
+        if (nextEdge) {
+          await traverseNode(
+            nextEdge.targetNodeId,
+            nodes,
+            edges,
+            input,
+            integrationId,
+            orgId,
+            depth + 1,
+            ctx
+          );
+        }
+        return; // Don't fall through to default edge traversal
       }
-      break;
+
+      case 'REPLY_COMMENT': {
+        const config = safeParseJson(node.data);
+        const messages =
+          Array.isArray(config.messages) && config.messages.length > 0
+            ? (config.messages as string[])
+            : null;
+        const rawMessage = messages
+          ? messages[Math.floor(Math.random() * messages.length)]
+          : config.message || config.template || '';
+        const message = interpolateVariables(rawMessage, input);
+        if (message) {
+          await replyToComment(
+            integrationId,
+            orgId,
+            input.igCommentId,
+            input.igMediaId,
+            message,
+            input.flowId,
+            `${input.executionId}:${node.id}`
+          );
+        }
+        break;
+      }
+
+      case 'SEND_DM': {
+        const config = safeParseJson(node.data);
+        const message = interpolateVariables(
+          config.message || config.template || '',
+          input
+        );
+        if (message) {
+          // Collect message — all DMs are sent as a single private reply at the end.
+          ctx.dmMessages.push(message);
+        }
+        if (config.buttonText && config.buttonUrl) {
+          ctx.dmButtonText = config.buttonText;
+          ctx.dmButtonUrl = config.buttonUrl;
+        }
+        break;
+      }
+
+      case 'DELAY': {
+        const config = safeParseJson(node.data);
+        const durationMs = parseDuration(
+          config.duration || 0,
+          config.unit || 'seconds'
+        );
+        if (durationMs > 0) {
+          await sleep(durationMs);
+        }
+        break;
+      }
     }
 
-    case 'SEND_DM': {
-      const config = safeParseJson(node.data);
-      const message = interpolateVariables(
-        config.message || config.template || '',
-        input
-      );
-      if (message) {
-        // Collect message — all DMs are sent as a single private reply at the end.
-        ctx.dmMessages.push(message);
-      }
-      if (config.buttonText && config.buttonUrl) {
-        ctx.dmButtonText = config.buttonText;
-        ctx.dmButtonUrl = config.buttonUrl;
-      }
-      break;
-    }
-
-    case 'DELAY': {
-      const config = safeParseJson(node.data);
-      const durationMs = parseDuration(
-        config.duration || 0,
-        config.unit || 'seconds'
-      );
-      if (durationMs > 0) {
-        await sleep(durationMs);
-      }
-      break;
-    }
-  }
-
-  await appendExecutionLog(input.executionId, {
-    nodeId,
-    nodeType: node.type,
-    status: 'completed',
-    timestamp: new Date().toISOString(),
-  });
+    await appendExecutionLog(input.executionId, {
+      nodeId,
+      nodeType: node.type,
+      status: 'completed',
+      timestamp: new Date().toISOString(),
+    });
   } catch (nodeErr: any) {
     await appendExecutionLog(input.executionId, {
       nodeId,
@@ -451,9 +461,7 @@ async function traverseNode(
   }
 
   // Follow all outgoing edges (for non-CONDITION nodes)
-  const outgoingEdges = edges.filter(
-    (e: any) => e.sourceNodeId === nodeId
-  );
+  const outgoingEdges = edges.filter((e: any) => e.sourceNodeId === nodeId);
 
   for (const edge of outgoingEdges) {
     await traverseNode(

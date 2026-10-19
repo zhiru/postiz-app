@@ -27,6 +27,9 @@ import {
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+
+const PAGES_TIMEOUT_MS = 45000;
 
 @ApiTags('Integrations')
 @Controller('/integrations')
@@ -65,7 +68,11 @@ export class NoAuthIntegrationsController {
       ? 'none'
       : await ioRedis.get(`login:${body.state}`);
     if (!getCodeVerifier) {
-      throw new Error('Invalid state');
+      // The state expires after an hour and is deleted once used (page reload)
+      throw new HttpException(
+        'This connection link expired or was already used, please connect the channel again',
+        400
+      );
     }
 
     const organization = await ioRedis.get(`organization:${body.state}`);
@@ -146,18 +153,14 @@ export class NoAuthIntegrationsController {
               refresh,
               auth.accessToken
             );
-            // Providers com access token de curta duracao (ex: YouTube) precisam
-            // preservar o refresh_token real devolvido pelo OAuth. O caminho
-            // default sobrescreve com body.refresh, descartando o refresh_token
-            // e quebrando a renovacao automatica horas depois.
-            if (integrationProvider.keepReconnectAuthTokens) {
-              return res({
-                ...newAuth,
-                refreshToken: auth.refreshToken,
-                expiresIn: auth.expiresIn,
-              });
-            }
-            return res({ ...newAuth, refreshToken: body.refresh });
+            // keep the fresh refresh token and expiration from the new
+            // authentication, otherwise the stored refresh token is wiped and
+            // the channel breaks again as soon as the access token expires
+            return res({
+              ...newAuth,
+              refreshToken: auth.refreshToken,
+              expiresIn: auth.expiresIn,
+            });
           } catch (err: any) {
             return res({
               error: err.message,
@@ -185,19 +188,9 @@ export class NoAuthIntegrationsController {
           });
         }
 
-        // Log full error so we can diagnose silent failures in OAuth
-        // (token-exchange errors from Meta, JSON parse failures, missing
-        // credentials, etc.) instead of swallowing them as "Authentication failed".
-        console.error(
-          `[connectSocialMedia] ${integration} authenticate() failed:`,
-          {
-            name: (err as Error)?.name,
-            message: (err as Error)?.message,
-            stack: (err as Error)?.stack,
-            cause: (err as any)?.cause,
-          }
-        );
-
+        console.error(`[connectSocialMedia] ${integration} authentication failed`, {
+          name: (err as Error)?.name,
+        });
         return res({
           error: 'Authentication failed',
           accessToken: '',
@@ -218,12 +211,6 @@ export class NoAuthIntegrationsController {
       throw new NotEnoughScopes('Invalid API key');
     }
 
-    if (refresh && String(id) !== String(refresh)) {
-      throw new NotEnoughScopes(
-        'Please refresh the channel that needs to be refreshed'
-      );
-    }
-
     let validName = name;
     if (!validName) {
       if (username) {
@@ -242,6 +229,30 @@ export class NoAuthIntegrationsController {
       ))
     ) {
       throw new HttpException('', 412);
+    }
+
+    if (refresh && String(id) !== String(refresh)) {
+      // A reconnect that returns a different id is either the wrong account or
+      // a channel migrating to another provider (MIGRATE_PROVIDERS) - the two
+      // apps return different app-scoped ids, so the channel is matched by
+      // profile and moved in place. Throws for anything else. Runs after every
+      // check that can reject the connect, so a rejection can never leave a
+      // half-migrated channel behind.
+      await this._integrationService.migrateIntegration(
+        org.id,
+        refresh,
+        integration,
+        { id: String(id), username }
+      );
+    } else if (!refresh) {
+      // A fresh connect of a migration target for an account the org already
+      // has on the source provider adopts that channel instead of creating a
+      // duplicate. No-op for everything else.
+      await this._integrationService.migrateIntegrationOnConnect(
+        org.id,
+        integration,
+        { id: String(id), username }
+      );
     }
 
     const createUpdate =
@@ -294,10 +305,30 @@ export class NoAuthIntegrationsController {
             : null;
 
         if (fetchMethod) {
-          // @ts-ignore - dynamic method call
-          pages = await integrationProvider[fetchMethod](accessToken);
+          // Bound the wait so a slow provider API shows an error instead of
+          // a spinner until the proxy cuts the request.
+          let timer: NodeJS.Timeout;
+          pages = await Promise.race([
+            // @ts-ignore - dynamic method call
+            integrationProvider[fetchMethod](accessToken),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(
+                () =>
+                  reject(
+                    new HttpException(
+                      'Timed out loading the accounts from the provider, please try again',
+                      504
+                    )
+                  ),
+                PAGES_TIMEOUT_MS
+              );
+            }),
+          ]).finally(() => clearTimeout(timer));
         }
       } catch (err) {
+        if (err instanceof HttpException) {
+          throw err;
+        }
         console.log('Failed to fetch pages:', err);
       }
     }
@@ -313,6 +344,8 @@ export class NoAuthIntegrationsController {
               apiKey: org.apiKey,
             }),
           }),
+          // @ts-ignore — undici option, not in lib.dom fetch types
+          dispatcher: getSsrfSafeDispatcher(),
         });
       } catch (err) {}
 

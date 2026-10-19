@@ -1,3 +1,4 @@
+import { getAuth, getProfileId } from '@gitroom/nestjs-libraries/chat/async.storage';
 /**
  * Helper para ler o contexto de runtime das ferramentas Mastra.
  *
@@ -24,7 +25,7 @@ export interface MinimalRequestContext {
 }
 
 const EMPTY_CONTEXT: MinimalRequestContext = {
-  get: () => undefined,
+  get: (key) => key === 'organization' && getAuth() ? JSON.stringify(getAuth()) : key === 'profileId' ? getProfileId() : undefined,
 };
 
 export function readRequestContext(rawCtx: any): MinimalRequestContext {

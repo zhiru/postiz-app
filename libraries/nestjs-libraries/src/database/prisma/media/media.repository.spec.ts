@@ -1,3 +1,4 @@
+jest.mock('bcrypt', () => ({ hashSync: jest.fn(), compareSync: jest.fn() }));
 import { createPrismaRepositoryMock } from '@gitroom/nestjs-libraries/test';
 import { MediaRepository } from './media.repository';
 
@@ -102,12 +103,13 @@ describe('MediaRepository', () => {
       (mediaMock.model.media as any).count.mockResolvedValue(0);
       (mediaMock.model.media as any).findMany.mockResolvedValue([]);
 
-      await repository.getMedia('org-1', 1, 'prof-1');
+      await repository.getMedia('org-1', 1, undefined, 'prof-1');
 
       expect((mediaMock.model.media as any).count).toHaveBeenCalledWith({
         where: {
           organization: { id: 'org-1' },
           deletedAt: null,
+          status: { not: 'processing' },
           OR: [{ profileId: 'prof-1' }, { profileId: null }],
         },
       });

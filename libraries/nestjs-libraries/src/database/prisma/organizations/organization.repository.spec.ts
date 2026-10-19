@@ -1,3 +1,4 @@
+jest.mock('bcrypt', () => ({ hashSync: jest.fn(), compareSync: jest.fn() }));
 import { OrganizationRepository } from './organization.repository';
 
 const mockOrgCreate = jest.fn();
@@ -40,7 +41,8 @@ describe('OrganizationRepository', () => {
       mockOrgModel as any,
       mockUserOrgModel as any,
       mockUserModel as any,
-      mockProfileMemberModel as any
+      mockProfileMemberModel as any,
+      {} as any
     );
   });
 
@@ -105,7 +107,7 @@ describe('OrganizationRepository', () => {
 
       await repository.getImpersonateUser('CLIENTE');
 
-      const userFilters = mockUserOrgFindMany.mock.calls[0][0].where.OR[1].user
+      const userFilters = mockUserOrgFindMany.mock.calls[0][0].where.OR.find((filter: any) => filter.user).user
         .OR;
       expect(userFilters[0].name).toEqual({
         contains: 'CLIENTE',
@@ -205,6 +207,7 @@ describe('OrganizationRepository', () => {
       expect(mockOrgUpdate).toHaveBeenCalledWith({
         where: { id: 'org-1' },
         data: { language: 'en' },
+        select: { language: true },
       });
     });
 

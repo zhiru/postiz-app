@@ -4,6 +4,7 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import useSWR from 'swr';
 import { FC, useCallback, useState } from 'react';
 import clsx from 'clsx';
+import dayjs from 'dayjs';
 import { useClickAway } from '@uidotdev/usehooks';
 import ReactLoading from '@gitroom/frontend/components/layout/loading';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -35,16 +36,29 @@ export const ShowNotification: FC<{
   const message = notification.contentKey
     ? t(notification.contentKey, notification.contentParams || {})
     : notification.content;
+  const createdAt = dayjs(notification.createdAt);
+  const isWithin24h = dayjs().diff(createdAt, 'hour') < 24;
+  const fullDate = createdAt.format('MMM D, YYYY h:mm A');
   return (
     <div
       className={clsx(
-        `text-textColor px-[16px] py-[10px] border-b border-tableBorder last:border-b-0 transition-colors overflow-hidden text-ellipsis`,
+        `text-textColor px-[16px] py-[10px] border-b border-tableBorder last:border-b-0 transition-colors`,
         newNotification && 'font-bold bg-seventh animate-newMessages'
       )}
-      dangerouslySetInnerHTML={{
-        __html: sanitizePostContent(replaceLinks(message)),
-      }}
-    />
+    >
+      <div
+        className="break-words"
+        dangerouslySetInnerHTML={{
+          __html: sanitizePostContent(replaceLinks(message)),
+        }}
+      />
+      <div
+        className="text-[11px] mt-[4px] opacity-60 font-normal"
+        title={isWithin24h ? fullDate : undefined}
+      >
+        {isWithin24h ? createdAt.fromNow() : fullDate}
+      </div>
+    </div>
   );
 };
 export const NotificationOpenComponent = () => {
@@ -58,15 +72,13 @@ export const NotificationOpenComponent = () => {
   return (
     <div
       id="notification-popup"
-      className="opacity-0 animate-normalFadeDown mt-[10px] absolute w-[420px] min-h-[200px] top-[100%] end-0 bg-third text-textColor rounded-[16px] flex flex-col border border-tableBorder z-[600]"
+      className="opacity-0 animate-normalFadeDown mt-[10px] absolute w-[420px] max-w-[calc(100vw-24px)] min-h-[200px] top-[100%] end-0 bg-third text-textColor rounded-[16px] flex flex-col border border-tableBorder z-[600]"
     >
-      <div
-        className={`p-[16px] border-b border-tableBorder font-bold`}
-      >
+      <div className={`p-[16px] border-b border-tableBorder font-bold`}>
         {t('notifications', 'Notifications')}
       </div>
 
-      <div className="flex flex-col">
+      <div className="flex flex-col max-h-[400px] overflow-y-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
         {isLoading && (
           <div className="flex-1 flex justify-center pt-12">
             <ReactLoading type="spin" color="#fff" width={36} height={36} />

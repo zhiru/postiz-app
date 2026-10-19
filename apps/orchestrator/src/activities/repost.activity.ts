@@ -1,10 +1,8 @@
+import { CreationMethod } from '@prisma/client';
 import { Injectable } from '@nestjs/common';
 import { Activity, ActivityMethod } from 'nestjs-temporal-core';
 import dayjs from 'dayjs';
-import {
-  RepostDestinationFormat,
-  RepostSourceType,
-} from '@prisma/client';
+import { RepostDestinationFormat, RepostSourceType } from '@prisma/client';
 import { RepostService } from '@gitroom/nestjs-libraries/database/prisma/repost/repost.service';
 import {
   RepostRepository,
@@ -130,7 +128,8 @@ export class RepostActivity {
       // Migracao: se checkpoint nao comeca com '2' (era um id legado),
       // fazemos soft-bootstrap — gravamos o max(timestamp) atual como novo
       // checkpoint e nao repostamos nada nesse ciclo.
-      const isLegacyCheckpoint = checkpoint.length > 0 && !checkpoint.startsWith('2');
+      const isLegacyCheckpoint =
+        checkpoint.length > 0 && !checkpoint.startsWith('2');
       if (isLegacyCheckpoint && items.length > 0) {
         const newest = items.reduce((acc, cur) =>
           (cur.timestamp || '') > (acc.timestamp || '') ? cur : acc
@@ -149,7 +148,9 @@ export class RepostActivity {
       }
 
       const fresh = items
-        .filter((s) => !!s.timestamp && (!checkpoint || s.timestamp > checkpoint))
+        .filter(
+          (s) => !!s.timestamp && (!checkpoint || s.timestamp > checkpoint)
+        )
         .sort((a, b) => ((a.timestamp || '') > (b.timestamp || '') ? 1 : -1));
 
       console.log(
@@ -244,11 +245,7 @@ export class RepostActivity {
     const log = await this._repostRepository.createLog({
       ruleId: rule.id,
       sourceItemId: item.id,
-      mediaType: isVideo
-        ? 'VIDEO'
-        : isImage
-        ? 'IMAGE'
-        : mediaType || 'UNKNOWN',
+      mediaType: isVideo ? 'VIDEO' : isImage ? 'IMAGE' : mediaType || 'UNKNOWN',
       mediaUrlOriginal: item.mediaUrl || item.thumbnailUrl || '',
     });
 
@@ -262,7 +259,10 @@ export class RepostActivity {
       `[repost] rule=${rule.id} processing item=${item.id} mediaType=${mediaType}`
     );
 
-    if (rule.filterHashtag && !hashtagMatches(item.caption, rule.filterHashtag)) {
+    if (
+      rule.filterHashtag &&
+      !hashtagMatches(item.caption, rule.filterHashtag)
+    ) {
       await this._repostRepository.markLogSkipped(log.id, 'FILTER_HASHTAG');
       return;
     }
@@ -390,6 +390,8 @@ export class RepostActivity {
               },
             ],
           },
+          CreationMethod.AUTOPOST,
+          false,
           rule.profileId
         );
 
@@ -468,25 +470,24 @@ export class RepostActivity {
   private async loadDestinations(rule: {
     organizationId: string;
     profileId: string;
-    destinations?:
-      | Array<{
-          integrationId: string;
-          format: RepostDestinationFormat;
-          integration?: {
-            id: string;
-            name: string;
-            picture: string | null;
-            providerIdentifier: string;
-            disabled: boolean;
-            deletedAt: Date | null;
-          };
-        }>
-      | null;
+    destinations?: Array<{
+      integrationId: string;
+      format: RepostDestinationFormat;
+      integration?: {
+        id: string;
+        name: string;
+        picture: string | null;
+        providerIdentifier: string;
+        disabled: boolean;
+        deletedAt: Date | null;
+      };
+    }> | null;
   }): Promise<RuleDestinationWithIntegration[]> {
     const list = rule.destinations ?? [];
     return list
       .filter(
-        (d) => d.integration && !d.integration.disabled && !d.integration.deletedAt
+        (d) =>
+          d.integration && !d.integration.disabled && !d.integration.deletedAt
       )
       .map((d) => ({
         integrationId: d.integrationId,
@@ -540,10 +541,7 @@ function skipByVideoLimits(
   ) {
     return 'DURATION_BELOW_TIKTOK_MIN';
   }
-  if (
-    format === 'X_POST' &&
-    rule.filterMaxDurationSeconds > X_MAX_SECONDS
-  ) {
+  if (format === 'X_POST' && rule.filterMaxDurationSeconds > X_MAX_SECONDS) {
     return 'DURATION_EXCEEDED_X';
   }
   if (
@@ -647,7 +645,9 @@ function buildSettingsForFormat(input: {
         ...trace,
       };
     case 'YOUTUBE_SHORT': {
-      const baseTitle = (input.caption || `Short ${new Date().toISOString().slice(0, 10)}`).trim();
+      const baseTitle = (
+        input.caption || `Short ${new Date().toISOString().slice(0, 10)}`
+      ).trim();
       const needsTag = !baseTitle.toLowerCase().includes('#shorts');
       let title = needsTag ? `${baseTitle} #Shorts` : baseTitle;
       if (title.length > 100) title = title.slice(0, 100);

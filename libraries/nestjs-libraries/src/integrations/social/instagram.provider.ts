@@ -1,3 +1,5 @@
+import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { CommentAutomationDeliveryError } from './social.integrations.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -5,6 +7,10 @@ import {
   PostDetails,
   PostResponse,
   SocialProvider,
+  ReportMetricsMap,
+  PendingCheckResponse,
+  SocialCommentDetails,
+  PublishedPostsPage,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { timer } from '@gitroom/helpers/utils/timer';
@@ -12,6 +18,9 @@ import dayjs from 'dayjs';
 import {
   RefreshToken,
   SocialAbstract,
+  BadBody,
+  Disconnect,
+  ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { InstagramDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/instagram.dto';
 import { Integration } from '@prisma/client';
@@ -22,10 +31,16 @@ import {
 } from '@gitroom/nestjs-libraries/integrations/social/meta-graph.constants';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 import { InstagramDmButton } from '@gitroom/nestjs-libraries/integrations/social/instagram-dm-button.type';
+import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analytics.trend';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import {
+  graphFetch,
+  graphPaginate,
+} from '@gitroom/nestjs-libraries/integrations/social/meta.graph';
+import { META_GRAPH_API_VERSION } from '@gitroom/nestjs-libraries/integrations/social/facebook.provider';
+import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
+import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
-// Aborta a chamada Graph API se passar de `timeoutMs` ms. Evita que uma
-// chamada lenta a graph.facebook.com (comum em agencias com muitas pages
-// via Business Manager) trave o OAuth callback inteiro e cause 504 do Nginx.
 async function fetchWithTimeout(
   url: string,
   timeoutMs = 15000
@@ -33,14 +48,15 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { signal: controller.signal });
+    return await ssrfSafeFetch(url, {
+      signal: controller.signal,
+      redirect: 'error',
+    });
   } finally {
     clearTimeout(timeout);
   }
 }
 
-// Traduz o botao interno para o formato de botao da Meta Messenger API.
-// Meta limita o title do botao a 20 chars; trimming garante envio valido.
 function buildButton(button: InstagramDmButton) {
   if (button.kind === 'postback') {
     return {
@@ -56,6 +72,12 @@ function buildButton(button: InstagramDmButton) {
   };
 }
 
+export const instagramReportMetrics: ReportMetricsMap = {
+  followersGained: ['Follower Count'],
+  reach: ['Reach'],
+  engagement: ['Likes', 'Comments', 'Shares', 'Saves', 'Replies'],
+};
+
 @Rules(
   "Instagram should have at least one attachment, if it's a story, it can have only one picture"
 )
@@ -64,12 +86,15 @@ export class InstagramProvider
   implements SocialProvider
 {
   identifier = 'instagram';
+
   name = 'Instagram\n(Facebook Business)';
+
   isBetweenSteps = true;
-  // refreshToken() abaixo e stub: Page Access Token nao se renova por
-  // refresh_token. Ver noNativeRefresh na interface.
+
   noNativeRefresh = true;
+
   toolTip = 'Instagram must be business and connected to a Facebook page';
+
   scopes = [
     'instagram_basic',
     'pages_show_list',
@@ -80,9 +105,13 @@ export class InstagramProvider
     'instagram_manage_insights',
     'instagram_manage_messages',
   ];
+
   override maxConcurrentJob = 400;
+
   editor = 'normal' as const;
+
   dto = InstagramDto;
+
   maxLength() {
     return 2200;
   }
@@ -142,7 +171,8 @@ export class InstagramProvider
     if (body.toLowerCase().indexOf('session has been invalidated') > -1) {
       return {
         type: 'refresh-token' as const,
-        value: 'You session has been invalidated, this can usually happen from frequent posting, please re-authenticate, and wait 1-2 days before posting again',
+        value:
+          'You session has been invalidated, this can usually happen from frequent posting, please re-authenticate, and wait 1-2 days before posting again',
       };
     }
 
@@ -403,8 +433,9 @@ export class InstagramProvider
   }
 
   async generateAuthUrl(clientInformation?: ClientInformation) {
-    const clientId = clientInformation?.client_id || process.env.FACEBOOK_APP_ID;
-    const state = makeId(6);
+    const clientId =
+      clientInformation?.client_id || process.env.FACEBOOK_APP_ID;
+    const state = makeSecureId(6);
     return {
       url:
         `${META_FACEBOOK_OAUTH_URL}/dialog/oauth` +
@@ -414,18 +445,23 @@ export class InstagramProvider
         )}` +
         `&state=${state}` +
         `&scope=${encodeURIComponent(this.scopes.join(','))}`,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
 
-  async authenticate(params: {
-    code: string;
-    codeVerifier: string;
-    refresh: string;
-  }, clientInformation?: ClientInformation) {
-    const clientId = clientInformation?.client_id || process.env.FACEBOOK_APP_ID;
-    const clientSecret = clientInformation?.client_secret || process.env.FACEBOOK_APP_SECRET;
+  async authenticate(
+    params: {
+      code: string;
+      codeVerifier: string;
+      refresh: string;
+    },
+    clientInformation?: ClientInformation
+  ) {
+    const clientId =
+      clientInformation?.client_id || process.env.FACEBOOK_APP_ID;
+    const clientSecret =
+      clientInformation?.client_secret || process.env.FACEBOOK_APP_SECRET;
 
     // Log de quais credenciais estao sendo usadas (sem expor secret).
     // Ajuda a diagnosticar falhas de token-exchange por client_id divergente
@@ -456,10 +492,7 @@ export class InstagramProvider
     // Loga a resposta crua do token-exchange. Se vier {error: {...}}, conseguimos
     // ver o motivo exato (rate limit, code expirado, redirect_uri mismatch).
     if (!getAccessToken.access_token) {
-      console.error('[Instagram.authenticate] token exchange retornou erro:', getAccessToken);
-      throw new Error(
-        `Meta token exchange failed: ${JSON.stringify(getAccessToken.error || getAccessToken)}`
-      );
+      throw new Error('Meta token exchange failed');
     }
 
     const longLivedResponse = await (
@@ -473,10 +506,7 @@ export class InstagramProvider
     ).json();
 
     if (!longLivedResponse.access_token) {
-      console.error('[Instagram.authenticate] long-lived token exchange retornou erro:', longLivedResponse);
-      throw new Error(
-        `Meta long-lived token exchange failed: ${JSON.stringify(longLivedResponse.error || longLivedResponse)}`
-      );
+      throw new Error('Meta long-lived token exchange failed');
     }
     const { access_token, expires_in, ...all } = longLivedResponse;
 
@@ -487,9 +517,10 @@ export class InstagramProvider
     ).json();
 
     if (!permsResponse.data) {
-      console.error('[Instagram.authenticate] /me/permissions retornou erro:', permsResponse);
       throw new Error(
-        `Meta /me/permissions failed: ${JSON.stringify(permsResponse.error || permsResponse)}`
+        `Meta /me/permissions failed: ${JSON.stringify(
+          permsResponse.error || permsResponse
+        )}`
       );
     }
     const { data } = permsResponse;
@@ -549,7 +580,10 @@ export class InstagramProvider
         `${META_FACEBOOK_GRAPH_URL}/me/accounts?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
       );
     } catch (err) {
-      console.warn('[Instagram.pages] /me/accounts failed:', (err as Error)?.message);
+      console.warn(
+        '[Instagram.pages] /me/accounts failed:',
+        (err as Error)?.message
+      );
     }
 
     // Also fetch pages via Business Manager API to discover pages not selected
@@ -560,8 +594,9 @@ export class InstagramProvider
     // de 90s + timeouts individuais garantem que nunca pendura indefinido.
     if (!budgetExceeded()) {
       try {
-        let bizUrl: string | undefined =
-          `${META_FACEBOOK_GRAPH_URL}/me/businesses?access_token=${accessToken}`;
+        let bizUrl:
+          | string
+          | undefined = `${META_FACEBOOK_GRAPH_URL}/me/businesses?access_token=${accessToken}`;
 
         while (bizUrl && !budgetExceeded()) {
           const bizResponse = await (await fetchWithTimeout(bizUrl)).json();
@@ -657,205 +692,63 @@ export class InstagramProvider
 
   async post(
     id: string,
-    accessToken: string,
+    token: string,
     postDetails: PostDetails<InstagramDto>[],
     integration: Integration,
     type = 'graph.facebook.com'
   ): Promise<PostResponse[]> {
     const [firstPost] = postDetails;
-    console.log('in progress', id);
-    const isStory = firstPost.settings.post_type === 'story';
-    const isTrialReel = this.assetBoolean(firstPost.settings.is_trial_reel);
-    const medias = await Promise.all(
-      firstPost?.media?.map(async (m) => {
-        const caption =
-          firstPost.media?.length === 1
-            ? `&caption=${encodeURIComponent(firstPost.message)}`
-            : ``;
-        const isCarousel =
-          (firstPost?.media?.length || 0) > 1 && !isStory
-            ? `&is_carousel_item=true`
-            : ``;
-        const isReel =
-          m.path.indexOf('.mp4') > -1 &&
-          firstPost?.media?.length === 1 &&
-          !isStory;
-
-        const mediaType =
-          m.path.indexOf('.mp4') > -1
-            ? firstPost?.media?.length === 1
-              ? isStory
-                ? `video_url=${m.path}&media_type=STORIES`
-                : `video_url=${m.path}&media_type=REELS&thumb_offset=${
-                    m?.thumbnailTimestamp || 0
-                  }`
-              : isStory
-              ? `video_url=${m.path}&media_type=STORIES`
-              : `video_url=${m.path}&media_type=VIDEO&thumb_offset=${
-                  m?.thumbnailTimestamp || 0
-                }`
-            : isStory
-            ? `image_url=${m.path}&media_type=STORIES`
-            : `image_url=${m.path}`;
-
-        const trialParams = isTrialReel
-          ? `&trial_params=${encodeURIComponent(
-              JSON.stringify({
-                graduation_strategy:
-                  firstPost.settings.graduation_strategy || 'MANUAL',
-              })
-            )}`
-          : ``;
-
-        const collaborators =
-          firstPost?.settings?.collaborators?.length && !isStory
-            ? `&collaborators=${JSON.stringify(
-                firstPost?.settings?.collaborators.map((p) => p.label)
-              )}`
-            : ``;
-
-        const coverUrl =
-          isReel && firstPost?.settings?.cover?.path
-            ? `&cover_url=${encodeURIComponent(firstPost.settings.cover.path)}`
-            : ``;
-
-        const { id: photoId } = await (
-          await this.fetch(
-            `${metaGraphUrl(type)}/${id}/media?${mediaType}${isCarousel}${collaborators}${trialParams}${coverUrl}&access_token=${accessToken}${caption}`,
-            {
-              method: 'POST',
-            }
-          )
-        ).json();
-        console.log('in progress2', id);
-
-        let status = 'IN_PROGRESS';
-        while (status === 'IN_PROGRESS') {
-          const { status_code } = await (
-            await this.fetch(
-              `${metaGraphUrl(type)}/${photoId}?access_token=${accessToken}&fields=status_code`,
-              undefined,
-              '',
-              0,
-              true
-            )
-          ).json();
-          await timer(30000);
-          status = status_code;
-        }
-        console.log('in progress3', id);
-
-        return photoId;
-      }) || []
+    const [response] = await this.postPending(
+      id,
+      token,
+      postDetails,
+      integration,
+      type
     );
 
-    if (isStory && medias.length > 1) {
-      // Stories don't support carousels - publish each media as a separate story
-      let lastMediaId = '';
-      let lastPermalink = '';
-      for (const mediaCreationId of medias) {
-        const { id: mediaId } = await (
-          await this.fetch(
-            `${metaGraphUrl(type)}/${id}/media_publish?creation_id=${mediaCreationId}&access_token=${accessToken}&field=id`,
-            {
-              method: 'POST',
-            }
-          )
-        ).json();
-        lastMediaId = mediaId;
+    let pendingData = response.pendingData;
+    const started = Date.now();
 
-        const { permalink } = await (
-          await this.fetch(
-            `${metaGraphUrl(type)}/${mediaId}?fields=permalink&access_token=${accessToken}`
-          )
-        ).json();
-        lastPermalink = permalink;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Cap below the 10-minute activity timeout of the old workflows using
+      // this method: failing here (non-retryable) is safe, timing the
+      // activity out is not - a retried activity would publish again.
+      if (Date.now() - started > 8 * 60 * 1000) {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          '{}',
+          'Media processing timed out'
+        );
       }
 
-      return [
-        {
-          id: firstPost.id,
-          postId: lastMediaId,
-          releaseURL: lastPermalink,
-          status: 'success',
-        },
-      ];
-    } else if (medias.length === 1) {
-      const { id: mediaId } = await (
-        await this.fetch(
-          `${metaGraphUrl(type)}/${id}/media_publish?creation_id=${medias[0]}&access_token=${accessToken}&field=id`,
-          {
-            method: 'POST',
-          }
-        )
-      ).json();
+      const check = await this.checkPostStatus(token, pendingData, integration);
 
-      const { permalink } = await (
-        await this.fetch(
-          `${metaGraphUrl(type)}/${mediaId}?fields=permalink&access_token=${accessToken}`
-        )
-      ).json();
-
-      return [
-        {
-          id: firstPost.id,
-          postId: mediaId,
-          releaseURL: permalink,
-          status: 'success',
-        },
-      ];
-    } else {
-      const { id: containerId, ...all3 } = await (
-        await this.fetch(
-          `${metaGraphUrl(type)}/${id}/media?caption=${encodeURIComponent(
-            firstPost?.message
-          )}&media_type=CAROUSEL&children=${encodeURIComponent(
-            medias.join(',')
-          )}&access_token=${accessToken}`,
-          {
-            method: 'POST',
-          }
-        )
-      ).json();
-
-      let status = 'IN_PROGRESS';
-      while (status === 'IN_PROGRESS') {
-        const { status_code } = await (
-          await this.fetch(
-            `${metaGraphUrl(type)}/${containerId}?fields=status_code&access_token=${accessToken}`,
-            undefined,
-            '',
-            0,
-            true
-          )
-        ).json();
+      if (check.status === 'pending') {
+        pendingData = check.pendingData;
         await timer(30000);
-        status = status_code;
+        continue;
       }
 
-      const { id: mediaId, ...all4 } = await (
-        await this.fetch(
-          `${metaGraphUrl(type)}/${id}/media_publish?creation_id=${containerId}&access_token=${accessToken}&field=id`,
+      const result =
+        check.status === 'ready'
+          ? await this.finalizePost(token, check.pendingData, integration)
+          : check;
+
+      if (result.status === 'completed') {
+        return [
           {
-            method: 'POST',
-          }
-        )
-      ).json();
+            id: firstPost.id,
+            postId: result.postId,
+            releaseURL: result.releaseURL,
+            status: 'success',
+          },
+        ];
+      }
 
-      const { permalink } = await (
-        await this.fetch(
-          `${metaGraphUrl(type)}/${mediaId}?fields=permalink&access_token=${accessToken}`
-        )
-      ).json();
-
-      return [
-        {
-          id: firstPost.id,
-          postId: mediaId,
-          releaseURL: permalink,
-          status: 'success',
-        },
-      ];
+      pendingData = result.pendingData;
+      await timer(30000);
     }
   }
 
@@ -863,16 +756,17 @@ export class InstagramProvider
     id: string,
     postId: string,
     lastCommentId: string | undefined,
-    accessToken: string,
+    token: string,
     postDetails: PostDetails<InstagramDto>[],
     integration: Integration,
     type = 'graph.facebook.com'
   ): Promise<PostResponse[]> {
+    const [accessToken, userToken] = token.split('___');
     const [commentPost] = postDetails;
 
     const { id: commentId } = await (
       await this.fetch(
-        `${metaGraphUrl(type)}/${postId}/comments?message=${encodeURIComponent(
+        `https://${type}/${META_GRAPH_API_VERSION}/${postId}/comments?message=${encodeURIComponent(
           commentPost.message
         )}&access_token=${accessToken}`,
         {
@@ -884,7 +778,9 @@ export class InstagramProvider
     // Get the permalink from the parent post
     const { permalink } = await (
       await this.fetch(
-        `${metaGraphUrl(type)}/${postId}?fields=permalink&access_token=${accessToken}`
+        `https://${type}/${META_GRAPH_API_VERSION}/${postId}?fields=permalink&access_token=${
+          userToken || accessToken
+        }`
       )
     ).json();
 
@@ -952,13 +848,17 @@ export class InstagramProvider
 
     const { data, ...all } = await (
       await this.analyticsFetch(
-        `${metaGraphUrl(type)}/${id}/insights?metric=follower_count,reach&access_token=${accessToken}&period=day&since=${since}&until=${until}`
+        `${metaGraphUrl(
+          type
+        )}/${id}/insights?metric=follower_count,reach&access_token=${accessToken}&period=day&since=${since}&until=${until}`
       )
     ).json();
 
     const { data: data2, ...all2 } = await (
       await this.analyticsFetch(
-        `${metaGraphUrl(type)}/${id}/insights?metric_type=total_value&metric=likes,views,comments,shares,saves,replies&access_token=${accessToken}&period=day&since=${since}&until=${until}`
+        `${metaGraphUrl(
+          type
+        )}/${id}/insights?metric_type=total_value&metric=likes,views,comments,shares,saves,replies&access_token=${accessToken}&period=day&since=${since}&until=${until}`
       )
     ).json();
     const analytics = [];
@@ -992,7 +892,7 @@ export class InstagramProvider
 
   music(accessToken: string, data: { q: string }) {
     return this.fetch(
-      `${META_FACEBOOK_GRAPH_URL}/music/search?q=${encodeURIComponent(
+      `https://graph.facebook.com/${META_GRAPH_API_VERSION}/music/search?q=${encodeURIComponent(
         data.q
       )}&access_token=${accessToken}`
     );
@@ -1012,7 +912,9 @@ export class InstagramProvider
       // Fetch media insights from Instagram Graph API
       const { data } = await (
         await this.analyticsFetch(
-          `${metaGraphUrl(type)}/${postId}/insights?metric=views,reach,saved,likes,comments,shares&access_token=${accessToken}`
+          `${metaGraphUrl(
+            type
+          )}/${postId}/insights?metric=views,reach,saved,likes,comments,shares&access_token=${accessToken}`
         )
       ).json();
 
@@ -1077,75 +979,63 @@ export class InstagramProvider
     message: string,
     type = 'graph.facebook.com'
   ): Promise<{ recipientId: string; messageId: string }> {
-    // Instagram Login API (graph.instagram.com + IG User Token) uses /me/messages
-    // directly — the IG User Token already scopes to the IG business account,
-    // no Page ID resolution needed. Facebook Login (graph.facebook.com + Page
-    // Access Token) needs the Page ID from /me.
-    const url = type === 'graph.instagram.com'
-      ? `${metaGraphUrl(type)}/me/messages?access_token=${accessToken}`
-      : await this.resolvePageMessagesUrl(accessToken, type);
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const url =
+      type === 'graph.instagram.com'
+        ? this.commentMutationUrl(type, 'me/messages')
+        : await this.resolvePageMessagesUrl(accessToken, type);
+    const result = await this.sendCommentMutation(
+      url,
+      accessToken,
+      {
         recipient: { id: igScopedUserId },
         message: { text: message },
-      }),
-    });
-
-    const body = await response.json();
-    if (!response.ok || body.error) {
-      const errMsg =
-        body?.error?.message || JSON.stringify(body?.error || body);
-      throw new Error(`Instagram DM failed (${response.status}): ${errMsg}`);
-    }
-
-    return {
-      recipientId: body.recipient_id,
-      messageId: body.message_id,
-    };
+      },
+      'message_id'
+    );
+    return { recipientId: result.recipient_id, messageId: result.message_id };
   }
 
   private async resolvePageMessagesUrl(
     accessToken: string,
     type = 'graph.facebook.com'
   ): Promise<string> {
-    const meRes = await fetch(
-      `${metaGraphUrl(type)}/me?access_token=${accessToken}`
-    );
-    const meBody = await meRes.json();
-    if (!meRes.ok || meBody.error) {
-      throw new Error(
-        `Failed to resolve Facebook Page ID: ${meBody?.error?.message || JSON.stringify(meBody)}`
+    try {
+      const response = await ssrfSafeFetch(
+        this.commentMutationUrl(type, 'me'),
+        {
+          headers: { Authorization: 'Bearer ' + accessToken.split('___')[0] },
+          signal: AbortSignal.timeout(25000),
+          redirect: 'error',
+        }
       );
+      const body = await response.json();
+      if (
+        !response.ok ||
+        typeof body.id !== 'string' ||
+        !body.id ||
+        body.error
+      ) {
+        throw new CommentAutomationDeliveryError('rejected');
+      }
+      return this.commentMutationUrl(
+        type,
+        encodeURIComponent(body.id) + '/messages'
+      );
+    } catch {
+      // No mutation was attempted when resolving the account failed.
+      throw new CommentAutomationDeliveryError('rejected');
     }
-    return `${metaGraphUrl(type)}/${meBody.id}/messages?access_token=${accessToken}`;
   }
 
-  // Send a private reply (DM) to someone who commented on your post.
-  // This is the Meta "private_replies" API — the ONLY supported way to DM
-  // a commenter without them having messaged you first. Valid for 7 days
-  // after the comment was created.
-  // Ref: https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/private-replies
   async sendPrivateReply(
     accessToken: string,
-    _igAccountId: string,
+    igAccountId: string,
     commentId: string,
     message: string,
     button?: InstagramDmButton,
     type = 'graph.facebook.com'
   ): Promise<{ recipientId: string; messageId: string }> {
-    // Instagram Login API (graph.instagram.com + IG User Token) hits /me/messages.
-    // Facebook Login (graph.facebook.com + Page Access Token) needs the Page ID.
-    // Must be sent within 7 days of the comment in both flows.
-    const url = type === 'graph.instagram.com'
-      ? `${metaGraphUrl(type)}/me/messages?access_token=${accessToken}`
-      : await this.resolvePageMessagesUrl(accessToken, type);
-
-    // When a CTA is provided, send as a button template (same schema as
-    // regular DMs). Text <= 640 chars, title <= 20 chars.
-    const messagePayload = button
+    const payload = button
       ? {
           attachment: {
             type: 'template',
@@ -1157,63 +1047,33 @@ export class InstagramProvider
           },
         }
       : { text: message };
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recipient: { comment_id: commentId },
-        message: messagePayload,
-      }),
-    });
-
-    const body = await response.json();
-    if (!response.ok || body.error) {
-      const errMsg =
-        body?.error?.message || JSON.stringify(body?.error || body);
-      throw new Error(
-        `Instagram private reply failed (${response.status}): ${errMsg}`
-      );
-    }
-
-    return {
-      recipientId: body.recipient_id,
-      messageId: body.message_id,
-    };
+    const result = await this.sendCommentMutation(
+      this.commentMutationUrl(
+        type,
+        encodeURIComponent(igAccountId) + '/messages'
+      ),
+      accessToken,
+      { recipient: { comment_id: commentId }, message: payload },
+      'message_id'
+    );
+    return { recipientId: result.recipient_id, messageId: result.message_id };
   }
 
-  // Reply to an existing IG comment (threaded reply).
-  // Ref: https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-comment/replies
   async replyToComment(
-    accessToken: string,
+    token: string,
     commentId: string,
     message: string,
+    integration: Integration | string,
     type = 'graph.facebook.com'
   ): Promise<{ id: string }> {
-    // Both flows support threaded replies at /{comment-id}/replies — route
-    // depends on which token the integration holds (Page Access vs IG User).
-    const url = `${metaGraphUrl(type)}/${commentId}/replies?access_token=${accessToken}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
-    });
-    const body = await response.json();
-    if (!response.ok || body.error) {
-      const err = body?.error || {};
-      const parts = [
-        err.message ? `msg=${err.message}` : null,
-        err.code != null ? `code=${err.code}` : null,
-        err.error_subcode != null ? `subcode=${err.error_subcode}` : null,
-        err.type ? `type=${err.type}` : null,
-        err.fbtrace_id ? `trace=${err.fbtrace_id}` : null,
-      ].filter(Boolean);
-      const detail = parts.length ? parts.join(' ') : JSON.stringify(body);
-      throw new Error(
-        `Instagram comment reply failed (${response.status}) [host=${type} commentId=${commentId}]: ${detail}`
-      );
-    }
-    return { id: body.id };
+    const host = typeof integration === 'string' ? integration : type;
+    const result = await this.sendCommentMutation(
+      this.commentMutationUrl(host, encodeURIComponent(commentId) + '/replies'),
+      token,
+      { message },
+      'id'
+    );
+    return { id: result.id };
   }
 
   async subscribeToWebhooks(
@@ -1224,14 +1084,18 @@ export class InstagramProvider
     // For Instagram webhooks (comments, messages), subscribe the IG Business
     // account directly with instagram-specific fields.
     const response = await this.fetch(
-      `${metaGraphUrl(type)}/${igAccountId}/subscribed_apps?subscribed_fields=comments,messages&access_token=${pageAccessToken}`,
+      `${metaGraphUrl(
+        type
+      )}/${igAccountId}/subscribed_apps?subscribed_fields=comments,messages&access_token=${pageAccessToken}`,
       { method: 'POST' }
     );
 
     const body = await response.json();
     if (body.error) {
       throw new Error(
-        `Webhook subscription failed: ${body.error.message || JSON.stringify(body.error)}`
+        `Webhook subscription failed: ${
+          body.error.message || JSON.stringify(body.error)
+        }`
       );
     }
 
@@ -1248,12 +1112,16 @@ export class InstagramProvider
     // model the subscription is configured in the Dashboard — this endpoint
     // reflects that state.
     const response = await this.fetch(
-      `${metaGraphUrl(type)}/${igAccountId}/subscribed_apps?access_token=${pageAccessToken}`
+      `${metaGraphUrl(
+        type
+      )}/${igAccountId}/subscribed_apps?access_token=${pageAccessToken}`
     );
     const body = await response.json();
     if (body.error) {
       throw new Error(
-        `Webhook check failed: ${body.error.message || JSON.stringify(body.error)}`
+        `Webhook check failed: ${
+          body.error.message || JSON.stringify(body.error)
+        }`
       );
     }
     const apps: Array<{ subscribed_fields?: string[] }> = Array.isArray(
@@ -1321,17 +1189,16 @@ export class InstagramProvider
 
     const tryFetch = async (fields: string) => {
       const response = await fetch(
-        `${metaGraphUrl(type)}/${mediaId}?fields=${fields}&access_token=${accessToken}`
+        `${metaGraphUrl(
+          type
+        )}/${mediaId}?fields=${fields}&access_token=${accessToken}`
       );
       const body = await response.json();
       return { response, body };
     };
 
     let { response, body } = await tryFetch(initialFields);
-    if (
-      supportsBoostField &&
-      (!response.ok || body?.error)
-    ) {
+    if (supportsBoostField && (!response.ok || body?.error)) {
       const message: string = body?.error?.message ?? '';
       const isNonexistingField =
         /nonexisting field/i.test(message) &&
@@ -1386,7 +1253,9 @@ export class InstagramProvider
       'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp';
     const cursor = after ? `&after=${after}` : '';
     const response = await fetch(
-      `${metaGraphUrl(type)}/${igAccountId}/media?fields=${fields}&limit=${limit}&access_token=${accessToken}${cursor}`
+      `${metaGraphUrl(
+        type
+      )}/${igAccountId}/media?fields=${fields}&limit=${limit}&access_token=${accessToken}${cursor}`
     );
     const body = await response.json();
     if (!response.ok || !body.data) {
@@ -1425,7 +1294,9 @@ export class InstagramProvider
     const fields =
       'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp';
     const response = await fetch(
-      `${metaGraphUrl(type)}/${igAccountId}/stories?fields=${fields}&access_token=${accessToken}`
+      `${metaGraphUrl(
+        type
+      )}/${igAccountId}/stories?fields=${fields}&access_token=${accessToken}`
     );
     const body = await response.json();
     if (!response.ok || !body.data) {
@@ -1442,5 +1313,677 @@ export class InstagramProvider
         timestamp: m.timestamp,
       })),
     };
+  }
+
+  canImportPublishedPost(settings: Record<string, unknown>) {
+    return settings.post_type !== 'story';
+  }
+
+  reportMetrics: ReportMetricsMap = instagramReportMetrics;
+
+  async listPublishedPosts(
+    id: string,
+    token: string,
+    cursor?: string,
+    host = 'graph.facebook.com'
+  ): Promise<PublishedPostsPage> {
+    const [pageToken, userToken] = token.split('___');
+    const fields =
+      'id,caption,timestamp,permalink,media_type,media_url,thumbnail_url,children{id,media_type,media_url,thumbnail_url}';
+    const params = new URLSearchParams({
+      fields,
+      limit: '50',
+      access_token: userToken || pageToken,
+      ...(cursor ? { after: cursor } : {}),
+    });
+    const data = await (
+      await this.fetch(
+        `https://${host}/${META_GRAPH_API_VERSION}/${id}/media?${params}`,
+        { signal: AbortSignal.timeout(60000) }
+      )
+    ).json();
+    if (!Array.isArray(data.data)) {
+      throw new Error('The provider did not return a valid media page');
+    }
+    const posts = [];
+    for (const item of data.data) {
+      let media =
+        item.media_type === 'CAROUSEL_ALBUM' ? item.children?.data : [item];
+      // Expanded edges can themselves be paginated; never silently truncate an album.
+      if (
+        item.media_type === 'CAROUSEL_ALBUM' &&
+        (!media || item.children?.paging?.next)
+      ) {
+        media = [];
+        let after: string | undefined;
+        do {
+          const childParams = new URLSearchParams({
+            fields: 'id,media_type,media_url,thumbnail_url',
+            limit: '100',
+            access_token: userToken || pageToken,
+            ...(after ? { after } : {}),
+          });
+          const children = await (
+            await this.fetch(
+              `https://${host}/${META_GRAPH_API_VERSION}/${item.id}/children?${childParams}`,
+              { signal: AbortSignal.timeout(60000) }
+            )
+          ).json();
+          if (!Array.isArray(children.data))
+            throw new Error('Invalid carousel media page');
+          media.push(...children.data);
+          const next = children.paging?.next
+            ? children.paging?.cursors?.after
+            : undefined;
+          if (children.paging?.next && (!next || next === after))
+            throw new Error('Invalid carousel cursor');
+          after = next;
+        } while (after);
+      }
+      if (
+        !item.id ||
+        !item.timestamp ||
+        !item.permalink ||
+        !Number.isFinite(Date.parse(item.timestamp))
+      ) {
+        throw new Error(
+          'The provider returned a media item without its identity or publication date'
+        );
+      }
+      posts.push({
+        id: String(item.id),
+        content: item.caption || '',
+        publishedAt: item.timestamp,
+        url: item.permalink,
+        media: (media || [])
+          .filter((m: any) => m.media_url)
+          .map((m: any) => ({
+            id: String(m.id),
+            path: m.media_url,
+            ...(m.thumbnail_url ? { thumbnail: m.thumbnail_url } : {}),
+          })),
+      });
+    }
+    const nextCursor = data.paging?.next
+      ? data.paging?.cursors?.after
+      : undefined;
+    if (data.paging?.next && (!nextCursor || nextCursor === cursor))
+      throw new Error('Invalid media cursor');
+    return { posts, nextCursor };
+  }
+
+  override async checkValidity(
+    [firstPost]: Array<ValidityMedia[]>,
+    settings: any
+  ): Promise<string | true> {
+    if (!firstPost?.length) {
+      return 'Should have at least one media';
+    }
+    if (firstPost.length > 10) {
+      return 'Instagram carousel only supports up to 10 media attachments';
+    }
+    if (this.assetBoolean(settings?.is_trial_reel)) {
+      if ((firstPost?.length ?? 0) > 1) {
+        return 'Trial Reels can only have one video';
+      }
+      const hasVideo = firstPost?.some(
+        (f) => (f?.path?.indexOf?.('mp4') ?? -1) > -1
+      );
+      if (!hasVideo) {
+        return 'Trial Reels must be a video';
+      }
+    }
+    if (settings?.audio?.id) {
+      if (settings?.post_type === 'story') {
+        return 'Audio can only be added to Reels, not to Stories';
+      }
+      if ((firstPost?.length ?? 0) > 1) {
+        return 'Audio can only be added to a single video Reel';
+      }
+      const hasVideo = firstPost?.some(
+        (f) => (f?.path?.indexOf?.('mp4') ?? -1) > -1
+      );
+      if (!hasVideo) {
+        return 'Audio can only be added to a video Reel';
+      }
+    }
+    return true;
+  }
+
+  private stripHandle(handle: string) {
+    return handle.replace(/^@+/, '');
+  }
+
+  private async igContainerStatus(
+    containerId: string,
+    checkToken: string,
+    type: string
+  ): Promise<string> {
+    const { status_code, status } = await (
+      await this.fetch(
+        `https://${type}/${META_GRAPH_API_VERSION}/${containerId}?access_token=${checkToken}&fields=status_code,status`,
+        undefined,
+        '',
+        0,
+        true
+      )
+    ).json();
+
+    if (status_code === 'ERROR' || status_code === 'EXPIRED') {
+      const handleError: ReturnType<SocialAbstract['handleErrors']> =
+        this.handleErrors(status || '', 200);
+      if (handleError?.type === 'disconnect') {
+        throw new Disconnect(
+          this.identifier,
+          JSON.stringify({ status_code, status }),
+          '{}',
+          handleError?.value
+        );
+      }
+      throw new BadBody(
+        this.identifier,
+        JSON.stringify({ status_code, status }),
+        '{}',
+        handleError?.value ||
+          (status !== status_code && status) ||
+          'Instagram could not process the media'
+      );
+    }
+
+    return status_code;
+  }
+
+  private async igPermalink(
+    mediaId: string,
+    checkToken: string,
+    type: string,
+    integration: Integration
+  ): Promise<string> {
+    try {
+      const { permalink } = await (
+        await this.fetch(
+          `https://${type}/${META_GRAPH_API_VERSION}/${mediaId}?fields=permalink&access_token=${checkToken}`
+        )
+      ).json();
+      return permalink;
+    } catch (err) {
+      return `https://www.instagram.com/${integration.profile}`;
+    }
+  }
+
+  async postPending(
+    id: string,
+    token: string,
+    postDetails: PostDetails<InstagramDto>[],
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<PostResponse[]> {
+    const [accessToken] = token.split('___');
+    const [firstPost] = postDetails;
+    const isStory = firstPost.settings.post_type === 'story';
+    const collaborators =
+      firstPost?.settings?.collaborators?.length && !isStory
+        ? `&collaborators=${encodeURIComponent(
+            JSON.stringify(
+              firstPost?.settings?.collaborators.map((p) =>
+                this.stripHandle(p.label)
+              )
+            )
+          )}`
+        : ``;
+    const isTrialReel = this.assetBoolean(firstPost.settings.is_trial_reel);
+    const medias = await Promise.all(
+      firstPost?.media?.map(async (m) => {
+        const caption =
+          firstPost.media?.length === 1
+            ? `&caption=${encodeURIComponent(firstPost.message)}`
+            : ``;
+        const isCarousel =
+          (firstPost?.media?.length || 0) > 1 && !isStory
+            ? `&is_carousel_item=true`
+            : ``;
+        const mediaType = hasExtension(m.path, 'mp4')
+          ? firstPost?.media?.length === 1
+            ? isStory
+              ? `video_url=${m.path}&media_type=STORIES`
+              : firstPost.settings.cover?.path || m?.thumbnail
+              ? `video_url=${
+                  m.path
+                }&media_type=REELS&cover_url=${encodeURIComponent(
+                  firstPost.settings.cover?.path || m.thumbnail
+                )}`
+              : `video_url=${m.path}&media_type=REELS&thumb_offset=${
+                  m?.thumbnailTimestamp || 0
+                }`
+            : isStory
+            ? `video_url=${m.path}&media_type=STORIES`
+            : `video_url=${m.path}&media_type=VIDEO&thumb_offset=${
+                m?.thumbnailTimestamp || 0
+              }`
+          : isStory
+          ? `image_url=${m.path}&media_type=STORIES`
+          : `image_url=${m.path}`;
+
+        const trialParams = isTrialReel
+          ? `&trial_params=${encodeURIComponent(
+              JSON.stringify({
+                graduation_strategy:
+                  firstPost.settings.graduation_strategy || 'MANUAL',
+              })
+            )}`
+          : ``;
+
+        // collaborators are not allowed on carousel child items,
+        // they go on the carousel container instead
+        const itemCollaborators =
+          firstPost?.media?.length === 1 ? collaborators : ``;
+
+        // audio_configuration is only supported for Reels (single video, not a story)
+        // and only with Facebook Login (not Instagram Login / graph.instagram.com)
+        const audioConfiguration =
+          firstPost?.settings?.audio?.id &&
+          type === 'graph.facebook.com' &&
+          !isStory &&
+          firstPost?.media?.length === 1 &&
+          hasExtension(m.path, 'mp4')
+            ? `&audio_configuration=${encodeURIComponent(
+                JSON.stringify({
+                  audio_id: firstPost.settings.audio.id,
+                  ...(typeof firstPost.settings.audio.audio_volume !==
+                  'undefined'
+                    ? { audio_volume: +firstPost.settings.audio.audio_volume }
+                    : {}),
+                  ...(typeof firstPost.settings.audio.video_volume !==
+                  'undefined'
+                    ? { video_volume: +firstPost.settings.audio.video_volume }
+                    : {}),
+                })
+              )}`
+            : ``;
+
+        const { id: photoId } = await (
+          await this.fetch(
+            `https://${type}/${META_GRAPH_API_VERSION}/${id}/media?${mediaType}${isCarousel}${itemCollaborators}${trialParams}${audioConfiguration}&access_token=${accessToken}${caption}`,
+            {
+              method: 'POST',
+            }
+          )
+        ).json();
+
+        return photoId;
+      }) || []
+    );
+
+    // Containers are invisible until media_publish runs: the processing wait
+    // and the publish itself move to checkPostStatus / finalizePost so a
+    // failure there can never re-create (and re-publish) the whole post.
+    return [
+      {
+        id: firstPost.id,
+        postId: '',
+        releaseURL: '',
+        status: 'pending',
+        pendingData: {
+          type,
+          postType:
+            isStory && medias.length > 1
+              ? 'stories'
+              : medias.length === 1
+              ? 'single'
+              : 'carousel',
+          containers: medias,
+          message: firstPost?.message || '',
+          ...(collaborators
+            ? {
+                collaborators: firstPost.settings.collaborators!.map((p) =>
+                  this.stripHandle(p.label)
+                ),
+              }
+            : {}),
+        },
+      },
+    ];
+  }
+
+  override async checkPostStatus(
+    token: string,
+    pendingData: {
+      type: string;
+      postType: 'stories' | 'single' | 'carousel';
+      containers: string[];
+      message?: string;
+      carouselId?: string;
+      collaborators?: string[];
+    },
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    const [accessToken, userToken] = token.split('___');
+    const checkToken = userToken || accessToken;
+
+    // the carousel container was already created: wait for it
+    if (pendingData.carouselId) {
+      const status = await this.igContainerStatus(
+        pendingData.carouselId,
+        checkToken,
+        pendingData.type
+      );
+
+      if (status === 'IN_PROGRESS') {
+        return { status: 'pending', pendingData };
+      }
+
+      // a previous finalizePost published but died before reporting: the post
+      // is live, never publish again
+      if (status === 'PUBLISHED') {
+        return {
+          status: 'completed',
+          postId: pendingData.carouselId,
+          releaseURL: `https://www.instagram.com/${integration.profile}`,
+        };
+      }
+
+      return { status: 'ready', pendingData };
+    }
+
+    for (const containerId of pendingData.containers) {
+      const status = await this.igContainerStatus(
+        containerId,
+        checkToken,
+        pendingData.type
+      );
+
+      if (status === 'IN_PROGRESS') {
+        return { status: 'pending', pendingData };
+      }
+
+      if (status === 'PUBLISHED') {
+        // a previous finalizePost died mid-way: a single post is fully live,
+        // stories are resumed by finalizePost (it skips published containers)
+        if (pendingData.postType === 'single') {
+          return {
+            status: 'completed',
+            postId: containerId,
+            releaseURL: `https://www.instagram.com/${integration.profile}`,
+          };
+        }
+      }
+    }
+
+    return { status: 'ready', pendingData };
+  }
+
+  override async finalizePost(
+    token: string,
+    pendingData: {
+      type: string;
+      postType: 'stories' | 'single' | 'carousel';
+      containers: string[];
+      message?: string;
+      carouselId?: string;
+      collaborators?: string[];
+    },
+    integration: Integration
+  ): Promise<PendingCheckResponse> {
+    const [accessToken, userToken] = token.split('___');
+    const checkToken = userToken || accessToken;
+    const igId = integration.internalId;
+
+    if (pendingData.postType === 'stories') {
+      // Stories don't support carousels - publish each media as a separate
+      // story, skipping containers a previous (crashed) run already published
+      let lastMediaId = '';
+      for (const mediaCreationId of pendingData.containers) {
+        const status = await this.igContainerStatus(
+          mediaCreationId,
+          checkToken,
+          pendingData.type
+        );
+        if (status === 'PUBLISHED') {
+          continue;
+        }
+
+        const { id: mediaId } = await (
+          await this.fetch(
+            `https://${pendingData.type}/${META_GRAPH_API_VERSION}/${igId}/media_publish?creation_id=${mediaCreationId}&access_token=${accessToken}&field=id`,
+            {
+              method: 'POST',
+            }
+          )
+        ).json();
+        lastMediaId = mediaId;
+      }
+
+      return {
+        status: 'completed',
+        postId: lastMediaId || pendingData.containers.at(-1)!,
+        releaseURL: !lastMediaId
+          ? `https://www.instagram.com/${integration.profile}`
+          : await this.igPermalink(
+              lastMediaId,
+              checkToken,
+              pendingData.type,
+              integration
+            ),
+      };
+    }
+
+    if (pendingData.postType === 'carousel' && !pendingData.carouselId) {
+      // create the carousel container and hand back to the workflow to wait
+      // for it (an orphan container from a crashed run is invisible, so
+      // re-running this is safe)
+      const { id: containerId } = await (
+        await this.fetch(
+          `https://${
+            pendingData.type
+          }/${META_GRAPH_API_VERSION}/${igId}/media?caption=${encodeURIComponent(
+            pendingData.message || ''
+          )}&media_type=CAROUSEL&children=${encodeURIComponent(
+            pendingData.containers.join(',')
+          )}${
+            pendingData.collaborators?.length
+              ? `&collaborators=${encodeURIComponent(
+                  JSON.stringify(pendingData.collaborators)
+                )}`
+              : ``
+          }&access_token=${accessToken}`,
+          {
+            method: 'POST',
+          }
+        )
+      ).json();
+
+      return {
+        status: 'pending',
+        pendingData: { ...pendingData, carouselId: containerId },
+      };
+    }
+
+    const creationId =
+      pendingData.postType === 'carousel'
+        ? pendingData.carouselId
+        : pendingData.containers[0];
+
+    const { id: mediaId } = await (
+      await this.fetch(
+        `https://${pendingData.type}/${META_GRAPH_API_VERSION}/${igId}/media_publish?creation_id=${creationId}&access_token=${accessToken}&field=id`,
+        {
+          method: 'POST',
+        }
+      )
+    ).json();
+
+    return {
+      status: 'completed',
+      postId: mediaId,
+      releaseURL: await this.igPermalink(
+        mediaId,
+        checkToken,
+        pendingData.type,
+        integration
+      ),
+    };
+  }
+
+  async listComments(
+    token: string,
+    postId: string,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<SocialCommentDetails[]> {
+    const [accessToken] = token.split('___');
+
+    const { data } = await (
+      await this.fetch(
+        `https://${type}/${META_GRAPH_API_VERSION}/${postId}/comments?fields=id,text,timestamp,username,parent_id,from{id,username}&limit=50&access_token=${accessToken}`
+      )
+    ).json();
+
+    return (data || []).map((comment: any) => ({
+      id: comment.id,
+      parentId: comment.parent_id,
+      content: comment.text || '',
+      authorName: comment.from?.username || comment.username,
+      authorId: comment.from?.id,
+      publishedAt: comment.timestamp,
+    }));
+  }
+
+  private async accountInsights(
+    id: string,
+    token: string,
+    type: string,
+    since: number,
+    until: number
+  ): Promise<AnalyticsData[]> {
+    const [accessToken, userToken] = token.split('___');
+
+    const { data, ...all } = await (
+      await fetch(
+        `https://${type}/${META_GRAPH_API_VERSION}/${id}/insights?metric=follower_count,reach&access_token=${accessToken}&period=day&since=${since}&until=${until}`
+      )
+    ).json();
+
+    const { data: data2, ...all2 } = await (
+      await fetch(
+        `https://${type}/${META_GRAPH_API_VERSION}/${id}/insights?metric_type=total_value&metric=likes,views,comments,shares,saves,replies&access_token=${accessToken}&period=day&since=${since}&until=${until}`
+      )
+    ).json();
+    const analytics = [];
+
+    analytics.push(
+      ...(data?.map((d: any) => ({
+        label: this.setTitle(d.name),
+        percentageChange: 0,
+        data: d.values.map((v: any) => ({
+          total: v.value,
+          date: dayjs(v.end_time).format('YYYY-MM-DD'),
+        })),
+      })) || [])
+    );
+
+    analytics.push(
+      ...data2.map((d: any) => ({
+        label: this.setTitle(d.name),
+        percentageChange: 0,
+        data: [
+          {
+            total: d.total_value.value,
+            date: dayjs().format('YYYY-MM-DD'),
+          },
+        ],
+      }))
+    );
+
+    return analytics;
+  }
+
+  @Tool({
+    description:
+      'Search audio (music or original sounds) to attach to a Reel via the "audio" setting, an empty query returns trending audio',
+    dataSchema: [
+      {
+        key: 'q',
+        type: 'string',
+        description: 'Search query, leave empty for trending audio',
+      },
+      {
+        key: 'type',
+        type: 'string',
+        description: 'Either "music" or "original_sound", defaults to "music"',
+      },
+    ],
+  })
+  async audioSearch(
+    token: string,
+    data: { q?: string; type?: 'music' | 'original_sound' },
+    internalId?: string
+  ) {
+    const [accessToken, userToken] = token.split('___');
+    const audioType =
+      data?.type === 'original_sound' ? 'original_sound' : 'music';
+
+    const { audio } = await (
+      await this.fetch(
+        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/ig_audio?audio_type=${audioType}&user_id=${internalId}${
+          data?.q ? `&search_query=${encodeURIComponent(data.q)}` : ''
+        }&access_token=${userToken || accessToken}`
+      )
+    ).json();
+
+    return (audio || []).map((audio: any) => ({
+      id: audio.audio_id,
+      title: audio.title || '',
+      artist: audio.display_artist || audio.ig_username || '',
+      image:
+        audio.cover_artwork_thumbnail_uri ||
+        audio.cover_artwork_thumbnail_url ||
+        audio.profile_picture_url ||
+        '',
+      duration: audio.duration_in_ms || 0,
+      previewUrl: audio.download_url || '',
+    }));
+  }
+
+  private commentMutationUrl(host: string, path: string): string {
+    if (!['graph.facebook.com', 'graph.instagram.com'].includes(host)) {
+      throw new CommentAutomationDeliveryError('rejected');
+    }
+    return metaGraphUrl(host) + '/' + path;
+  }
+
+  private async sendCommentMutation(
+    url: string,
+    token: string,
+    payload: Record<string, unknown>,
+    idField: 'id' | 'message_id'
+  ): Promise<Record<string, string>> {
+    try {
+      // Meta has no idempotency key: a timeout or malformed success must never be retried.
+      const response = await ssrfSafeFetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + token.split('___')[0],
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(25000),
+        redirect: 'error',
+      });
+      const body = await response.json().catch(() => undefined);
+      if (!response.ok || body?.error) {
+        throw new CommentAutomationDeliveryError(
+          response.status >= 400 && response.status < 500 && body?.error
+            ? 'rejected'
+            : 'unknown'
+        );
+      }
+      if (typeof body?.[idField] !== 'string' || !body[idField]) {
+        throw new CommentAutomationDeliveryError('unknown');
+      }
+      return body;
+    } catch (error) {
+      if (error instanceof CommentAutomationDeliveryError) throw error;
+      throw new CommentAutomationDeliveryError('unknown');
+    }
   }
 }

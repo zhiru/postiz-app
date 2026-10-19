@@ -6,6 +6,7 @@ import { NodeMailerProvider } from '@gitroom/nestjs-libraries/emails/node.mailer
 import { TemporalService } from 'nestjs-temporal-core';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { emailT } from '@gitroom/nestjs-libraries/emails/i18n/email.i18n';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class EmailService {
@@ -43,15 +44,16 @@ export class EmailService {
     replyTo?: string,
     lang?: string
   ) {
+    if (!to || !subject) {
+      return;
+    }
+
     return this._temporalService.client
       .getRawClient()
-      ?.workflow.signalWithStart('sendEmailWorkflow', {
+      ?.workflow.start('sendSingleEmailWorkflowV2', {
         taskQueue: 'main',
-        workflowId: 'send_email',
-        signal: 'sendEmail',
-        args: [{ queue: [] }],
-        signalArgs: [{ to, subject, html, replyTo, addTo, lang }],
-        workflowIdConflictPolicy: 'USE_EXISTING',
+        workflowId: `send_email_${randomUUID()}`,
+        args: [{ to, subject, html, replyTo, addTo, lang }],
       });
   }
 

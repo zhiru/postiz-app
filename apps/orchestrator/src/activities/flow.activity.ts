@@ -1,3 +1,4 @@
+import { AutomationDeliveryService } from '@gitroom/nestjs-libraries/database/prisma/flows/automation-delivery.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Activity, ActivityMethod } from 'nestjs-temporal-core';
 import { FlowsService } from '@gitroom/nestjs-libraries/database/prisma/flows/flows.service';
@@ -28,7 +29,8 @@ export class FlowActivity {
     private _integrationManager: IntegrationManager,
     private _instagramMessagingService: InstagramMessagingService,
     private _unmatchedCommentService: UnmatchedCommentService,
-    private _encryption: EncryptionService
+    private _encryption: EncryptionService,
+    private _deliveries: AutomationDeliveryService
   ) {}
 
   // Descriptografa integration.token in-place (B1). No-op em tokens sem prefixo
@@ -64,8 +66,14 @@ export class FlowActivity {
     orgId: string,
     commentId: string,
     mediaId: string,
-    message: string
+    message: string,
+    flowId?: string,
+    actionId?: string
   ) {
+    if (!actionId)
+      throw new Error('A stable automation action identity is required');
+    if (!flowId) throw new Error('Automation identity required');
+    await this.requireActiveFlow(flowId);
     const integration = await this._integrationService.getIntegrationById(
       orgId,
       integrationId
@@ -75,7 +83,9 @@ export class FlowActivity {
     }
     this.decryptToken(integration);
 
-    const provider = this._integrationManager.getSocialIntegration('instagram') as unknown as InstagramProvider;
+    const provider = this._integrationManager.getSocialIntegration(
+      'instagram'
+    ) as unknown as InstagramProvider;
     if (!provider) {
       throw new Error('Instagram provider not found');
     }
@@ -84,36 +94,10 @@ export class FlowActivity {
     this._logger.log(
       `replyToComment: integration=${integrationId} provider=${integration.providerIdentifier} igAccount=${integration.internalId} commentId=${commentId} route.source=${route.source} route.host=${route.host}`
     );
-    // Threaded reply to the specific comment (not a new top-level comment on the media).
-    try {
-      await provider.replyToComment(route.token, commentId, message, route.host);
-    } catch (e) {
-      // IG User Tokens cadastrados em Settings sao gerados pelo aluno com
-      // escopos de messaging em mente (instagram_business_manage_messages)
-      // e frequentemente nao incluem instagram_business_manage_comments.
-      // O endpoint /{comment-id}/replies devolve code=100 subcode=33
-      // quando o token nao tem esse escopo. Quando a integration veio do
-      // fluxo Facebook Login, o Page Access Token tem instagram_manage_comments
-      // com Standard Access para testers/admins do app — fallback funciona
-      // em dev mode sem App Review.
-      if (
-        route.source === 'ig-user-token' &&
-        integration.token &&
-        integration.token !== route.token
-      ) {
-        this._logger.warn(
-          `replyToComment: ig-user-token route failed (${(e as Error).message}); falling back to Page Access Token on graph.facebook.com`
-        );
-        await provider.replyToComment(
-          integration.token,
-          commentId,
-          message,
-          'graph.facebook.com'
-        );
-        return;
-      }
-      throw e;
-    }
+    await this._deliveries.sendOnce(
+      JSON.stringify([integrationId, commentId, 'public', actionId]),
+      () => provider.replyToComment(route.token, commentId, message, route.host)
+    );
   }
 
   @ActivityMethod()
@@ -124,8 +108,11 @@ export class FlowActivity {
     message: string,
     commentId: string,
     buttonText?: string,
-    buttonUrl?: string
+    buttonUrl?: string,
+    flowId?: string
   ) {
+    if (!flowId) throw new Error('Automation identity required');
+    await this.requireActiveFlow(flowId);
     const integration = await this._integrationService.getIntegrationById(
       orgId,
       integrationId
@@ -135,7 +122,9 @@ export class FlowActivity {
     }
     this.decryptToken(integration);
 
-    const provider = this._integrationManager.getSocialIntegration('instagram') as unknown as InstagramProvider;
+    const provider = this._integrationManager.getSocialIntegration(
+      'instagram'
+    ) as unknown as InstagramProvider;
     if (!provider) {
       throw new Error('Instagram provider not found');
     }
@@ -150,13 +139,17 @@ export class FlowActivity {
     // This is the ONLY way to DM a commenter without advanced access
     // to instagram_manage_messages. Limited to ONE per comment, so the
     // workflow collects all DM messages and sends them combined here.
-    await provider.sendPrivateReply(
-      token,
-      integration.internalId,
-      commentId,
-      message,
-      button,
-      host
+    await this._deliveries.sendOnce(
+      JSON.stringify([integrationId, commentId, 'private']),
+      () =>
+        provider.sendPrivateReply(
+          token,
+          integration.internalId,
+          commentId,
+          message,
+          button,
+          host
+        )
     );
   }
 
@@ -167,8 +160,12 @@ export class FlowActivity {
     igScopedUserId: string,
     message: string,
     buttonText?: string,
-    buttonUrl?: string
+    buttonUrl?: string,
+    eventId?: string,
+    flowId?: string
   ) {
+    if (!flowId) throw new Error('Automation identity required');
+    await this.requireActiveFlow(flowId);
     const integration = await this._integrationService.getIntegrationById(
       orgId,
       integrationId
@@ -182,19 +179,25 @@ export class FlowActivity {
         ? ({ kind: 'url', title: buttonText, url: buttonUrl } as const)
         : undefined;
 
-    // Messaging uses a token configured in Settings > Credenciais (Meta
-    // System User Token or per-account IG User Token), NOT the integration
-    // token used for posting. The service resolves the right token, does
-    // lazy refresh, and calls the right Meta endpoint.
-    await this._instagramMessagingService.sendStoryReply({
-      organizationId: integration.organizationId,
-      profileId: integration.profileId || null,
-      igBusinessAccountId: integration.internalId,
-      recipientIgsid: igScopedUserId,
-      message,
-      button,
-      integrationName: integration.name || undefined,
-    });
+    if (!eventId) throw new Error('A stable story event identity is required');
+    return this._deliveries.sendOnce(
+      JSON.stringify([integrationId, eventId, 'story']),
+      async () => {
+        // Messaging uses a token configured in Settings > Credenciais (Meta
+        // System User Token or per-account IG User Token), NOT the integration
+        // token used for posting. The service resolves the right token, does
+        // lazy refresh, and calls the right Meta endpoint.
+        return this._instagramMessagingService.sendStoryReply({
+          organizationId: integration.organizationId,
+          profileId: integration.profileId || null,
+          igBusinessAccountId: integration.internalId,
+          recipientIgsid: igScopedUserId,
+          message,
+          button,
+          integrationName: integration.name || undefined,
+        });
+      }
+    );
   }
 
   @ActivityMethod()
@@ -263,21 +266,15 @@ export class FlowActivity {
       const lowerComment = commentText.toLowerCase();
 
       if (matchMode === 'all') {
-        return keywords.every((kw) =>
-          lowerComment.includes(kw.toLowerCase())
-        );
+        return keywords.every((kw) => lowerComment.includes(kw.toLowerCase()));
       }
 
       if (matchMode === 'exact') {
-        return keywords.some(
-          (kw) => lowerComment === kw.toLowerCase()
-        );
+        return keywords.some((kw) => lowerComment === kw.toLowerCase());
       }
 
       // Default: 'any' — at least one keyword matches
-      return keywords.some((kw) =>
-        lowerComment.includes(kw.toLowerCase())
-      );
+      return keywords.some((kw) => lowerComment.includes(kw.toLowerCase()));
     } catch {
       return false;
     }
@@ -299,7 +296,13 @@ export class FlowActivity {
   @ActivityMethod()
   async appendExecutionLog(
     executionId: string,
-    entry: { nodeId: string; nodeType: string; status: string; timestamp: string; error?: string }
+    entry: {
+      nodeId: string;
+      nodeType: string;
+      status: string;
+      timestamp: string;
+      error?: string;
+    }
   ) {
     return this._flowsService.appendExecutionLog(executionId, entry);
   }
@@ -362,6 +365,7 @@ export class FlowActivity {
       );
     }
 
+    await this.requireActiveFlow(pb.flowId);
     const integration = await this._integrationService.getIntegrationById(
       pb.organizationId,
       pb.integrationId
@@ -384,13 +388,17 @@ export class FlowActivity {
     };
 
     const { token, host } = await this.resolveIgRoute(integration);
-    await provider.sendPrivateReply(
-      token,
-      integration.internalId,
-      pb.igCommentId,
-      message,
-      button,
-      host
+    await this._deliveries.sendOnce(
+      JSON.stringify([integration.id, pb.igCommentId, 'private']),
+      () =>
+        provider.sendPrivateReply(
+          token,
+          integration.internalId,
+          pb.igCommentId,
+          message,
+          button,
+          host
+        )
     );
   }
 
@@ -405,52 +413,58 @@ export class FlowActivity {
     const pb = await this._flowsService.getPendingPostback(pendingPostbackId);
     if (!pb) throw new Error(`PendingPostback ${pendingPostbackId} not found`);
 
-    const integration = await this._integrationService.getIntegrationById(
-      pb.organizationId,
-      pb.integrationId
+    return this._deliveries.sendOnce(
+      JSON.stringify([pb.integrationId, pb.originExecutionId, 'final']),
+      async () => {
+        await this.requireActiveFlow(pb.flowId);
+        const integration = await this._integrationService.getIntegrationById(
+          pb.organizationId,
+          pb.integrationId
+        );
+        if (!integration) {
+          throw new Error(`Integration ${pb.integrationId} not found`);
+        }
+        this.decryptToken(integration);
+
+        const message = pb.snapshotFinalDm?.trim();
+        if (!message) {
+          // Nothing to send — flow didn't configure a final DM. Just no-op.
+          return;
+        }
+
+        const button: InstagramDmButton | undefined =
+          pb.snapshotFinalBtnText && pb.snapshotFinalBtnUrl
+            ? {
+                kind: 'url',
+                title: pb.snapshotFinalBtnText,
+                url: pb.snapshotFinalBtnUrl,
+              }
+            : undefined;
+
+        // Integrations via Instagram Login API ja possuem IG User Token no
+        // integration.token — dispensa messaging token separado em Settings.
+        if (integration.providerIdentifier === 'instagram-standalone') {
+          return this._instagramMessagingService.sendDmWithToken({
+            token: integration.token,
+            recipientIgsid: pb.igSenderId,
+            message,
+            button,
+            useInstagramGraph: true,
+          });
+          return;
+        }
+
+        return this._instagramMessagingService.sendStoryReply({
+          organizationId: integration.organizationId,
+          profileId: integration.profileId || null,
+          igBusinessAccountId: integration.internalId,
+          recipientIgsid: pb.igSenderId,
+          message,
+          button,
+          integrationName: integration.name || undefined,
+        });
+      }
     );
-    if (!integration) {
-      throw new Error(`Integration ${pb.integrationId} not found`);
-    }
-    this.decryptToken(integration);
-
-    const message = pb.snapshotFinalDm?.trim();
-    if (!message) {
-      // Nothing to send — flow didn't configure a final DM. Just no-op.
-      return;
-    }
-
-    const button: InstagramDmButton | undefined =
-      pb.snapshotFinalBtnText && pb.snapshotFinalBtnUrl
-        ? {
-            kind: 'url',
-            title: pb.snapshotFinalBtnText,
-            url: pb.snapshotFinalBtnUrl,
-          }
-        : undefined;
-
-    // Integrations via Instagram Login API ja possuem IG User Token no
-    // integration.token — dispensa messaging token separado em Settings.
-    if (integration.providerIdentifier === 'instagram-standalone') {
-      await this._instagramMessagingService.sendDmWithToken({
-        token: integration.token,
-        recipientIgsid: pb.igSenderId,
-        message,
-        button,
-        useInstagramGraph: true,
-      });
-      return;
-    }
-
-    await this._instagramMessagingService.sendStoryReply({
-      organizationId: integration.organizationId,
-      profileId: integration.profileId || null,
-      igBusinessAccountId: integration.internalId,
-      recipientIgsid: pb.igSenderId,
-      message,
-      button,
-      integrationName: integration.name || undefined,
-    });
   }
 
   /**
@@ -469,99 +483,104 @@ export class FlowActivity {
     const pb = await this._flowsService.getPendingPostback(pendingPostbackId);
     if (!pb) throw new Error(`PendingPostback ${pendingPostbackId} not found`);
 
-    const integration = await this._integrationService.getIntegrationById(
-      pb.organizationId,
-      pb.integrationId
-    );
-    if (!integration) {
-      throw new Error(`Integration ${pb.integrationId} not found`);
-    }
-    this.decryptToken(integration);
+    return this._deliveries.sendOnce(
+      JSON.stringify([pb.integrationId, pb.id, 'follow-gate']),
+      async () => {
+        await this.requireActiveFlow(pb.flowId);
+        const integration = await this._integrationService.getIntegrationById(
+          pb.organizationId,
+          pb.integrationId
+        );
+        if (!integration) {
+          throw new Error(`Integration ${pb.integrationId} not found`);
+        }
+        this.decryptToken(integration);
 
-    const isStandalone =
-      integration.providerIdentifier === 'instagram-standalone';
+        const isStandalone =
+          integration.providerIdentifier === 'instagram-standalone';
 
-    if (opts.exhausted) {
-      // Apologetic message, no button. Avoids locking the user in a button
-      // loop when they'll never follow.
-      const exhaustedMessage =
-        pb.snapshotExhaustedMessage?.trim() || GATE_EXHAUSTED_MESSAGE;
-      if (isStandalone) {
-        await this._instagramMessagingService.sendDmWithToken({
-          token: integration.token,
-          recipientIgsid: pb.igSenderId,
-          message: exhaustedMessage,
-          useInstagramGraph: true,
+        if (opts.exhausted) {
+          // Apologetic message, no button. Avoids locking the user in a button
+          // loop when they'll never follow.
+          const exhaustedMessage =
+            pb.snapshotExhaustedMessage?.trim() || GATE_EXHAUSTED_MESSAGE;
+          if (isStandalone) {
+            return this._instagramMessagingService.sendDmWithToken({
+              token: integration.token,
+              recipientIgsid: pb.igSenderId,
+              message: exhaustedMessage,
+              useInstagramGraph: true,
+            });
+          } else {
+            return this._instagramMessagingService.sendStoryReply({
+              organizationId: integration.organizationId,
+              profileId: integration.profileId || null,
+              igBusinessAccountId: integration.internalId,
+              recipientIgsid: pb.igSenderId,
+              message: exhaustedMessage,
+              integrationName: integration.name || undefined,
+            });
+          }
+          return;
+        }
+
+        // Create a new pending (kind='already_followed') carrying forward the
+        // same snapshots so a future click resolves to the same final DM.
+        const newPending = await this._flowsService.createPendingPostback({
+          flowId: pb.flowId,
+          originExecutionId: pb.originExecutionId,
+          integrationId: pb.integrationId,
+          organizationId: pb.organizationId,
+          igSenderId: pb.igSenderId,
+          igCommenterName: pb.igCommenterName || undefined,
+          igMediaId: pb.igMediaId || undefined,
+          igCommentId: pb.igCommentId || undefined,
+          kind: 'already_followed',
+          attemptCount: pb.attemptCount + 1,
+          maxAttempts: pb.maxAttempts,
+          snapshotFinalDm: pb.snapshotFinalDm || undefined,
+          snapshotFinalBtnText: pb.snapshotFinalBtnText || undefined,
+          snapshotFinalBtnUrl: pb.snapshotFinalBtnUrl || undefined,
+          snapshotGateDm: pb.snapshotGateDm || undefined,
+          snapshotAlreadyBtnText: pb.snapshotAlreadyBtnText || undefined,
+          snapshotExhaustedMessage: pb.snapshotExhaustedMessage || undefined,
+          openingDmMessage: pb.openingDmMessage || undefined,
+          openingDmButtonText: pb.openingDmButtonText || undefined,
         });
-      } else {
-        await this._instagramMessagingService.sendStoryReply({
+
+        // Consume the current pending — it has served its purpose (this click)
+        // and the new pending carries the next attempt.
+        await this._flowsService.consumePendingPostback(pb.id);
+
+        const gateMessage = pb.snapshotGateDm?.trim() || GATE_FALLBACK_MESSAGE;
+        const button: InstagramDmButton = {
+          kind: 'postback',
+          title: pb.snapshotAlreadyBtnText?.trim() || 'Ja segui!',
+          payload: newPending.payload,
+        };
+
+        if (isStandalone) {
+          return this._instagramMessagingService.sendDmWithToken({
+            token: integration.token,
+            recipientIgsid: pb.igSenderId,
+            message: gateMessage,
+            button,
+            useInstagramGraph: true,
+          });
+          return;
+        }
+
+        return this._instagramMessagingService.sendStoryReply({
           organizationId: integration.organizationId,
           profileId: integration.profileId || null,
           igBusinessAccountId: integration.internalId,
           recipientIgsid: pb.igSenderId,
-          message: exhaustedMessage,
+          message: gateMessage,
+          button,
           integrationName: integration.name || undefined,
         });
       }
-      return;
-    }
-
-    // Create a new pending (kind='already_followed') carrying forward the
-    // same snapshots so a future click resolves to the same final DM.
-    const newPending = await this._flowsService.createPendingPostback({
-      flowId: pb.flowId,
-      originExecutionId: pb.originExecutionId,
-      integrationId: pb.integrationId,
-      organizationId: pb.organizationId,
-      igSenderId: pb.igSenderId,
-      igCommenterName: pb.igCommenterName || undefined,
-      igMediaId: pb.igMediaId || undefined,
-      igCommentId: pb.igCommentId || undefined,
-      kind: 'already_followed',
-      attemptCount: pb.attemptCount + 1,
-      maxAttempts: pb.maxAttempts,
-      snapshotFinalDm: pb.snapshotFinalDm || undefined,
-      snapshotFinalBtnText: pb.snapshotFinalBtnText || undefined,
-      snapshotFinalBtnUrl: pb.snapshotFinalBtnUrl || undefined,
-      snapshotGateDm: pb.snapshotGateDm || undefined,
-      snapshotAlreadyBtnText: pb.snapshotAlreadyBtnText || undefined,
-      snapshotExhaustedMessage: pb.snapshotExhaustedMessage || undefined,
-      openingDmMessage: pb.openingDmMessage || undefined,
-      openingDmButtonText: pb.openingDmButtonText || undefined,
-    });
-
-    // Consume the current pending — it has served its purpose (this click)
-    // and the new pending carries the next attempt.
-    await this._flowsService.consumePendingPostback(pb.id);
-
-    const gateMessage =
-      pb.snapshotGateDm?.trim() || GATE_FALLBACK_MESSAGE;
-    const button: InstagramDmButton = {
-      kind: 'postback',
-      title: pb.snapshotAlreadyBtnText?.trim() || 'Ja segui!',
-      payload: newPending.payload,
-    };
-
-    if (isStandalone) {
-      await this._instagramMessagingService.sendDmWithToken({
-        token: integration.token,
-        recipientIgsid: pb.igSenderId,
-        message: gateMessage,
-        button,
-        useInstagramGraph: true,
-      });
-      return;
-    }
-
-    await this._instagramMessagingService.sendStoryReply({
-      organizationId: integration.organizationId,
-      profileId: integration.profileId || null,
-      igBusinessAccountId: integration.internalId,
-      recipientIgsid: pb.igSenderId,
-      message: gateMessage,
-      button,
-      integrationName: integration.name || undefined,
-    });
+    );
   }
 
   // Enriquece metadata de um UnmatchedComment (thumbnail, legenda, badge "Anuncio").
@@ -572,5 +591,11 @@ export class FlowActivity {
       `enrichUnmatchedComment: iniciando id=${unmatchedCommentId}`
     );
     await this._unmatchedCommentService.enrich(unmatchedCommentId);
+  }
+
+  private async requireActiveFlow(flowId: string) {
+    const flow = await this._flowsService.getFlowById(flowId);
+    if (!flow || flow.status !== 'ACTIVE' || flow.deletedAt)
+      throw new Error('Automation paused or unavailable');
   }
 }

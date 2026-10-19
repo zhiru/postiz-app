@@ -1,3 +1,8 @@
+jest.mock('@gitroom/nestjs-libraries/ai/ai-image.service', () => ({ AiImageService: class {} }));
+jest.mock('@gitroom/nestjs-libraries/ai/ai-text.service', () => ({ AiTextService: class {} }));
+jest.mock('@gitroom/nestjs-libraries/ai/ai-video.service', () => ({ AiVideoService: class {} }));
+jest.mock('@gitroom/nestjs-libraries/upload/custom.upload.validation', () => ({ getMaxSize: jest.fn(), uploadStreamToStorage: jest.fn() }));
+jest.mock('@gitroom/nestjs-libraries/redis/redis.service', () => ({ ioRedis: { get: jest.fn(), set: jest.fn(), rpush: jest.fn(), expire: jest.fn(), lrange: jest.fn() } }));
 // MediaService importa SubscriptionService que cascateia ate nostr-tools
 // (ESM-only que quebra ts-jest). Mockamos topo-de-modulo as cadeias pesadas.
 jest.mock(
@@ -26,7 +31,7 @@ const mockStorage = {
   healthCheck: jest.fn(),
 };
 jest.mock('@gitroom/nestjs-libraries/upload/upload.factory', () => ({
-  UploadFactory: { createStorage: () => mockStorage },
+  UploadFactory: { createStorage: () => mockStorage, createProcessor: () => null },
 }));
 
 import { MediaService } from './media.service';
@@ -46,7 +51,8 @@ const buildService = () => {
     null as any, // videoManager
     null as any, // aiImageService
     null as any, // aiTextService
-    null as any // aiVideoService
+    null as any, // aiVideoService
+    null as any // temporalService
   );
 
   return { service, repository };
@@ -232,12 +238,38 @@ describe('MediaService.getMedia', () => {
       { image: '[{"id":"media-1"}]', settings: null as string | null },
     ] as any);
 
-    const result = await service.getMedia('org-1', 1, 'prof-1');
+    const result = await service.getMedia('org-1', 1, undefined, 'prof-1');
 
     expect(result.results.map((item: any) => item.inUse)).toEqual([
       true,
       true,
       false,
     ]);
+  });
+});
+
+
+describe('MediaService - sessoes de upload por perfil', () => {
+  const redis = require('@gitroom/nestjs-libraries/redis/redis.service').ioRedis;
+  beforeEach(() => jest.clearAllMocks());
+
+  it('vincula a sessao ao perfil autenticado', async () => {
+    const { service } = buildService();
+    await service.createUploadSession('org-1', 'profile-1');
+    expect(JSON.parse(redis.set.mock.calls[0][1])).toEqual({ org: 'org-1', profileId: 'profile-1' });
+  });
+  it('recusa ticket e leitura de sessao de outro perfil', async () => {
+    const { service, repository } = buildService();
+    redis.get.mockResolvedValue(JSON.stringify({ org: 'org-1', profileId: 'profile-2' }));
+    await expect(service.createUploadTicket('org-1', 'session-2', 'profile-1')).rejects.toThrow('Upload session not found');
+    await expect(service.getUploadSession('org-1', 'session-2', 'profile-1')).rejects.toThrow('Upload session not found');
+    expect(repository.getMediaStatus).not.toHaveBeenCalled();
+  });
+  it('o widget salva usando o perfil da sessao, sem campo controlado pelo cliente', async () => {
+    const { service } = buildService();
+    redis.get.mockResolvedValue(JSON.stringify({ org: 'org-1', profileId: 'profile-1' }));
+    const save = jest.spyOn(service, 'saveUploadedFile').mockResolvedValue({ id: 'media-1' } as any);
+    await service.saveUploadSessionFile('org-1', 'session-1', 'safe.jpg', '/uploads/safe.jpg', 'Foto.jpg');
+    expect(save).toHaveBeenCalledWith('org-1', 'safe.jpg', '/uploads/safe.jpg', 'Foto.jpg', 'profile-1');
   });
 });

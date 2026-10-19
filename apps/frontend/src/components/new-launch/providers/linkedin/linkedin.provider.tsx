@@ -61,7 +61,10 @@ export default withProvider<LinkedinDto>({
       return 'Can have maximum 1 media when selecting a video.';
     }
     if (restPosts?.some((p) => (p?.length ?? 0) > 0)) {
-      return t?.('comments_only_text', 'Comments can only contain text.') ?? 'Comments can only contain text.';
+      return (
+        t?.('comments_only_text', 'Comments can only contain text.') ??
+        'Comments can only contain text.'
+      );
     }
     return true;
   },

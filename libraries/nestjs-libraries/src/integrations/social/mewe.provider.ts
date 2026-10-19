@@ -11,13 +11,20 @@ import { Integration } from '@prisma/client';
 import { MeweDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/mewe.dto';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
+import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 export class MeweProvider extends SocialAbstract implements SocialProvider {
   identifier = 'mewe';
+
   name = 'MeWe';
+
   isBetweenSteps = false;
+
   scopes = [] as string[];
+
   editor = 'normal' as const;
+
   dto = MeweDto;
 
   private get meweHost() {
@@ -79,7 +86,7 @@ export class MeweProvider extends SocialAbstract implements SocialProvider {
   }
 
   async generateAuthUrl() {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     return {
       url:
         `${this.meweHost}/login` +
@@ -88,7 +95,7 @@ export class MeweProvider extends SocialAbstract implements SocialProvider {
           `${process.env.FRONTEND_URL}/integrations/social/mewe`
         )}` +
         `&state=${state}`,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -182,7 +189,7 @@ export class MeweProvider extends SocialAbstract implements SocialProvider {
       let nextUrl: string | null = `${this.meweHost}/api/dev/groups`;
 
       while (nextUrl) {
-        const response = await ssrfSafeFetch(nextUrl, {
+        const response = await fetch(nextUrl, {
           method: 'GET',
           headers: this.authHeaders(accessToken),
         });
@@ -207,14 +214,14 @@ export class MeweProvider extends SocialAbstract implements SocialProvider {
     accessToken: string,
     mediaPath: string
   ): Promise<string> {
-    const mediaResponse = await ssrfSafeFetch(mediaPath);
+    const mediaResponse = await fetch(mediaPath);
     const blob = await mediaResponse.blob();
     const fileName = mediaPath.split('/').pop() || 'photo.jpg';
 
     const form = new FormData();
     form.append('file', blob, fileName);
 
-    const uploadResponse = await ssrfSafeFetch(
+    const uploadResponse = await fetch(
       `${this.meweHost}/api/dev/photo/upload`,
       {
         method: 'POST',
@@ -248,7 +255,7 @@ export class MeweProvider extends SocialAbstract implements SocialProvider {
 
     // Upload photos if present (exclude videos)
     const imageMedia =
-      firstPost.media?.filter((m) => !m.path || m.path.indexOf('mp4') === -1) ||
+      firstPost.media?.filter((m) => !m.path || !hasExtension(m.path, 'mp4')) ||
       [];
 
     const uploadedPhotoIds: string[] = [];
@@ -268,7 +275,7 @@ export class MeweProvider extends SocialAbstract implements SocialProvider {
         : `${this.meweHost}/api/dev/group/${groupId}/post`;
 
     // MeWe post endpoint may return 204 (no content), so use raw fetch
-    const postResponse = await ssrfSafeFetch(postUrl, {
+    const postResponse = await fetch(postUrl, {
       method: 'POST',
       headers: this.authHeaders(accessToken),
       body: JSON.stringify(postBody),

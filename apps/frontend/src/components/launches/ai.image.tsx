@@ -148,8 +148,7 @@ const ImageModal: FC<ModalProps> = ({ value, close, onChange }) => {
           return;
         }
         toaster.show(
-          backendMessage ||
-            t('ai_image_generic_error', 'Erro ao gerar imagem'),
+          backendMessage || t('ai_image_generic_error', 'Erro ao gerar imagem'),
           'warning'
         );
         return;
@@ -193,7 +192,9 @@ const ImageModal: FC<ModalProps> = ({ value, close, onChange }) => {
       <div>
         <div className="flex gap-[14px] flex-col w-[700px] max-w-[90vw] max-h-[85vh] overflow-y-auto bg-sixth border-tableBorder border-2 rounded-xl pb-[20px] px-[20px] relative">
           <div className="flex items-center justify-between sticky top-0 bg-sixth z-[1] pt-[20px] pb-[4px]">
-            <TopTitle title={t('ai_image_modal_title', 'Gerar imagem com IA')} />
+            <TopTitle
+              title={t('ai_image_modal_title', 'Gerar imagem com IA')}
+            />
             <button
               onClick={close}
               className="outline-none mantine-UnstyledButton-root mantine-ActionIcon-root bg-primary hover:bg-tableBorder cursor-pointer mantine-Modal-close p-[6px] rounded-[6px]"
@@ -238,7 +239,10 @@ const ImageModal: FC<ModalProps> = ({ value, close, onChange }) => {
 
           {/* Prompt manual (opcional) */}
           <FieldRow
-            label={t('ai_image_manual_prompt_label', 'Prompt manual (opcional)')}
+            label={t(
+              'ai_image_manual_prompt_label',
+              'Prompt manual (opcional)'
+            )}
           >
             <textarea
               className="bg-newBgColorInner border border-newTableBorder rounded-[8px] px-[14px] py-[10px] outline-none text-[14px] min-h-[80px] resize-none"

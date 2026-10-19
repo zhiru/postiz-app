@@ -1,16 +1,19 @@
-import {
-  IsOptional,
-  IsString,
-  IsDateString,
-} from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsOptional, IsString, IsDateString, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class GetPostsDto {
-  @ApiProperty({ description: 'Data inicial do filtro (ISO 8601).', example: '2026-05-01T00:00:00Z' })
+  @ApiProperty({
+    description: 'Data inicial do filtro (ISO 8601).',
+    example: '2026-05-01T00:00:00Z',
+  })
   @IsDateString()
   startDate: string;
 
-  @ApiProperty({ description: 'Data final do filtro (ISO 8601).', example: '2026-06-05T23:59:59Z' })
+  @ApiProperty({
+    description: 'Data final do filtro (ISO 8601).',
+    example: '2026-06-05T23:59:59Z',
+  })
   @IsDateString()
   endDate: string;
 
@@ -26,4 +29,10 @@ export class GetPostsDto {
   @IsOptional()
   @IsString()
   profileId?: string;
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) =>
+    value === 'true' ? true : value === 'false' ? false : value
+  )
+  includeAttachments?: boolean;
 }
