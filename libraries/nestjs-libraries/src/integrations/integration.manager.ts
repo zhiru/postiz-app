@@ -89,7 +89,6 @@ export const socialIntegrationList: Array<SocialAbstract & SocialProvider> = [
   new WhopProvider(),
   new SkoolProvider(),
   new MeweProvider(),
-  new TumblrProvider(),
   // new MastodonCustomProvider(),
   new ZernioTikTokProvider(),
   new ZernioPinterestProvider(),

@@ -9,7 +9,8 @@ jest.mock(
   })
 );
 
-import { IntegrationManager } from './integration.manager';
+import { IntegrationManager, socialIntegrationList } from './integration.manager';
+import { buildTemporalWorkers } from '../temporal/temporal.module';
 
 describe('IntegrationManager.getProviderCredentials', () => {
   it('reutiliza a credencial Google do YouTube no GMB', async () => {
@@ -43,5 +44,27 @@ describe('IntegrationManager.getProviderCredentials', () => {
       'youtube',
       'profile-1'
     );
+  });
+});
+
+
+describe('IntegrationManager provider registry', () => {
+  it('starts one worker per registered provider without omitting any queue', () => {
+    const identifiers = new IntegrationManager().getAllowedSocialsIntegrations();
+    expect(new Set(identifiers).size).toBe(identifiers.length);
+
+    const workers = buildTemporalWorkers({
+      workflowsPath: '/workflows/index.js',
+      activityClasses: [class TestActivity {}],
+      integrations: socialIntegrationList,
+    });
+    const queues = workers.map((worker) => worker.taskQueue);
+    expect(new Set(queues).size).toBe(queues.length);
+    expect(queues).toEqual([
+      'main',
+      ...identifiers.filter((identifier) => !identifier.includes('-')),
+      'email',
+      'email-bulk',
+    ]);
   });
 });
