@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Add an independent private-message switch to Instagram comment automations. Turning it off removes private actions and follow-gate messages on save, including multi-account creation, while preserving existing flows by default.
+
 - Import 16 upstream commits through `e454b8b5`: saved IANA timezone preference, notification refresh, autopost draft copy and Sentry privacy fixes. Preserve Instagram automations, historical synchronization, post engagement previews, profile access and instance branding. Adds only nullable `User.timezoneName`.
 
 ### Post preview, engagement and automation account selection

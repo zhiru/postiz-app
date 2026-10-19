@@ -671,6 +671,25 @@ export class FlowsRepository {
     });
   }
 
+  abandonFlowPostbacks(orgId: string, flowId: string, profileId?: string) {
+    return this._pendingPostback.model.pendingPostback.updateMany({
+      where: {
+        flowId,
+        organizationId: orgId,
+        status: PendingPostbackStatus.PENDING,
+        flow: {
+          organizationId: orgId,
+          ...(profileId ? { profileId } : {}),
+          deletedAt: null,
+        },
+      },
+      data: {
+        status: PendingPostbackStatus.ABANDONED,
+        consumedAt: new Date(),
+      },
+    });
+  }
+
   abandonPostback(id: string) {
     return this._pendingPostback.model.pendingPostback.update({
       where: { id },

@@ -2308,5 +2308,6 @@
   "agents_dev": "Agents / Dev",
   "timezone": "Timezone",
   "automatic_timezone": "Automatic ({{timezone}})",
-  "could_not_save_timezone": "Could not save the timezone"
+  "could_not_save_timezone": "Could not save the timezone",
+  "wizard_dm_disabled_hint": "When off, this automation will not send private messages."
 }

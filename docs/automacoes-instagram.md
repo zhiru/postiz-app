@@ -2,6 +2,10 @@
 
 Guia completo para configurar e usar automacoes de comentarios do Instagram no Robo MultiPost.
 
+## Resposta pública e DM independentes
+
+No assistente de comentários, use os switches de resposta pública e **Enviar mensagem privada** separadamente. Para responder somente nos comentários, ligue a resposta pública e desligue a DM. O texto e os links da DM ficam ocultos; o pedido para seguir também fica desativado, pois ele envia mensagens privadas. A alteração só é aplicada ao salvar. Ao salvar com DM desligada, os botões pendentes de pedir para seguir são cancelados e mensagens privadas ainda na fila verificam a configuração atual antes de enviar. Mensagens já enviadas não são removidas. Automações existentes com uma ação de DM abrem com o switch ligado, sem mudança automática na configuração ou no status.
+
 ## O que e
 
 Permite criar fluxos visuais que respondem automaticamente a comentarios em postagens do Instagram. Por exemplo:

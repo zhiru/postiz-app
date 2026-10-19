@@ -151,12 +151,10 @@ describe('FlowActivity delivery guards and workflow replay', () => {
 
   const graph = (...nodes: any[]) => {
     flow.nodes = [node('trigger', 'TRIGGER'), ...nodes];
-    flow.edges = flow.nodes
-      .slice(1)
-      .map((n: any, i: number) => ({
-        sourceNodeId: flow.nodes[i].id,
-        targetNodeId: n.id,
-      }));
+    flow.edges = flow.nodes.slice(1).map((n: any, i: number) => ({
+      sourceNodeId: flow.nodes[i].id,
+      targetNodeId: n.id,
+    }));
   };
 
   it('sends each distinct public action once when the same execution is replayed', async () => {
@@ -265,5 +263,52 @@ describe('FlowActivity delivery guards and workflow replay', () => {
     expect(
       rows.get(JSON.stringify(['integration', 'execution', 'final'])).status
     ).toBe('UNKNOWN');
+  });
+  it('blocks queued private actions after DM is disabled while preserving public replies', async () => {
+    flow.nodes = [node('trigger', 'TRIGGER', { enableDm: false })];
+    await activity.replyToComment(
+      'integration',
+      'org',
+      'comment',
+      'media',
+      'Public only',
+      'flow',
+      'public-action'
+    );
+    await expect(
+      activity.sendDirectMessage(
+        'integration',
+        'org',
+        'person',
+        'Old DM',
+        'comment',
+        undefined,
+        undefined,
+        'flow'
+      )
+    ).rejects.toThrow('Private messages disabled');
+    await expect(
+      activity.sendStoryDirectMessage(
+        'integration',
+        'org',
+        'person',
+        'Old story DM',
+        undefined,
+        undefined,
+        'event',
+        'flow'
+      )
+    ).rejects.toThrow('Private messages disabled');
+    await expect(activity.sendOpeningDmWithPostback('pending')).rejects.toThrow(
+      'Private messages disabled'
+    );
+    await expect(activity.sendFinalDm('pending')).rejects.toThrow();
+    await expect(
+      activity.sendAlreadyFollowedGate('pending', { exhausted: false })
+    ).rejects.toThrow();
+    expect(provider.replyToComment).toHaveBeenCalledTimes(1);
+    expect(provider.sendPrivateReply).not.toHaveBeenCalled();
+    expect(messaging.sendDmWithToken).not.toHaveBeenCalled();
+    expect(messaging.sendStoryReply).not.toHaveBeenCalled();
   });
 });

@@ -146,10 +146,8 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
       setEnableReply(true);
       setReplyMessages([replyCfg.message]);
     }
-    if (dmCfg.message) {
-      setEnableDm(true);
-      setDmMessage(dmCfg.message);
-    }
+    setEnableDm(!!dmNode);
+    setDmMessage(dmCfg.message || '');
     if (dmCfg.buttonText) setDmButtonText(dmCfg.buttonText);
     if (dmCfg.buttonUrl) setDmButtonUrl(dmCfg.buttonUrl);
     if (typeof triggerCfg.requireFollow === 'boolean') {
@@ -177,14 +175,14 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
 
   // Auto-switch preview tab based on state
   useEffect(() => {
-    if (dmMessage) {
+    if (enableDm && dmMessage) {
       setActivePreviewTab('dm');
     } else if (enableReply) {
       setActivePreviewTab('comments');
-    } else if (selectedPostIds.length > 0) {
+    } else {
       setActivePreviewTab('post');
     }
-  }, [dmMessage, enableReply, selectedPostIds.length]);
+  }, [enableDm, dmMessage, enableReply, selectedPostIds.length]);
 
   const instagramIntegrations = useMemo(() => {
     if (!Array.isArray(integrations)) return [];
@@ -254,8 +252,9 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
     (keywordMode !== 'specific' || keywords.some(keyword => keyword.trim())) &&
     !!name.trim() &&
     !!integrationId &&
-    ((enableReply && replyMessages.some(m => m.trim())) || dmMessage.trim().length > 0) &&
-    (!requireFollow ||
+    (!enableDm || dmMessage.trim().length > 0) &&
+    ((enableReply && replyMessages.some(m => m.trim())) || (enableDm && dmMessage.trim().length > 0)) &&
+    (!enableDm || !requireFollow ||
       (openingDmMessage.trim().length > 0 && openingDmButtonText.trim().length > 0));
 
   const handleSave = useCallback(async () => {
@@ -272,6 +271,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
         integrationId,
         triggerType: 'comment_on_post',
         postMode,
+        enableDm,
       };
       if (postMode === 'specific' && selectedPostIds.length > 0) {
         body.postIds = selectedPostIds;
@@ -284,18 +284,18 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
         const msgs = replyMessages.filter(m => m.trim());
         if (msgs.length) body.replyMessages = msgs;
       }
-      if (dmMessage.trim()) {
+      if (enableDm && dmMessage.trim()) {
         body.dmMessage = dmMessage.trim();
         if (dmButtonText.trim() && dmButtonUrl.trim()) {
           body.dmButtonText = dmButtonText.trim();
           body.dmButtonUrl = dmButtonUrl.trim();
         }
       }
-      body.requireFollow = requireFollow;
-      if (requireFollow && followGateMessage.trim()) {
+      body.requireFollow = enableDm && requireFollow;
+      if (enableDm && requireFollow && followGateMessage.trim()) {
         body.followGateMessage = followGateMessage.trim();
       }
-      if (requireFollow) {
+      if (enableDm && requireFollow) {
         if (openingDmMessage.trim()) {
           body.openingDmMessage = openingDmMessage.trim();
         }
@@ -602,8 +602,12 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
                 </span>
                 {/* Toggle switch (CSS-only) */}
                 <button
+                  type="button"
+                  role="switch"
+                  aria-checked={enableReply}
+                  aria-label={t('wizard_enable_reply', 'interagir com os comentários deles na publicação')}
                   onClick={() => setEnableReply(v => !v)}
-                  className={`relative w-[44px] h-[24px] rounded-full transition-colors ${enableReply ? 'bg-btnPrimary' : 'bg-customColor18/30'}`}
+                  className={`relative w-[44px] h-[24px] rounded-full transition-colors ${enableReply ? 'bg-btnPrimary' : 'bg-newTextColor/30'}`}
                 >
                   <div className={`absolute top-[2px] w-[20px] h-[20px] rounded-full bg-white transition-all ${enableReply ? 'left-[22px]' : 'left-[2px]'}`} />
                 </button>
@@ -650,14 +654,30 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
 
             {/* DM section */}
             <div className="border-t border-fifth pt-[20px] mb-[20px]">
-              <h2 className="text-[16px] font-semibold text-textColor mb-[12px]">
-                {t('wizard_step2_title', 'Enviar mensagem privada')}
-              </h2>
+              <div className="flex items-center justify-between gap-[12px] mb-[12px]">
+                <h2 className="text-[16px] font-semibold text-textColor">
+                  {t('wizard_step2_title', 'Enviar mensagem privada')}
+                </h2>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={enableDm}
+                  aria-controls="automation-private-message"
+                  aria-label={t('wizard_step2_title', 'Enviar mensagem privada')}
+                  onClick={() => setEnableDm(value => !value)}
+                  className={`relative w-[44px] h-[24px] shrink-0 rounded-full transition-colors ${enableDm ? 'bg-btnPrimary' : 'bg-newTextColor/30'}`}
+                >
+                  <div className={`absolute top-[2px] w-[20px] h-[20px] rounded-full bg-white transition-all ${enableDm ? 'left-[22px]' : 'left-[2px]'}`} />
+                </button>
+              </div>
+              {enableDm ? (
+                <div id="automation-private-message">
               <div className={inputWrapperClass}>
                 <textarea
                   className={`${inputClass} min-h-[100px] resize-y`}
                   rows={4}
                   placeholder={t('dm_template_placeholder', 'Olá {commenter_name}!\n\nAqui está o link que você pediu...')}
+                  aria-label={t('wizard_step2_title', 'Enviar mensagem privada')}
                   value={dmMessage}
                   onFocus={() => setActivePreviewTab('dm')}
                   onChange={(e) => setDmMessage(e.target.value)}
@@ -675,10 +695,16 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
                   ? `${dmButtonText} · ${dmButtonUrl}`
                   : `+ ${t('story_add_link', 'Adicionar um link')}`}
               </button>
+                </div>
+              ) : (
+                <p className="text-[12px] text-customColor18">
+                  {t('wizard_dm_disabled_hint', 'Com esta opção desligada, nenhuma mensagem privada será enviada.')}
+                </p>
+              )}
             </div>
 
-            {/* Extras — follow gate */}
-            <div className="border-t border-fifth pt-[20px] mb-[20px]">
+            {/* Extras — follow gate requires private messages */}
+            {enableDm && (<div className="border-t border-fifth pt-[20px] mb-[20px]">
               <h2 className="text-[16px] font-semibold text-textColor mb-[12px]">
                 {t('story_section_extras', 'Outros recursos para automatizar')}
               </h2>
@@ -869,6 +895,8 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
               </div>
             </div>
 
+            )}
+
             {(!isEditing || initialFlow?.status === 'DRAFT') && (
           <label className="flex items-center gap-[8px] text-[13px] mb-[12px]">
             <input type="checkbox" checked={activateAfterSave} onChange={e => setActivateAfterSave(e.target.checked)} />
@@ -895,9 +923,9 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
           postThumb={selectedPost?.thumbnailUrl || selectedPost?.mediaUrl}
           postCaption={selectedPost?.caption}
           replyMessage={enableReply ? replyMessages.filter(m => m.trim())[0] : undefined}
-          dmMessage={dmMessage || undefined}
-          dmButtonText={dmButtonText || undefined}
-          dmButtonUrl={dmButtonUrl || undefined}
+          dmMessage={enableDm ? dmMessage || undefined : undefined}
+          dmButtonText={enableDm ? dmButtonText || undefined : undefined}
+          dmButtonUrl={enableDm ? dmButtonUrl || undefined : undefined}
           integrationPicture={(selectedIntegration as any)?.picture}
           integrationName={(selectedIntegration as any)?.name || (selectedIntegration as any)?.display}
           activeTab={activePreviewTab}
@@ -1022,7 +1050,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
       )}
 
       <AddLinkModal
-        open={showAddLink}
+        open={enableDm && showAddLink}
         initialText={dmButtonText}
         initialUrl={dmButtonUrl}
         onClose={() => setShowAddLink(false)}
