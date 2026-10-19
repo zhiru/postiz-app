@@ -1,6 +1,8 @@
 # Instagram webhook relay
 
-The relay keeps the existing Meta callback URL and Chatwoot receiver. It adds a second delivery to Postiz. It does not change the Meta app callback or rebuild Hermes.
+The relay keeps the existing Chatwoot receiver and adds a second delivery to Postiz without rebuilding Hermes. The active callback URL for this installation is `https://chat.neuraltalk.com.br/webhooks/instagram`.
+
+Release validation on 2026-10-19 found that the former Instagram callback host, `chat.aireset.com.br`, had no DNS record and was suspended in Plesk. The release uses the active `chat.neuraltalk.com.br` host, which reaches the same Hermes receiver. Do not reactivate the suspended domain or change DNS. Change only the Instagram object callback in the shared Meta app after the public validation below; keep the Page and WhatsApp callbacks unchanged.
 
 Python 3.12 standard library is sufficient. No application database is used or changed. The HTTP listener binds only to `127.0.0.1:15038`. Apache remains the public TLS endpoint.
 
@@ -44,8 +46,8 @@ Perform this step only as part of an authorized release.
 3. Put the **existing shared Meta app secret** in a separate private file without printing it. The file must be readable by container UID 1000 (mode 0400, owner 1000). Keep its parent directory private to the operator. Do not change the secret in Meta, Hermes or Postiz. Both destinations must already use that same app secret.
 4. Set `META_APP_SECRET_FILE` to that file's absolute path. Set `RELAY_INSTAGRAM_IDS` to the connected Instagram `internalId` values from the current Postiz database. Check the active account and organization scope. The release validation identified three accounts, but read their current IDs instead of assuming that old metadata is still current. Keep this `.env` outside Git.
 5. Start only this service with `docker compose -f compose.yaml up -d`. Check its image digest and retain it with the release record. Check `http://127.0.0.1:15038/health`; expect zero pending/dead deliveries.
-6. Back up the exact Apache/Plesk HTTPS vhost file and its permissions. Add `apache.conf` **before** the existing `ProxyPass "/"` rule for `chat.aireset.com.br`. Keep the remaining vhost configuration and the Meta callback URL unchanged. Run the server's Apache configuration test before its graceful reload. Do not restart the global Docker daemon or alter unrelated vhosts.
-7. Verify an invalid signature returns HTTP 401 without a queue entry. Verify the Meta GET challenge still reaches Hermes. Use an authorized test event to confirm both destinations accept a delivery and the queue drains. Keep automation flows paused until the test account, rule and expected message are confirmed.
+6. Back up the exact Apache/Plesk HTTPS vhost file and its permissions for `chat.neuraltalk.com.br`. Add `apache.conf` after the existing `RewriteEngine On`, **before** the general proxy rewrite rules and `ProxyPass "/"`. This vhost uses a deployment `RewriteMap`: its general `[P,L]` rule runs before `ProxyPassMatch`, so `ProxyPassMatch` alone does not route requests to the relay. Keep the map, backend target and all other routes unchanged. Run the server's Apache configuration test before its graceful reload. Do not restart Docker or alter unrelated vhosts.
+7. Use the **public HTTPS URL** to verify an invalid signature returns HTTP 401 without a queue entry. Verify the existing Hermes GET challenge through that same URL. A signed neutral entry for an allowed account with `changes: []` must return `queued`, drain both destinations and leave automation execution/delivery counts unchanged; its replay must return `duplicate`. This distinguishes the relay response from the direct Hermes response `"ok"`. Then update only the shared Meta app's Instagram object callback to the active URL above, using the existing verification token. Keep automation flows paused until the test account, rule and expected message are confirmed.
 8. Replay the same signed event. Expect HTTP 200 `duplicate` and unchanged Postiz execution/delivery counts. Confirm the existing Chatwoot event and current Instagram history sync still work. Record the exact source revision, image digest, allowed account IDs and results without secrets.
 
 ## Recover a dead letter
@@ -62,4 +64,4 @@ Replace `EVENT_SHA256` with the 64-character hash from the dead-letter log. Use 
 
 ## Roll back ingress
 
-Restore the saved HTTPS vhost configuration, run the Apache configuration test, then reload Apache gracefully. The same callback URL will again reach Hermes directly. Keep the relay running until accepted pending deliveries have drained, or retain the spool and resolve dead letters later. Do not remove the spool, rotate signing secrets or restore an application database for this rollback.
+Restore the saved active HTTPS vhost configuration, run the Apache configuration test, then reload Apache gracefully. The active callback URL will again reach Hermes directly. Keep the Instagram callback on the active hostname; do not restore the suspended legacy hostname. Keep the relay running until accepted pending deliveries have drained, or retain the spool and resolve dead letters later. Do not remove the spool, rotate signing secrets or restore an application database for this rollback.
