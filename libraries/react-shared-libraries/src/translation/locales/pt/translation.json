@@ -2308,5 +2308,6 @@
   "agents_dev": "Agentes / Dev",
   "timezone": "Fuso horário",
   "automatic_timezone": "Automático ({{timezone}})",
-  "could_not_save_timezone": "Não foi possível salvar o fuso horário"
+  "could_not_save_timezone": "Não foi possível salvar o fuso horário",
+  "wizard_dm_disabled_hint": "Com esta opção desligada, nenhuma mensagem privada será enviada."
 }

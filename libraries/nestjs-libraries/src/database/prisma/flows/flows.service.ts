@@ -668,6 +668,9 @@ export class FlowsService {
       flowEdges,
       profileId
     );
+    if (body.enableDm === false) {
+      await this._flowsRepository.abandonFlowPostbacks(orgId, id, profileId);
+    }
 
     // Auto-activate on first wizard save: if the flow was still DRAFT (created
     // via the popup hub which makes an empty draft before the wizard runs),
@@ -846,7 +849,7 @@ export class FlowsService {
     }
 
     // Send DM node
-    if (body.dmMessage) {
+    if (body.enableDm !== false && body.dmMessage) {
       const dmData: Record<string, any> = { message: body.dmMessage };
       if (body.dmButtonText) dmData.buttonText = body.dmButtonText;
       if (body.dmButtonUrl) dmData.buttonUrl = body.dmButtonUrl;
@@ -901,7 +904,9 @@ export class FlowsService {
     // The follow-gate flag works for both triggers:
     //   story_reply  -> sends gate text via regular DM
     //   comment_on_post -> sends gate text via private reply (button stripped)
-    triggerConfig.requireFollow = body.requireFollow ?? false;
+    if (body.enableDm !== undefined) triggerConfig.enableDm = body.enableDm;
+    triggerConfig.requireFollow =
+      body.enableDm !== false && (body.requireFollow ?? false);
     if (body.followGateMessage !== undefined) {
       triggerConfig.followGateMessage = body.followGateMessage;
     }
@@ -1797,8 +1802,29 @@ export class FlowsService {
     });
   }
 
-  getPendingPostback(id: string) {
-    return this._flowsRepository.findPostbackById(id);
+  async getPendingPostback(id: string) {
+    const pending = await this._flowsRepository.findPostbackById(id);
+    if (!pending || pending.status === PendingPostbackStatus.ABANDONED)
+      return null;
+    // Recheck the saved setting when a queued activity reads an old snapshot.
+    if (await this.privateMessagesDisabled(pending)) return null;
+    return pending;
+  }
+
+  private async privateMessagesDisabled(pending: PendingPostback) {
+    const flow = await this._flowsRepository.getFlow(
+      pending.organizationId,
+      pending.flowId
+    );
+    if (!flow) return true;
+    return flow.nodes.some((node) => {
+      if (node.type !== 'TRIGGER') return false;
+      try {
+        return JSON.parse(node.data || '{}').enableDm === false;
+      } catch {
+        return false;
+      }
+    });
   }
 
   consumePendingPostback(id: string) {
@@ -1858,6 +1884,8 @@ export class FlowsService {
       );
       return;
     }
+
+    if (await this.privateMessagesDisabled(pending)) return;
 
     if (pending.expiresAt.getTime() < Date.now()) {
       this._logger.log(

@@ -112,7 +112,7 @@ export class FlowActivity {
     flowId?: string
   ) {
     if (!flowId) throw new Error('Automation identity required');
-    await this.requireActiveFlow(flowId);
+    await this.requireActiveFlow(flowId, true);
     const integration = await this._integrationService.getIntegrationById(
       orgId,
       integrationId
@@ -141,15 +141,17 @@ export class FlowActivity {
     // workflow collects all DM messages and sends them combined here.
     await this._deliveries.sendOnce(
       JSON.stringify([integrationId, commentId, 'private']),
-      () =>
-        provider.sendPrivateReply(
+      async () => {
+        await this.requireActiveFlow(flowId, true);
+        return provider.sendPrivateReply(
           token,
           integration.internalId,
           commentId,
           message,
           button,
           host
-        )
+        );
+      }
     );
   }
 
@@ -165,7 +167,7 @@ export class FlowActivity {
     flowId?: string
   ) {
     if (!flowId) throw new Error('Automation identity required');
-    await this.requireActiveFlow(flowId);
+    await this.requireActiveFlow(flowId, true);
     const integration = await this._integrationService.getIntegrationById(
       orgId,
       integrationId
@@ -183,6 +185,7 @@ export class FlowActivity {
     return this._deliveries.sendOnce(
       JSON.stringify([integrationId, eventId, 'story']),
       async () => {
+        await this.requireActiveFlow(flowId, true);
         // Messaging uses a token configured in Settings > Credenciais (Meta
         // System User Token or per-account IG User Token), NOT the integration
         // token used for posting. The service resolves the right token, does
@@ -365,7 +368,7 @@ export class FlowActivity {
       );
     }
 
-    await this.requireActiveFlow(pb.flowId);
+    await this.requireActiveFlow(pb.flowId, true);
     const integration = await this._integrationService.getIntegrationById(
       pb.organizationId,
       pb.integrationId
@@ -390,15 +393,17 @@ export class FlowActivity {
     const { token, host } = await this.resolveIgRoute(integration);
     await this._deliveries.sendOnce(
       JSON.stringify([integration.id, pb.igCommentId, 'private']),
-      () =>
-        provider.sendPrivateReply(
+      async () => {
+        await this.requireActiveFlow(pb.flowId, true);
+        return provider.sendPrivateReply(
           token,
           integration.internalId,
           pb.igCommentId,
           message,
           button,
           host
-        )
+        );
+      }
     );
   }
 
@@ -416,7 +421,7 @@ export class FlowActivity {
     return this._deliveries.sendOnce(
       JSON.stringify([pb.integrationId, pb.originExecutionId, 'final']),
       async () => {
-        await this.requireActiveFlow(pb.flowId);
+        await this.requireActiveFlow(pb.flowId, true);
         const integration = await this._integrationService.getIntegrationById(
           pb.organizationId,
           pb.integrationId
@@ -486,7 +491,7 @@ export class FlowActivity {
     return this._deliveries.sendOnce(
       JSON.stringify([pb.integrationId, pb.id, 'follow-gate']),
       async () => {
-        await this.requireActiveFlow(pb.flowId);
+        await this.requireActiveFlow(pb.flowId, true);
         const integration = await this._integrationService.getIntegrationById(
           pb.organizationId,
           pb.integrationId
@@ -593,9 +598,22 @@ export class FlowActivity {
     await this._unmatchedCommentService.enrich(unmatchedCommentId);
   }
 
-  private async requireActiveFlow(flowId: string) {
+  private async requireActiveFlow(flowId: string, privateMessage = false) {
     const flow = await this._flowsService.getFlowById(flowId);
     if (!flow || flow.status !== 'ACTIVE' || flow.deletedAt)
       throw new Error('Automation paused or unavailable');
+    if (
+      privateMessage &&
+      flow.nodes.some((node) => {
+        if (node.type !== 'TRIGGER') return false;
+        try {
+          return JSON.parse(node.data || '{}').enableDm === false;
+        } catch {
+          return false;
+        }
+      })
+    ) {
+      throw new Error('Private messages disabled for this automation');
+    }
   }
 }

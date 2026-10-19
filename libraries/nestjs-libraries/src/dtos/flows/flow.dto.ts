@@ -265,6 +265,13 @@ export class QuickCreateFlowDto {
   replyMessages?: string[];
 
   @ApiPropertyOptional({
+    description: 'Desativa todas as mensagens privadas quando false. Ausente mantém a compatibilidade com fluxos e clientes existentes.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enableDm?: boolean;
+
+  @ApiPropertyOptional({
     maxLength: 2000,
     description:
       'Texto da mensagem direta (DM) enviada ao autor do comentário.',

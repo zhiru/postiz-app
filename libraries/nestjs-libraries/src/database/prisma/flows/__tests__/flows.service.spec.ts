@@ -1355,6 +1355,7 @@ describe('FlowsService', () => {
 
   describe('handlePostbackClick', () => {
     beforeEach(() => {
+      mockRepository.getFlow.mockResolvedValue({ nodes: [] });
       process.env.POSTBACK_SIGNING_SECRET = 'unit-test-secret';
     });
 
