@@ -7,6 +7,14 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+### Post preview, engagement and automation account selection
+
+- Calendar cards open preview; native posts keep an explicit edit action.
+- Authenticated post previews include network comments, available metrics, last refresh time and refresh-now; background polling gradually covers historical posts.
+- Searchable, readable Instagram account selection supports shared settings for several accounts, with independent histories and atomic, idempotent creation. New flows can be saved paused.
+- Instance admins can configure a public HTTPS logo and accessible platform name using the existing settings panel.
+
+
 ### Corrigido
 
 - Webhooks do Instagram solicitam reentrega quando o Temporal não aceita uma automação de comentário ou story. A recuperação reaproveita a execução e a identidade do workflow, preservando a proteção contra envios repetidos.

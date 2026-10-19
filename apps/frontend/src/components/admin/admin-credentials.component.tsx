@@ -1,7 +1,7 @@
 'use client';
 
 import React, { FC, useCallback, useMemo, useState } from 'react';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import copy from 'copy-to-clipboard';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
@@ -19,7 +19,8 @@ type CredentialCategory =
   | 'limits'
   | 'flags'
   | 'urls'
-  | 'monitoring';
+  | 'monitoring'
+  | 'branding';
 
 interface CredentialKey {
   key: string;
@@ -47,6 +48,7 @@ interface CredentialsResponse {
 
 // same order the settings are grouped in on screen
 const CATEGORIES: CredentialCategory[] = [
+  'branding',
   'networks',
   'ai',
   'email',
@@ -106,7 +108,10 @@ const RestartButton: FC<{ pending: number }> = ({ pending }) => {
         );
         return;
       }
-      toaster.show(t('restarting_services', 'Restarting the services'), 'success');
+      toaster.show(
+        t('restarting_services', 'Restarting the services'),
+        'success'
+      );
     } finally {
       setRestarting(false);
     }
@@ -166,6 +171,7 @@ const CredentialGroupCard: FC<{
   onSaved: (data: CredentialsResponse) => void;
 }> = ({ group, onSaved }) => {
   const t = useT();
+  const { mutate: mutateCache } = useSWRConfig();
   const fetch = useFetch();
   const toaster = useToaster();
   const [values, setValues] = useState<Record<string, string | null>>({});
@@ -188,6 +194,7 @@ const CredentialGroupCard: FC<{
       }
       setValues({});
       onSaved(await res.json());
+      if (group.category === 'branding') await mutateCache('/public/branding').catch(() => undefined);
       toaster.show(t('credentials_saved', 'Credentials saved'), 'success');
     } finally {
       setSaving(false);
@@ -197,13 +204,15 @@ const CredentialGroupCard: FC<{
   return (
     <div className="border border-newTableBorder rounded-[8px] p-[16px] bg-newBgColorInner flex flex-col gap-[12px]">
       <div className="flex items-center gap-[8px]">
-        <div className="text-[16px] font-[600] flex-1">{group.name}</div>
+        <div className="text-[16px] font-[600] flex-1">{group.category === 'branding' ? t('platform_branding_title', 'Platform logo') : group.name}</div>
         <div
           className={
             configured ? 'text-[12px] text-green-500' : 'text-[12px] opacity-70'
           }
         >
-          {configured
+          {group.category === 'branding'
+            ? t('platform_branding_public', 'Visible to everyone')
+            : configured
             ? t('credential_configured', 'Configured')
             : t('credential_missing', 'Missing keys')}
         </div>
@@ -236,13 +245,29 @@ const CredentialGroupCard: FC<{
           </Button>
         </div>
       ))}
+      {group.category === 'branding' && (
+        <p className="text-[13px] text-textItemBlur">
+          {t(
+            'platform_branding_help',
+            'Set the platform name and paste the HTTPS URL of your logo from the media library. The logo appears in the sidebar, login and preview. Leave empty to restore the default. Browser titles and favicon are separate settings.'
+          )}
+        </p>
+      )}
       {group.keys.map((k) => (
         <div
           key={k.key}
-          className="grid grid-cols-[220px_1fr_150px_120px_auto] gap-[8px] items-center text-[13px]"
+          className={group.category === 'branding'
+            ? 'flex flex-col items-stretch gap-[8px] text-[13px]'
+            : 'grid grid-cols-[220px_1fr_150px_120px_auto] gap-[8px] items-center text-[13px]'}
         >
           <div className="flex flex-col">
-            <div className="font-mono truncate">{k.key}</div>
+            <div className="font-mono truncate">
+              {k.key === 'PLATFORM_BRAND_NAME'
+                ? t('platform_name', 'Platform name')
+                : k.key === 'PLATFORM_BRAND_LOGO_URL'
+                ? t('platform_logo_url', 'Logo image URL (HTTPS)')
+                : k.key}
+            </div>
             {k.frontend && (
               <div className="text-[11px] opacity-60">
                 {t('credential_also_in_env', 'Keep it in the .env too')}
@@ -251,6 +276,7 @@ const CredentialGroupCard: FC<{
           </div>
           {k.writable ? (
             <input
+              aria-label={k.key}
               type={k.secret ? 'password' : 'text'}
               autoComplete="off"
               className="bg-newBgColor border border-newTableBorder rounded-[4px] h-[32px] px-[8px]"
@@ -319,7 +345,9 @@ const BootstrapCard: FC<{ bootstrap: CredentialsResponse['bootstrap'] }> = ({
           <div className="font-mono truncate">{item.key}</div>
           <div
             className={
-              item.present ? 'text-[12px] text-green-500' : 'text-[12px] text-red-400'
+              item.present
+                ? 'text-[12px] text-green-500'
+                : 'text-[12px] text-red-400'
             }
           >
             {item.present
@@ -339,6 +367,7 @@ export const AdminCredentialsComponent: FC = () => {
 
   const categoryLabels: Record<CredentialCategory, string> = useMemo(
     () => ({
+      branding: t('credential_category_branding', 'Platform branding'),
       networks: t('credential_category_networks', 'Social networks'),
       ai: t('credential_category_ai', 'AI'),
       email: t('credential_category_email', 'E-mail'),

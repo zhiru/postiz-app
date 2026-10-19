@@ -10,7 +10,8 @@ export type InstanceCredentialCategory =
   | 'limits'
   | 'flags'
   | 'urls'
-  | 'monitoring';
+  | 'monitoring'
+  | 'branding';
 
 export const instanceCredentialGroups: {
   name: string;
@@ -19,6 +20,7 @@ export const instanceCredentialGroups: {
   keys: string[];
   docs?: string;
 }[] = [
+  { name: 'Platform branding', category: 'branding', identifiers: [], keys: ['PLATFORM_BRAND_NAME', 'PLATFORM_BRAND_LOGO_URL'] },
   { name: 'Facebook / Instagram (Meta)', category: 'networks', identifiers: ['facebook', 'instagram'], keys: ['FACEBOOK_APP_ID', 'FACEBOOK_APP_SECRET'], docs: 'https://developers.facebook.com/apps' },
   { name: 'Instagram (Instagram Login)', category: 'networks', identifiers: ['instagram-standalone'], keys: ['INSTAGRAM_APP_ID', 'INSTAGRAM_APP_SECRET'], docs: 'https://developers.facebook.com/apps' },
   { name: 'Threads', category: 'networks', identifiers: ['threads'], keys: ['THREADS_APP_ID', 'THREADS_APP_SECRET'], docs: 'https://developers.facebook.com/apps' },

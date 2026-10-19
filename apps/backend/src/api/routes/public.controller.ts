@@ -47,15 +47,23 @@ export class PublicController {
     private _reviewLinksService: ReviewLinksService
   ) {}
 
+  // These two new settings are intentionally public, including on login pages.
+  // Never expose the credentials list or arbitrary environment keys here.
+  @Get('/branding')
+  getBranding() {
+    return {
+      name: process.env.PLATFORM_BRAND_NAME || 'Robô MultiPost',
+      logoUrl: process.env.PLATFORM_BRAND_LOGO_URL || null,
+    };
+  }
+
   // Guia/skill de agente em markdown, com a URL do backend já injetada.
   // Público (sem auth) — o conteúdo é instrução, não segredo; as chamadas reais
   // exigem a chave. Passe este link + a chave ao agente (Hermes/OpenClaw/etc.).
   @Get('/agent-skill')
   async agentSkill(@Res() res: Response) {
     const apiUrl =
-      process.env.NEXT_PUBLIC_BACKEND_URL ||
-      process.env.FRONTEND_URL ||
-      '';
+      process.env.NEXT_PUBLIC_BACKEND_URL || process.env.FRONTEND_URL || '';
     res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
     res.setHeader('Cache-Control', 'public, max-age=300');
     res.send(buildAgentSkillMarkdown(apiUrl));
@@ -101,9 +109,14 @@ export class PublicController {
   }
 
   @Get('/posts/:id/review-comments')
-  async getGuestReviewComments(@Param('id') postId: string, @Query('token') token?: string) {
+  async getGuestReviewComments(
+    @Param('id') postId: string,
+    @Query('token') token?: string
+  ) {
     const link = await this._reviewLinksService.resolveToken(postId, token);
-    return { comments: link ? await this._postsService.getGuestComments(postId) : [] };
+    return {
+      comments: link ? await this._postsService.getGuestComments(postId) : [],
+    };
   }
 
   @Get(`/posts/:id/review`)

@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import {
   Injectable,
   BadRequestException,
@@ -22,6 +23,7 @@ import {
   UpdateFlowDto,
   SaveCanvasDto,
   QuickCreateFlowDto,
+  MultiQuickCreateFlowDto,
 } from '@gitroom/nestjs-libraries/dtos/flows/flow.dto';
 import { TemporalService } from 'nestjs-temporal-core';
 import { organizationId as orgSearchAttr } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
@@ -174,6 +176,15 @@ export class FlowsService {
     return this._flowsRepository.createFlow(orgId, body, resolvedProfileId);
   }
 
+  async checkIntegrationWebhookAccess(
+    orgId: string,
+    integrationId: string,
+    profileId?: string
+  ) {
+    await this.assertIntegrationAccess(orgId, integrationId, profileId);
+    return this.checkIntegrationWebhook(orgId, integrationId);
+  }
+
   async checkIntegrationWebhook(
     orgId: string,
     integrationId: string
@@ -185,7 +196,11 @@ export class FlowsService {
     if (!integration) {
       return { ok: false, error: 'Integracao nao encontrada' };
     }
-    if (!['instagram', 'instagram-standalone'].includes(integration.providerIdentifier)) {
+    if (
+      !['instagram', 'instagram-standalone'].includes(
+        integration.providerIdentifier
+      )
+    ) {
       return {
         ok: false,
         error: 'Apenas contas do Instagram suportam automacoes no momento',
@@ -343,29 +358,37 @@ export class FlowsService {
     }> = [];
     if (creds?.instagramAppId && creds?.instagramAppSecret) {
       candidates.push({
-        appId: creds.instagramAppId, appSecret: creds.instagramAppSecret,
+        appId: creds.instagramAppId,
+        appSecret: creds.instagramAppSecret,
         primaryHost: 'graph.instagram.com',
       });
     }
     if (creds?.clientId && creds?.clientSecret) {
       candidates.push({
-        appId: creds.clientId, appSecret: creds.clientSecret,
+        appId: creds.clientId,
+        appSecret: creds.clientSecret,
         primaryHost: 'graph.facebook.com',
       });
     }
     if (process.env.INSTAGRAM_APP_ID && process.env.INSTAGRAM_APP_SECRET) {
       candidates.push({
-        appId: process.env.INSTAGRAM_APP_ID, appSecret: process.env.INSTAGRAM_APP_SECRET,
+        appId: process.env.INSTAGRAM_APP_ID,
+        appSecret: process.env.INSTAGRAM_APP_SECRET,
         primaryHost: 'graph.instagram.com',
       });
     }
     if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) {
       candidates.push({
-        appId: process.env.FACEBOOK_APP_ID, appSecret: process.env.FACEBOOK_APP_SECRET,
+        appId: process.env.FACEBOOK_APP_ID,
+        appSecret: process.env.FACEBOOK_APP_SECRET,
         primaryHost: 'graph.facebook.com',
       });
     }
-    return candidates.find((candidate) => candidate.primaryHost === preferredHost) ?? candidates[0] ?? null;
+    return (
+      candidates.find((candidate) => candidate.primaryHost === preferredHost) ??
+      candidates[0] ??
+      null
+    );
   }
 
   private evaluateIgSubscription(
@@ -538,36 +561,66 @@ export class FlowsService {
     return this._flowsRepository.updateFlowStatus(orgId, id, status, profileId);
   }
 
-  private async ensureWebhookSubscription(orgId: string, integrationId: string) {
+  private async ensureWebhookSubscription(
+    orgId: string,
+    integrationId: string
+  ) {
     try {
-      const integration = await this._integrationService.getIntegrationById(orgId, integrationId);
-      if (!integration || !['instagram', 'instagram-standalone'].includes(integration.providerIdentifier)) return;
-      integration.token = decryptIntegrationToken(this._encryption, integration.token);
-      const provider = this._integrationManager.getSocialIntegration('instagram') as unknown as InstagramProvider;
+      const integration = await this._integrationService.getIntegrationById(
+        orgId,
+        integrationId
+      );
+      if (
+        !integration ||
+        !['instagram', 'instagram-standalone'].includes(
+          integration.providerIdentifier
+        )
+      )
+        return;
+      integration.token = decryptIntegrationToken(
+        this._encryption,
+        integration.token
+      );
+      const provider = this._integrationManager.getSocialIntegration(
+        'instagram'
+      ) as unknown as InstagramProvider;
       if (!provider) {
-        this._logger.warn('Instagram provider not found, skipping webhook subscription');
+        this._logger.warn(
+          'Instagram provider not found, skipping webhook subscription'
+        );
         return;
       }
       const route = await resolveIgRoute(integration, this._instagramMessaging);
       const credentials = await this._credentialService.getRawShared(
-        orgId, 'facebook', integration.profileId ?? undefined
+        orgId,
+        'facebook',
+        integration.profileId ?? undefined
       );
       const app = this.pickAppCandidate(credentials, route.host);
       if (!app) {
-        this._logger.warn('Meta app credentials are unavailable; subscription was not changed');
+        this._logger.warn(
+          'Meta app credentials are unavailable; subscription was not changed'
+        );
         return;
       }
       const subscribed = await provider.ensureWebhookSubscription(
-        route.token, integration.internalId, route.host, app.appId
+        route.token,
+        integration.internalId,
+        route.host,
+        app.appId
       );
       if (!subscribed) {
-        this._logger.warn('Instagram account webhook subscription was not confirmed');
+        this._logger.warn(
+          'Instagram account webhook subscription was not confirmed'
+        );
         return;
       }
       this._logger.log('Instagram account webhook subscription confirmed');
     } catch {
       // Preserve manually configured webhook setups if the API cannot confirm them.
-      this._logger.warn('Instagram account webhook subscription could not be confirmed');
+      this._logger.warn(
+        'Instagram account webhook subscription could not be confirmed'
+      );
     }
   }
 
@@ -575,7 +628,11 @@ export class FlowsService {
     const flow = await this._flowsRepository.getFlow(orgId, flowId, profileId);
     if (!flow) throw new BadRequestException('Automacao nao encontrada');
     const result = await this.getInstagramPostsByIntegration(
-      orgId, flow.integrationId, undefined, 25, profileId
+      orgId,
+      flow.integrationId,
+      undefined,
+      25,
+      profileId
     );
     return result.posts;
   }
@@ -602,69 +659,7 @@ export class FlowsService {
       profileId
     );
 
-    const triggerType = body.triggerType ?? 'comment_on_post';
-    const nodes: Array<{
-      type: string;
-      label?: string;
-      positionX: number;
-      positionY: number;
-      data: string;
-    }> = [];
-    const edges: Array<{ sourceIndex: number; targetIndex: number }> = [];
-
-    const triggerConfig = this.buildTriggerConfig(body);
-
-    nodes.push({
-      type: 'TRIGGER',
-      label: triggerType,
-      positionX: 250,
-      positionY: 50,
-      data: JSON.stringify(triggerConfig),
-    });
-    let lastIndex = 0;
-
-    if (triggerType === 'comment_on_post') {
-      const replyMsgs =
-        body.replyMessages?.filter(Boolean) ??
-        (body.replyMessage ? [body.replyMessage] : []);
-      if (replyMsgs.length) {
-        nodes.push({
-          type: 'REPLY_COMMENT',
-          positionX: 250,
-          positionY: 50 + nodes.length * 150,
-          data: JSON.stringify({ message: replyMsgs[0], messages: replyMsgs }),
-        });
-        edges.push({ sourceIndex: lastIndex, targetIndex: nodes.length - 1 });
-        lastIndex = nodes.length - 1;
-      }
-    }
-
-    if (body.dmMessage) {
-      const dmData: Record<string, any> = { message: body.dmMessage };
-      if (body.dmButtonText) dmData.buttonText = body.dmButtonText;
-      if (body.dmButtonUrl) dmData.buttonUrl = body.dmButtonUrl;
-      nodes.push({
-        type: 'SEND_DM',
-        positionX: 250,
-        positionY: 50 + nodes.length * 150,
-        data: JSON.stringify(dmData),
-      });
-      edges.push({ sourceIndex: lastIndex, targetIndex: nodes.length - 1 });
-    }
-
-    const flowNodes = nodes.map((n, i) => ({
-      id: `temp-${i}`,
-      type: n.type as any,
-      label: n.label,
-      positionX: n.positionX,
-      positionY: n.positionY,
-      data: n.data,
-    }));
-    const flowEdges = edges.map((e, i) => ({
-      id: `temp-edge-${i}`,
-      sourceNodeId: `temp-${e.sourceIndex}`,
-      targetNodeId: `temp-${e.targetIndex}`,
-    }));
+    const { nodes: flowNodes, edges: flowEdges } = this.buildQuickCanvas(body);
 
     await this._flowsRepository.saveCanvas(
       orgId,
@@ -678,11 +673,15 @@ export class FlowsService {
     // via the popup hub which makes an empty draft before the wizard runs),
     // promote it to ACTIVE so the user doesn't need to remember to activate
     // it manually. Flows already ACTIVE or PAUSED keep their current status.
-    if (current.status === FlowStatus.DRAFT) {
-      await this.updateFlowStatus(
+    if (current.status === FlowStatus.DRAFT && body.activate !== false) {
+      await this.updateFlowStatus(orgId, id, FlowStatus.ACTIVE, profileId);
+    }
+
+    if (current.status === FlowStatus.DRAFT && body.activate === false) {
+      await this._flowsRepository.updateFlowStatus(
         orgId,
         id,
-        FlowStatus.ACTIVE,
+        FlowStatus.PAUSED,
         profileId
       );
     }
@@ -721,6 +720,92 @@ export class FlowsService {
       profileId
     );
 
+    const { nodes: flowNodes, edges: flowEdges } = this.buildQuickCanvas(body);
+
+    await this._flowsRepository.saveCanvas(
+      orgId,
+      flow.id,
+      flowNodes,
+      flowEdges,
+      profileId
+    );
+
+    if (body.activate === false) {
+      await this._flowsRepository.updateFlowStatus(
+        orgId,
+        flow.id,
+        FlowStatus.PAUSED,
+        profileId
+      );
+    } else {
+      await this.updateFlowStatus(orgId, flow.id, FlowStatus.ACTIVE, profileId);
+    }
+
+    return this._flowsRepository.getFlow(orgId, flow.id, profileId);
+  }
+
+  async quickCreateMultipleFlows(
+    orgId: string,
+    body: MultiQuickCreateFlowDto,
+    profileId?: string
+  ) {
+    const ids = [...new Set(body.integrationIds)];
+    if (!ids.length || ids.length > 20 || !ids.includes(body.integrationId))
+      throw new BadRequestException('Select up to 20 accounts');
+    if (ids.length > 1 && body.postMode === 'specific') {
+      throw new BadRequestException(
+        'For multiple accounts select all posts or next publication. Specific posts are configured separately for each account.'
+      );
+    }
+    this.assertDmButtonUrl(body.dmButtonUrl);
+    for (const integrationId of ids) {
+      await this.assertIntegrationAccess(orgId, integrationId, profileId);
+      const check = await this.checkIntegrationWebhook(orgId, integrationId);
+      if (!check.ok) throw new BadRequestException(check.error);
+    }
+    const resolvedProfileId = await this.resolveCreationProfileId(
+      orgId,
+      profileId
+    );
+    const canvas = this.buildQuickCanvas(body);
+    if (
+      !canvas.nodes.some(
+        (n) => n.type === 'REPLY_COMMENT' || n.type === 'SEND_DM'
+      )
+    ) {
+      throw new BadRequestException(
+        'Configure a public reply or a direct message'
+      );
+    }
+    const flows = await this._flowsRepository.createQuickBatch(
+      orgId,
+      resolvedProfileId,
+      ids.map((integrationId) => ({
+        id: createHash('sha256')
+          .update(
+            JSON.stringify([
+              orgId,
+              resolvedProfileId,
+              body.requestId,
+              integrationId,
+            ])
+          )
+          .digest('hex'),
+        integrationId,
+      })),
+      body.name,
+      canvas,
+      body.activate === true
+    );
+    if (body.activate === true) {
+      for (const integrationId of ids)
+        await this.ensureWebhookSubscription(orgId, integrationId);
+    }
+    return { flows };
+  }
+
+  private buildQuickCanvas(body: QuickCreateFlowDto) {
+    const triggerType = body.triggerType ?? 'comment_on_post';
     const nodes: Array<{
       type: string;
       label?: string;
@@ -789,23 +874,7 @@ export class FlowsService {
       targetNodeId: `temp-${e.targetIndex}`,
     }));
 
-    await this._flowsRepository.saveCanvas(
-      orgId,
-      flow.id,
-      flowNodes,
-      flowEdges,
-      profileId
-    );
-
-    // Auto-activate new flows created via wizard
-    await this.updateFlowStatus(
-      orgId,
-      flow.id,
-      FlowStatus.ACTIVE,
-      profileId
-    );
-
-    return this._flowsRepository.getFlow(orgId, flow.id, profileId);
+    return { nodes: flowNodes, edges: flowEdges };
   }
 
   private buildTriggerConfig(body: QuickCreateFlowDto): Record<string, any> {
@@ -962,22 +1031,49 @@ export class FlowsService {
     limit = 25,
     profileId?: string
   ) {
-    const integration = await this.assertIntegrationAccess(orgId, integrationId, profileId);
-    if (!['instagram', 'instagram-standalone'].includes(integration.providerIdentifier)) {
-      throw new BadRequestException('A integracao precisa ser uma conta do Instagram');
+    const integration = await this.assertIntegrationAccess(
+      orgId,
+      integrationId,
+      profileId
+    );
+    if (
+      !['instagram', 'instagram-standalone'].includes(
+        integration.providerIdentifier
+      )
+    ) {
+      throw new BadRequestException(
+        'A integracao precisa ser uma conta do Instagram'
+      );
     }
-    const provider = this._integrationManager.getSocialIntegration('instagram') as unknown as InstagramProvider;
-    if (!provider) throw new ServiceUnavailableException('Instagram media is temporarily unavailable');
+    const provider = this._integrationManager.getSocialIntegration(
+      'instagram'
+    ) as unknown as InstagramProvider;
+    if (!provider)
+      throw new ServiceUnavailableException(
+        'Instagram media is temporarily unavailable'
+      );
 
     try {
-      integration.token = decryptIntegrationToken(this._encryption, integration.token);
+      integration.token = decryptIntegrationToken(
+        this._encryption,
+        integration.token
+      );
       const route = await resolveIgRoute(integration, this._instagramMessaging);
       // Facebook media reads accept the user half of the stored page___user pair.
-      const token = route.source === 'page-access-token' ? integration.token : route.token;
-      return await provider.getRecentMedia(integration.internalId, token, route.host, limit, cursor);
+      const token =
+        route.source === 'page-access-token' ? integration.token : route.token;
+      return await provider.getRecentMedia(
+        integration.internalId,
+        token,
+        route.host,
+        limit,
+        cursor
+      );
     } catch {
       this._logger.warn('Failed to fetch Instagram posts');
-      throw new ServiceUnavailableException('Could not load Instagram posts. Check the channel connection and try again.');
+      throw new ServiceUnavailableException(
+        'Could not load Instagram posts. Check the channel connection and try again.'
+      );
     }
   }
 
@@ -986,21 +1082,46 @@ export class FlowsService {
     integrationId: string,
     profileId?: string
   ) {
-    const integration = await this.assertIntegrationAccess(orgId, integrationId, profileId);
-    if (!['instagram', 'instagram-standalone'].includes(integration.providerIdentifier)) {
-      throw new BadRequestException('A integracao precisa ser uma conta do Instagram');
+    const integration = await this.assertIntegrationAccess(
+      orgId,
+      integrationId,
+      profileId
+    );
+    if (
+      !['instagram', 'instagram-standalone'].includes(
+        integration.providerIdentifier
+      )
+    ) {
+      throw new BadRequestException(
+        'A integracao precisa ser uma conta do Instagram'
+      );
     }
-    const provider = this._integrationManager.getSocialIntegration('instagram') as unknown as InstagramProvider;
-    if (!provider) throw new ServiceUnavailableException('Instagram media is temporarily unavailable');
+    const provider = this._integrationManager.getSocialIntegration(
+      'instagram'
+    ) as unknown as InstagramProvider;
+    if (!provider)
+      throw new ServiceUnavailableException(
+        'Instagram media is temporarily unavailable'
+      );
 
     try {
-      integration.token = decryptIntegrationToken(this._encryption, integration.token);
+      integration.token = decryptIntegrationToken(
+        this._encryption,
+        integration.token
+      );
       const route = await resolveIgRoute(integration, this._instagramMessaging);
-      const token = route.source === 'page-access-token' ? integration.token : route.token;
-      return await provider.getRecentStories(integration.internalId, token, route.host);
+      const token =
+        route.source === 'page-access-token' ? integration.token : route.token;
+      return await provider.getRecentStories(
+        integration.internalId,
+        token,
+        route.host
+      );
     } catch {
       this._logger.warn('Failed to fetch Instagram stories');
-      throw new ServiceUnavailableException('Could not load Instagram stories. Check the channel connection and try again.');
+      throw new ServiceUnavailableException(
+        'Could not load Instagram stories. Check the channel connection and try again.'
+      );
     }
   }
 

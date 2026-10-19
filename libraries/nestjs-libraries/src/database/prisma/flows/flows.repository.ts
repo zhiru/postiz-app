@@ -1,5 +1,6 @@
+import { randomUUID } from 'crypto';
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   FlowStatus,
   FlowExecutionStatus,
@@ -15,7 +16,7 @@ import {
 @Injectable()
 export class FlowsRepository {
   constructor(
-    private _flow: PrismaRepository<'flow'>,
+    private _flow: PrismaRepository<'flow' | '$transaction'>,
     private _flowNode: PrismaRepository<'flowNode'>,
     private _flowEdge: PrismaRepository<'flowEdge'>,
     private _flowExecution: PrismaRepository<'flowExecution'>,
@@ -108,6 +109,85 @@ export class FlowsRepository {
           ? JSON.stringify(data.triggerPostIds)
           : null,
       },
+    });
+  }
+
+  async createQuickBatch(
+    orgId: string,
+    profileId: string,
+    targets: Array<{ id: string; integrationId: string }>,
+    name: string,
+    canvas: { nodes: FlowNodeDto[]; edges: FlowEdgeDto[] },
+    activate: boolean
+  ) {
+    return this._flow.model.$transaction(async (tx) => {
+      const result: Array<{ id: string; integrationId: string }> = [];
+      for (const target of targets) {
+        const existing = await tx.flow.findUnique({
+          where: { id: target.id },
+          include: { nodes: true },
+        });
+        if (existing) {
+          const config = (
+            nodes: Array<{
+              type: string;
+              data?: string | null;
+              positionY: number;
+            }>
+          ) =>
+            JSON.stringify(
+              [...nodes]
+                .sort((a, b) => a.positionY - b.positionY)
+                .map((n) => [n.type, n.data])
+            );
+          if (
+            existing.deletedAt ||
+            existing.organizationId !== orgId ||
+            existing.profileId !== profileId ||
+            existing.integrationId !== target.integrationId ||
+            existing.name !== name ||
+            config(existing.nodes) !== config(canvas.nodes)
+          ) {
+            throw new BadRequestException(
+              'This creation request already exists with different settings. Reload before creating another automation.'
+            );
+          }
+          result.push(target);
+          continue;
+        }
+        await tx.flow.create({
+          data: {
+            ...target,
+            organizationId: orgId,
+            profileId,
+            name,
+            status: activate ? FlowStatus.ACTIVE : FlowStatus.PAUSED,
+          },
+          select: { id: true },
+        });
+        const ids = new Map(
+          canvas.nodes.map((node) => [node.id, randomUUID()])
+        );
+        await tx.flowNode.createMany({
+          data: canvas.nodes.map((node) => ({
+            ...node,
+            id: ids.get(node.id)!,
+            flowId: target.id,
+          })),
+        });
+        if (canvas.edges.length)
+          await tx.flowEdge.createMany({
+            data: canvas.edges.map((edge) => ({
+              ...edge,
+              id: randomUUID(),
+              flowId: target.id,
+              sourceNodeId: ids.get(edge.sourceNodeId)!,
+              targetNodeId: ids.get(edge.targetNodeId)!,
+            })),
+          });
+        result.push(target);
+      }
+      return result;
     });
   }
 

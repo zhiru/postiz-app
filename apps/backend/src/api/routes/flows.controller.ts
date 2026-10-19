@@ -20,6 +20,7 @@ import {
   UpdateFlowStatusDto,
   SaveCanvasDto,
   QuickCreateFlowDto,
+  MultiQuickCreateFlowDto,
 } from '@gitroom/nestjs-libraries/dtos/flows/flow.dto';
 
 @ApiTags('Flows')
@@ -85,6 +86,19 @@ export class FlowsController {
     @Body() body: QuickCreateFlowDto
   ) {
     return this._flowsService.quickUpdateFlow(org.id, id, body, profile?.id);
+  }
+
+  @Post('/quick-create-multiple')
+  async quickCreateMultipleFlows(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Body() body: MultiQuickCreateFlowDto
+  ) {
+    return this._flowsService.quickCreateMultipleFlows(
+      org.id,
+      body,
+      profile?.id
+    );
   }
 
   @Post('/quick-create')
@@ -182,9 +196,14 @@ export class FlowsController {
   @Get('/integrations/:integrationId/webhook-status')
   async checkIntegrationWebhook(
     @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
     @Param('integrationId') integrationId: string
   ) {
-    return this._flowsService.checkIntegrationWebhook(org.id, integrationId);
+    return this._flowsService.checkIntegrationWebhookAccess(
+      org.id,
+      integrationId,
+      profile?.id
+    );
   }
 
   @Get('/:id/posts')
@@ -220,6 +239,11 @@ export class FlowsController {
     @Param('id') flowId: string,
     @Param('executionId') executionId: string
   ) {
-    return this._flowsService.getExecution(org.id, executionId, flowId, profile?.id);
+    return this._flowsService.getExecution(
+      org.id,
+      executionId,
+      flowId,
+      profile?.id
+    );
   }
 }

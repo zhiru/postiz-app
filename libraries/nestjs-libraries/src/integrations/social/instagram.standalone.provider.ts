@@ -325,6 +325,21 @@ export class InstagramStandaloneProvider
     );
   }
 
+  async listCommentsPage(
+    accessToken: string,
+    postId: string,
+    integration: Integration,
+    cursor?: string
+  ) {
+    return instagramProvider.listCommentsPage(
+      accessToken,
+      postId,
+      integration,
+      cursor,
+      'graph.instagram.com'
+    );
+  }
+
   async listComments(
     accessToken: string,
     postId: string,

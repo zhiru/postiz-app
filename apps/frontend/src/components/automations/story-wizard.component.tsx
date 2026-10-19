@@ -1,17 +1,20 @@
 'use client';
 
-import { FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import { useIntegrationStories } from '@gitroom/frontend/components/automations/hooks/use-flows';
 import { Button } from '@gitroom/react/form/button';
+import { InstagramAccountSelect } from './instagram-account-select';
 import { useRouter } from 'next/navigation';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { WizardPhonePreview } from '@gitroom/frontend/components/automations/wizard-phone-preview.component';
 import { AddLinkModal } from '@gitroom/frontend/components/automations/add-link-modal.component';
 
 interface Props {
+  initialName?: string;
+  initialIntegrationIds?: string[];
   flowId?: string;
   initialFlow?: any;
 }
@@ -38,7 +41,7 @@ const RadioDot: FC<{ active: boolean }> = ({ active }) => (
   </div>
 );
 
-export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
+export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow, initialName = '', initialIntegrationIds = [] }) => {
   const t = useT();
   const fetchApi = useFetch();
   const router = useRouter();
@@ -46,8 +49,12 @@ export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
   const { data: integrations } = useIntegrationList();
   const isEditing = !!flowId;
 
-  const [name, setName] = useState('');
-  const [integrationId, setIntegrationId] = useState('');
+  const [name, setName] = useState(initialName);
+  const [integrationIds, setIntegrationIds] = useState<string[]>(initialIntegrationIds);
+  const integrationId = integrationIds[0] || '';
+  const setIntegrationId = (id: string) => setIntegrationIds(id ? [id] : []);
+  const [activateAfterSave, setActivateAfterSave] = useState(false);
+  const creationId = useRef<string | undefined>(undefined);
   const [storyMode, setStoryMode] = useState<'all' | 'specific' | 'next_publication'>('all');
   const [selectedStoryIds, setSelectedStoryIds] = useState<string[]>([]);
   const [keywordMode, setKeywordMode] = useState<'any_word_or_reaction' | 'specific'>('any_word_or_reaction');
@@ -175,14 +182,20 @@ export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
   const removeKeyword = (k: string) => setKeywords(keywords.filter((x) => x !== k));
 
   const canSave =
+    (keywordMode !== 'specific' || keywords.some(keyword => keyword.trim())) &&
     !!name.trim() && !!integrationId && dmMessage.trim().length > 0;
 
   const handleSave = useCallback(async () => {
-    if (!canSave) return;
+    if (!canSave || saving) return;
+    if (storyMode === 'specific' && (integrationIds.length > 1 || !selectedStoryIds.length)) {
+      toaster.show(t('select_specific_post_account', 'Select a post for one account, or choose all posts / next publication for multiple accounts.'), 'warning');
+      return;
+    }
     setSaving(true);
     try {
       const body: Record<string, any> = {
         name: name.trim(),
+        activate: activateAfterSave,
         integrationId,
         triggerType: 'story_reply',
         postMode: storyMode,
@@ -206,9 +219,13 @@ export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
         }
       }
 
-      const url = isEditing
-        ? `/flows/${flowId}/quick-update`
-        : '/flows/quick-create';
+      const multiple = !isEditing && integrationIds.length > 1;
+      if (multiple) {
+        creationId.current ||= crypto.randomUUID();
+        body.requestId = creationId.current;
+        body.integrationIds = integrationIds;
+      }
+      const url = isEditing ? `/flows/${flowId}/quick-update` : multiple ? '/flows/quick-create-multiple' : '/flows/quick-create';
       const method = isEditing ? 'PUT' : 'POST';
       const res = await fetchApi(url, { method, body: JSON.stringify(body) });
       if (!res.ok) {
@@ -226,7 +243,7 @@ export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
           : t('flow_created', 'Automacao criada com sucesso'),
         'success'
       );
-      router.push(`/automacoes/${flow.id}`);
+      router.push(multiple ? '/automacoes' : `/automacoes/${flow.id}`);
     } catch {
       toaster.show(
         t('failed_to_create_flow', 'Falha ao criar automacao'),
@@ -236,6 +253,7 @@ export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
       setSaving(false);
     }
   }, [
+    saving, integrationIds, activateAfterSave,
     canSave,
     name,
     integrationId,
@@ -349,22 +367,9 @@ export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
               <label className="text-[12px] text-customColor18 mt-[6px]">
                 {t('select_instagram_account', 'Conta do Instagram')}
               </label>
-              <div className="bg-newBgColorInner h-[42px] border-newTableBorder border rounded-[8px] flex items-center">
-                <select
-                  className="h-full bg-transparent outline-none flex-1 text-[14px] text-textColor px-[16px] appearance-none"
-                  value={integrationId}
-                  onChange={(e) => setIntegrationId(e.target.value)}
-                >
-                  <option value="">
-                    {t('select_account', 'Selecione uma conta...')}
-                  </option>
-                  {instagramIntegrations.map((ig: any) => (
-                    <option key={ig.id} value={ig.id}>
-                      {ig.name || ig.display || ig.id}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <InstagramAccountSelect accounts={instagramIntegrations} value={integrationIds}
+              multiple={!isEditing} disabled={isEditing}
+              onChange={ids => { setIntegrationIds(ids); setSelectedStoryIds([]); if (ids.length > 1) setStoryMode('all'); }} />
             </>
           )}
         </div>
@@ -676,6 +681,12 @@ export const StoryWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
           </div>
         </div>
 
+        {(!isEditing || initialFlow?.status === 'DRAFT') && (
+          <label className="flex items-center gap-[8px] text-[13px] mb-[12px]">
+            <input type="checkbox" checked={activateAfterSave} onChange={e => setActivateAfterSave(e.target.checked)} />
+            {t('activate_automation_after_save', 'Activate after saving (leave unchecked to save paused)')}
+          </label>
+        )}
         {/* Save */}
         <div className="flex gap-[8px] pt-[8px]">
           <button

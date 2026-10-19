@@ -78,7 +78,9 @@ export class InstanceCredentialsService
         }
       }
     } catch (err) {
-      Logger.warn('Could not load instance credentials, keeping the environment');
+      Logger.warn(
+        'Could not load instance credentials, keeping the environment'
+      );
     }
   }
 
@@ -152,11 +154,14 @@ export class InstanceCredentialsService
   async save(values: Record<string, string | null>, userId: string) {
     const keys = Object.keys(values);
     const readOnly = keys.filter(
-      (key) => instanceCredentialListedKeys.includes(key) && !isWritableCredential(key)
+      (key) =>
+        instanceCredentialListedKeys.includes(key) && !isWritableCredential(key)
     );
     if (readOnly.length) {
       throw new HttpException(
-        `These settings can only be changed in the .env: ${readOnly.join(', ')}`,
+        `These settings can only be changed in the .env: ${readOnly.join(
+          ', '
+        )}`,
         400
       );
     }
@@ -171,7 +176,10 @@ export class InstanceCredentialsService
     }
     const unknown = keys.filter((key) => !instanceCredentialKeys.includes(key));
     if (unknown.length) {
-      throw new HttpException(`Unknown credentials: ${unknown.join(', ')}`, 400);
+      throw new HttpException(
+        `Unknown credentials: ${unknown.join(', ')}`,
+        400
+      );
     }
     const invalid = keys.filter(
       (key) =>
@@ -180,6 +188,26 @@ export class InstanceCredentialsService
     );
     if (invalid.length) {
       throw new HttpException(`Invalid values for: ${invalid.join(', ')}`, 400);
+    }
+
+    const logo = values.PLATFORM_BRAND_LOGO_URL?.trim();
+    if (logo) {
+      try {
+        const url = new URL(logo);
+        if (url.protocol !== 'https:' || url.username || url.password)
+          throw new Error();
+      } catch {
+        throw new HttpException(
+          'The platform logo must be an HTTPS image URL',
+          400
+        );
+      }
+    }
+    if ((values.PLATFORM_BRAND_NAME?.trim().length || 0) > 100) {
+      throw new HttpException(
+        'The platform name must have at most 100 characters',
+        400
+      );
     }
 
     for (const key of keys) {

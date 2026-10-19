@@ -9,6 +9,7 @@ import {
   useIntegrationPosts,
 } from '@gitroom/frontend/components/automations/hooks/use-flows';
 import { Button } from '@gitroom/react/form/button';
+import { InstagramAccountSelect } from './instagram-account-select';
 import { useRouter } from 'next/navigation';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { WizardPhonePreview } from '@gitroom/frontend/components/automations/wizard-phone-preview.component';
@@ -28,6 +29,8 @@ const GATE_EXHAUSTED_DEFAULT_PT =
 const DEFAULT_MAX_GATE_ATTEMPTS = 3;
 
 interface Props {
+  initialName?: string;
+  initialIntegrationIds?: string[];
   flowId?: string;
   initialFlow?: any;
 }
@@ -56,7 +59,7 @@ function formatRelative(dateStr: string): string {
   } catch { return ''; }
 }
 
-export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) => {
+export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, initialName = '', initialIntegrationIds = [] }) => {
   const t = useT();
   const fetchApi = useFetch();
   const router = useRouter();
@@ -65,9 +68,13 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
   const isEditing = !!flowId;
 
   // Form state
-  const [name, setName] = useState('');
-  const [integrationId, setIntegrationId] = useState('');
-  const [postMode, setPostMode] = useState<'all' | 'specific' | 'next_publication'>('specific');
+  const [name, setName] = useState(initialName);
+  const [integrationIds, setIntegrationIds] = useState<string[]>(initialIntegrationIds);
+  const integrationId = integrationIds[0] || '';
+  const setIntegrationId = (id: string) => setIntegrationIds(id ? [id] : []);
+  const [activateAfterSave, setActivateAfterSave] = useState(false);
+  const creationId = useRef<string | undefined>(undefined);
+  const [postMode, setPostMode] = useState<'all' | 'specific' | 'next_publication'>(initialIntegrationIds.length > 1 ? 'all' : 'specific');
   const [selectedPostIds, setSelectedPostIds] = useState<string[]>([]);
   const [keywordMode, setKeywordMode] = useState<'any_word' | 'specific'>('any_word');
   const [keywords, setKeywords] = useState<string[]>([]);
@@ -244,6 +251,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
   }, [posts, selectedPostIds]);
 
   const canSave =
+    (keywordMode !== 'specific' || keywords.some(keyword => keyword.trim())) &&
     !!name.trim() &&
     !!integrationId &&
     ((enableReply && replyMessages.some(m => m.trim())) || dmMessage.trim().length > 0) &&
@@ -251,11 +259,16 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
       (openingDmMessage.trim().length > 0 && openingDmButtonText.trim().length > 0));
 
   const handleSave = useCallback(async () => {
-    if (!canSave) return;
+    if (!canSave || saving) return;
+    if (postMode === 'specific' && (integrationIds.length > 1 || !selectedPostIds.length)) {
+      toaster.show(t('select_specific_post_account', 'Select a post for one account, or choose all posts / next publication for multiple accounts.'), 'warning');
+      return;
+    }
     setSaving(true);
     try {
       const body: Record<string, any> = {
         name: name.trim(),
+        activate: activateAfterSave,
         integrationId,
         triggerType: 'comment_on_post',
         postMode,
@@ -299,7 +312,13 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
         body.maxGateAttempts = clampedAttempts;
       }
 
-      const url = isEditing ? `/flows/${flowId}/quick-update` : '/flows/quick-create';
+      const multiple = !isEditing && integrationIds.length > 1;
+      if (multiple) {
+        creationId.current ||= crypto.randomUUID();
+        body.requestId = creationId.current;
+        body.integrationIds = integrationIds;
+      }
+      const url = isEditing ? `/flows/${flowId}/quick-update` : multiple ? '/flows/quick-create-multiple' : '/flows/quick-create';
       const method = isEditing ? 'PUT' : 'POST';
       const res = await fetchApi(url, { method, body: JSON.stringify(body) });
       if (!res.ok) {
@@ -317,13 +336,14 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
           : t('flow_created', 'Automação criada com sucesso'),
         'success'
       );
-      router.push(`/automacoes/${flow.id}`);
+      router.push(multiple ? '/automacoes' : `/automacoes/${flow.id}`);
     } catch {
       toaster.show(t('failed_to_create_flow', 'Falha ao criar automação'), 'warning');
     } finally {
       setSaving(false);
     }
   }, [
+    saving, integrationIds, activateAfterSave,
     canSave, name, integrationId, postMode, selectedPostIds,
     keywordMode, keywords, matchMode, enableReply, replyMessages,
     enableDm, dmMessage, dmButtonText, dmButtonUrl,
@@ -384,25 +404,9 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
               )}
             </p>
           ) : (
-            <div className={inputWrapperClass}>
-              <select
-                className={inputClass}
-                value={integrationId}
-                onChange={(e) => {
-                  setIntegrationId(e.target.value);
-                  setSelectedPostIds([]);
-                }}
-              >
-                <option value="">
-                  {t('select_account', 'Select an account...')}
-                </option>
-                {instagramIntegrations.map((ig: any) => (
-                  <option key={ig.id} value={ig.id}>
-                    {ig.name || ig.display || ig.id}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <InstagramAccountSelect accounts={instagramIntegrations} value={integrationIds}
+              multiple={!isEditing} disabled={isEditing}
+              onChange={ids => { setIntegrationIds(ids); setSelectedPostIds([]); if (ids.length > 1) setPostMode('all'); }} />
           )}
         </div>
 
@@ -865,7 +869,13 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow }) =>
               </div>
             </div>
 
-            {/* Save button */}
+            {(!isEditing || initialFlow?.status === 'DRAFT') && (
+          <label className="flex items-center gap-[8px] text-[13px] mb-[12px]">
+            <input type="checkbox" checked={activateAfterSave} onChange={e => setActivateAfterSave(e.target.checked)} />
+            {t('activate_automation_after_save', 'Activate after saving (leave unchecked to save paused)')}
+          </label>
+        )}
+        {/* Save button */}
             <button
               onClick={handleSave}
               disabled={!canSave || saving}

@@ -906,6 +906,7 @@ export class InstagramProvider
     integration?: Integration,
     type = 'graph.facebook.com'
   ): Promise<AnalyticsData[]> {
+    accessToken = accessToken.split('___')[0];
     const today = dayjs().format('YYYY-MM-DD');
 
     try {
@@ -914,7 +915,8 @@ export class InstagramProvider
         await this.analyticsFetch(
           `${metaGraphUrl(
             type
-          )}/${postId}/insights?metric=views,reach,saved,likes,comments,shares&access_token=${accessToken}`
+          )}/${postId}/insights?metric=views,reach,saved,likes,comments,shares`,
+          { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15000) }
         )
       ).json();
 
@@ -968,7 +970,7 @@ export class InstagramProvider
       if (err instanceof RefreshToken) {
         throw err;
       }
-      console.error('Error fetching Instagram post analytics:', err);
+      console.warn('Instagram post insights are unavailable');
       return [];
     }
   }
@@ -1934,22 +1936,129 @@ export class InstagramProvider
     integration: Integration,
     type = 'graph.facebook.com'
   ): Promise<SocialCommentDetails[]> {
+    const comments: SocialCommentDetails[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.listCommentsPage(
+        token,
+        postId,
+        integration,
+        cursor,
+        type
+      );
+      comments.push(...page.comments);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return comments;
+  }
+
+  // The inbox persists each bounded chunk and its cursor. Large histories make
+  // progress across rounds instead of restarting after a request limit.
+  async listCommentsPage(
+    token: string,
+    postId: string,
+    integration: Integration,
+    cursor?: string,
+    type = 'graph.facebook.com'
+  ): Promise<{ comments: SocialCommentDetails[]; nextCursor?: string }> {
     const [accessToken] = token.split('___');
-
-    const { data } = await (
-      await this.fetch(
-        `https://${type}/${META_GRAPH_API_VERSION}/${postId}/comments?fields=id,text,timestamp,username,parent_id,from{id,username}&limit=50&access_token=${accessToken}`
+    const fields = 'id,text,timestamp,username,parent_id,from{id,username}';
+    const state: {
+      after?: string;
+      complete: boolean;
+      replies: Array<{ id: string; after: string }>;
+    } = cursor ? JSON.parse(cursor) : { complete: false, replies: [] };
+    if (
+      typeof state.complete !== 'boolean' ||
+      !Array.isArray(state.replies) ||
+      state.replies.length > 50
+    )
+      throw new Error('Invalid comments cursor');
+    const comments = new Map<string, SocialCommentDetails>();
+    const seen = new Set<string>();
+    const nextCursor = (page: any) => {
+      if (!page.paging?.next) return undefined;
+      const after = page.paging?.cursors?.after;
+      if (typeof after !== 'string' || !after || after.length > 4096)
+        throw new Error('Invalid comments cursor');
+      return after;
+    };
+    const remember = (comment: any, parentId?: string) => {
+      if (
+        typeof comment.id !== 'string' ||
+        !comment.id ||
+        !Number.isFinite(Date.parse(comment.timestamp))
       )
-    ).json();
-
-    return (data || []).map((comment: any) => ({
-      id: comment.id,
-      parentId: comment.parent_id,
-      content: comment.text || '',
-      authorName: comment.from?.username || comment.username,
-      authorId: comment.from?.id,
-      publishedAt: comment.timestamp,
-    }));
+        throw new Error('Invalid comment');
+      comments.set(comment.id, {
+        id: comment.id,
+        parentId: parentId || comment.parent_id,
+        content: comment.text || '',
+        authorName: comment.from?.username || comment.username,
+        authorId: comment.from?.id,
+        publishedAt: comment.timestamp,
+      });
+    };
+    for (
+      let request = 0;
+      request < 10 && (state.replies.length || !state.complete);
+      request++
+    ) {
+      const reply = state.replies.shift();
+      const edge = reply ? 'replies' : 'comments';
+      const id = reply?.id || postId;
+      const after = reply?.after || state.after;
+      if (
+        after !== undefined &&
+        (typeof after !== 'string' || !after || after.length > 4096)
+      )
+        throw new Error('Invalid comments cursor');
+      const key = `${id}:${edge}:${after || ''}`;
+      if (seen.has(key)) throw new Error('Invalid comments cursor');
+      seen.add(key);
+      const params = new URLSearchParams({
+        fields: reply ? fields : `${fields},replies.limit(50){${fields}}`,
+        limit: '50',
+        access_token: accessToken,
+        ...(after ? { after } : {}),
+      });
+      const page = await (
+        await this.fetch(
+          `https://${type}/${META_GRAPH_API_VERSION}/${encodeURIComponent(
+            id
+          )}/${edge}?${params}`,
+          { signal: AbortSignal.timeout(10000) }
+        )
+      ).json();
+      if (!Array.isArray(page?.data))
+        throw new Error('Invalid comments response');
+      for (const comment of page.data) {
+        remember(comment, reply?.id);
+        if (!reply && comment.replies) {
+          if (!Array.isArray(comment.replies.data))
+            throw new Error('Invalid comment replies');
+          for (const child of comment.replies.data) remember(child, comment.id);
+          const afterReply = nextCursor(comment.replies);
+          if (afterReply)
+            state.replies.push({ id: comment.id, after: afterReply });
+        }
+      }
+      const next = nextCursor(page);
+      if (next && next === after) throw new Error('Invalid comments cursor');
+      if (reply) {
+        if (next) state.replies.unshift({ id, after: next });
+      } else {
+        state.after = next;
+        state.complete = !next;
+      }
+    }
+    return {
+      comments: [...comments.values()],
+      nextCursor:
+        state.complete && !state.replies.length
+          ? undefined
+          : JSON.stringify(state),
+    };
   }
 
   private async accountInsights(

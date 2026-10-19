@@ -127,3 +127,192 @@ describe('FlowsService.updateExecution (StatusEvent AUTOMATION_FAILED)', () => {
     expect(statusEvent.record).not.toHaveBeenCalled();
   });
 });
+
+describe('Multi-account quick automation creation', () => {
+  const build = () => {
+    const repo = {
+      createQuickBatch: jest.fn().mockResolvedValue([
+        { id: 'flow-1', integrationId: 'ig-1' },
+        { id: 'flow-2', integrationId: 'ig-2' },
+      ]),
+    };
+    const integrations = {
+      getIntegrationById: jest.fn(async (_org, id) => ({
+        id,
+        profileId: 'profile-1',
+        providerIdentifier: 'instagram',
+      })),
+    };
+    const profiles = {
+      getProfileById: jest.fn().mockResolvedValue({ id: 'profile-1' }),
+    };
+    const service = new FlowsService(
+      repo as any,
+      null as any,
+      integrations as any,
+      null as any,
+      null as any,
+      null as any,
+      profiles as any,
+      {} as any,
+      {} as any
+    );
+    jest
+      .spyOn(service, 'checkIntegrationWebhook')
+      .mockResolvedValue({ ok: true });
+    return { repo, integrations, service };
+  };
+  const body = {
+    name: 'Keywords',
+    integrationId: 'ig-1',
+    integrationIds: ['ig-1', 'ig-2'],
+    requestId: '62044a19-f129-4aef-8cc4-f9745b29d96e',
+    postMode: 'all' as const,
+    keywords: ['QUERO'],
+    replyMessage: 'Sent!',
+    dmMessage: 'Details',
+  };
+  it('validates every account before writing and saves paused with the same graph per account', async () => {
+    const ctx = build();
+    await ctx.service.quickCreateMultipleFlows('org-1', body, 'profile-1');
+    expect(ctx.integrations.getIntegrationById).toHaveBeenCalledWith(
+      'org-1',
+      'ig-1'
+    );
+    expect(ctx.integrations.getIntegrationById).toHaveBeenCalledWith(
+      'org-1',
+      'ig-2'
+    );
+    const args = ctx.repo.createQuickBatch.mock.calls[0];
+    expect(args[0]).toBe('org-1');
+    expect(args[1]).toBe('profile-1');
+    expect(args[5]).toBe(false);
+    expect(args[4].nodes.map((node: { type: string }) => node.type)).toEqual([
+      'TRIGGER',
+      'REPLY_COMMENT',
+      'SEND_DM',
+    ]);
+    expect(JSON.parse(args[4].nodes[0].data)).toMatchObject({
+      mode: 'all',
+      keywords: ['QUERO'],
+    });
+    expect(
+      new Set(args[2].map((target: { id: string }) => target.id)).size
+    ).toBe(2);
+    await ctx.service.quickCreateMultipleFlows('org-1', body, 'profile-1');
+    expect(ctx.repo.createQuickBatch.mock.calls[1][2]).toEqual(args[2]);
+  });
+  it('rejects an account outside the profile before creating any flow', async () => {
+    const ctx = build();
+    ctx.integrations.getIntegrationById.mockImplementation(
+      async (_org, id) => ({
+        id,
+        providerIdentifier: 'instagram',
+        profileId: id === 'ig-2' ? 'other-profile' : 'profile-1',
+      })
+    );
+    await expect(
+      ctx.service.quickCreateMultipleFlows('org-1', body, 'profile-1')
+    ).rejects.toThrow('outro perfil');
+    expect(ctx.repo.createQuickBatch).not.toHaveBeenCalled();
+  });
+  it('does not apply account-specific media ids to other accounts', async () => {
+    const ctx = build();
+    await expect(
+      ctx.service.quickCreateMultipleFlows(
+        'org-1',
+        { ...body, postMode: 'specific', postIds: ['media-1'] },
+        'profile-1'
+      )
+    ).rejects.toThrow('Specific posts');
+    expect(ctx.repo.createQuickBatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('Saving automation configuration preserves activation intent', () => {
+  it.each(['ACTIVE', 'PAUSED'])(
+    'preserves existing %s state when saving',
+    async (status) => {
+      const current = { id: 'flow-1', integrationId: 'ig-1', status };
+      const repo = {
+        getFlow: jest.fn().mockResolvedValue(current),
+        updateFlow: jest.fn(),
+        saveCanvas: jest.fn(),
+        updateFlowStatus: jest.fn(),
+      };
+      const service = new FlowsService(
+        repo as any,
+        null as any,
+        {
+          getIntegrationById: jest
+            .fn()
+            .mockResolvedValue({ id: 'ig-1', profileId: 'profile-1' }),
+        } as any,
+        null as any,
+        null as any,
+        null as any,
+        null as any,
+        {} as any,
+        {} as any
+      );
+      await service.quickUpdateFlow(
+        'org-1',
+        'flow-1',
+        {
+          name: 'Rule',
+          integrationId: 'ig-1',
+          dmMessage: 'Details',
+          activate: false,
+        },
+        'profile-1'
+      );
+      expect(repo.updateFlowStatus).not.toHaveBeenCalled();
+    }
+  );
+  it('saves a draft paused when activation is explicitly unchecked', async () => {
+    const repo = {
+      getFlow: jest
+        .fn()
+        .mockResolvedValue({
+          id: 'flow-1',
+          integrationId: 'ig-1',
+          status: 'DRAFT',
+        }),
+      updateFlow: jest.fn(),
+      saveCanvas: jest.fn(),
+      updateFlowStatus: jest.fn(),
+    };
+    const service = new FlowsService(
+      repo as any,
+      null as any,
+      {
+        getIntegrationById: jest
+          .fn()
+          .mockResolvedValue({ id: 'ig-1', profileId: 'profile-1' }),
+      } as any,
+      null as any,
+      null as any,
+      null as any,
+      null as any,
+      {} as any,
+      {} as any
+    );
+    await service.quickUpdateFlow(
+      'org-1',
+      'flow-1',
+      {
+        name: 'Rule',
+        integrationId: 'ig-1',
+        dmMessage: 'Details',
+        activate: false,
+      },
+      'profile-1'
+    );
+    expect(repo.updateFlowStatus).toHaveBeenCalledWith(
+      'org-1',
+      'flow-1',
+      'PAUSED',
+      'profile-1'
+    );
+  });
+});
