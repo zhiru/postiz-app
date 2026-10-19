@@ -1165,17 +1165,25 @@ export class FlowsService {
     // Sem flows que matcham: persistir UnmatchedComment + dispatch enrichment
     if (matchingFlows.length === 0) {
       await this.persistUnmatchedComment(payload);
-      return [];
+      return { executions: [], retry: false };
     }
 
     const results = [];
+    let shouldRetry = false;
     for (const flow of matchingFlows) {
       // Idempotency: skip if already executed for this comment+flow
       const existing = await this._flowsRepository.findExistingExecution(
         flow.id,
         payload.igCommentId
       );
-      if (existing && existing.status !== FlowExecutionStatus.FAILED) continue;
+      if (
+        existing &&
+        existing.status !== FlowExecutionStatus.FAILED &&
+        existing.status !== FlowExecutionStatus.RUNNING
+      ) {
+        continue;
+      }
+      // RUNNING is also the initial claim: retry the deterministic start after a crash.
 
       const workflowId = `flow-exec-${flow.id}-${payload.igCommentId}`;
 
@@ -1193,13 +1201,16 @@ export class FlowsService {
       const temporalClient = this._temporalService.client.getRawClient();
       if (!temporalClient) {
         this._logger.error(
-          `Temporal client unavailable — orchestrator offline? Marking execution ${execution.id} (flow=${flow.id}) as FAILED`
+          'Temporal client unavailable; automation enqueue requires retry'
         );
-        await this.updateExecution(execution.id, {
-          status: FlowExecutionStatus.FAILED,
-          error: 'Temporal client unavailable (orchestrator offline)',
-          completedAt: new Date(),
-        });
+        if (existing?.status !== FlowExecutionStatus.RUNNING) {
+          await this.updateExecution(execution.id, {
+            status: FlowExecutionStatus.FAILED,
+            error: 'Temporal client unavailable (orchestrator offline)',
+            completedAt: new Date(),
+          });
+        }
+        shouldRetry = true;
         results.push(execution);
         continue;
       }
@@ -1234,18 +1245,21 @@ export class FlowsService {
           results.push(execution);
           continue;
         }
-        await this.updateExecution(execution.id, {
-          status: FlowExecutionStatus.FAILED,
-          error:
-            'Could not enqueue automation. The event can be delivered again safely.',
-          completedAt: new Date(),
-        });
+        shouldRetry = true;
+        if (existing?.status !== FlowExecutionStatus.RUNNING) {
+          await this.updateExecution(execution.id, {
+            status: FlowExecutionStatus.FAILED,
+            error:
+              'Could not enqueue automation. The event can be delivered again safely.',
+            completedAt: new Date(),
+          });
+        }
       }
 
       results.push(execution);
     }
 
-    return results;
+    return { executions: results, retry: shouldRetry };
   }
 
   private async persistUnmatchedComment(payload: {
@@ -1460,13 +1474,21 @@ export class FlowsService {
     });
 
     const results = [];
+    let shouldRetry = false;
     for (const flow of finalFlows) {
       const existing =
         await this._flowsRepository.findExistingExecutionByMessage(
           flow.id,
           payload.igMessageId
         );
-      if (existing && existing.status !== FlowExecutionStatus.FAILED) continue;
+      if (
+        existing &&
+        existing.status !== FlowExecutionStatus.FAILED &&
+        existing.status !== FlowExecutionStatus.RUNNING
+      ) {
+        continue;
+      }
+      // RUNNING is also the initial claim: retry the deterministic start after a crash.
 
       const workflowId = `flow-exec-${flow.id}-${payload.igMessageId}`;
 
@@ -1485,13 +1507,16 @@ export class FlowsService {
       const temporalClient = this._temporalService.client.getRawClient();
       if (!temporalClient) {
         this._logger.error(
-          `Temporal client unavailable — orchestrator offline? Marking execution ${execution.id} (flow=${flow.id}) as FAILED`
+          'Temporal client unavailable; automation enqueue requires retry'
         );
-        await this.updateExecution(execution.id, {
-          status: FlowExecutionStatus.FAILED,
-          error: 'Temporal client unavailable (orchestrator offline)',
-          completedAt: new Date(),
-        });
+        if (existing?.status !== FlowExecutionStatus.RUNNING) {
+          await this.updateExecution(execution.id, {
+            status: FlowExecutionStatus.FAILED,
+            error: 'Temporal client unavailable (orchestrator offline)',
+            completedAt: new Date(),
+          });
+        }
+        shouldRetry = true;
         results.push(execution);
         continue;
       }
@@ -1528,18 +1553,21 @@ export class FlowsService {
           results.push(execution);
           continue;
         }
-        await this.updateExecution(execution.id, {
-          status: FlowExecutionStatus.FAILED,
-          error:
-            'Could not enqueue automation. The event can be delivered again safely.',
-          completedAt: new Date(),
-        });
+        shouldRetry = true;
+        if (existing?.status !== FlowExecutionStatus.RUNNING) {
+          await this.updateExecution(execution.id, {
+            status: FlowExecutionStatus.FAILED,
+            error:
+              'Could not enqueue automation. The event can be delivered again safely.',
+            completedAt: new Date(),
+          });
+        }
       }
 
       results.push(execution);
     }
 
-    return results;
+    return { executions: results, retry: shouldRetry };
   }
 
   // --- Follow-gate em 2 etapas (postback) ---

@@ -22,9 +22,9 @@ e um **follow gate de 2 etapas** com botao postback (padrao ManyChat).
 
 ```
 Comentario no IG
-   -> Webhook /api/webhooks/instagram (HMAC validado; escopo por organizacao dona da conta)
-   -> IgWebhookController.processCommentEvent
-   -> FlowsService.startFlowsForComment (enfileira Temporal)
+   -> Webhook /api/public/ig-webhook (HMAC validado; escopo por organizacao dona da conta)
+   -> IgWebhookController.processComment
+   -> FlowsService.handleIncomingComment (enfileira Temporal)
    -> flowExecutionWorkflow (task queue "main")
        - replyToComment (resposta publica)
        - (branch requireFollow && comment_on_post) sendOpeningDmWithPostback
@@ -47,6 +47,14 @@ Usuario clica no botao postback
 
 Story reply e mais simples: sem postback, checagem de follow direto, branch
 entre DM configurada vs `followGateMessage`.
+
+O receiver responde HTTP 503 se o Temporal estiver indisponivel ou rejeitar o
+enfileiramento de comentarios, stories ou postbacks. O remetente deve repetir a
+entrega. A recuperacao usa a mesma `FlowExecution` (upsert por flow+evento) e o
+mesmo workflow ID com `REJECT_DUPLICATE`, inclusive quando um crash deixou o
+claim inicial em `RUNNING`. Um workflow ja aceito nao e iniciado novamente;
+execucoes concluidas, canceladas ou aguardando postback sao ignoradas. Nenhum
+workflow existente ou ledger de envio e alterado por esta recuperacao.
 
 ---
 

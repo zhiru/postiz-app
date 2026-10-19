@@ -9,11 +9,16 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ### Corrigido
 
+- Webhooks do Instagram solicitam reentrega quando o Temporal não aceita uma automação de comentário ou story. A recuperação reaproveita a execução e a identidade do workflow, preservando a proteção contra envios repetidos.
+- Registro de provedores mantém um único worker por fila e corrige reinícios do orchestrator causados pelo Tumblr duplicado.
+
 - Migração vincula configurações legadas ao perfil Default após sua criação e preserva preferências alteradas pelo usuário nos reinícios.
 - Assistentes de automação interpretam conexões antigas do Instagram, exibem falhas de consulta com opção de tentar novamente e usam a ativação normal de webhooks sem remover assinaturas existentes do Chatwoot.
 - Reconexão preserva o refresh token existente quando o provedor não devolve outro e limita a atualização de tokens compartilhados à organização e ao perfil corretos.
 
 ### Adicionado
+
+- Relay opcional de webhooks do Instagram preserva o recebimento no Chatwoot e encaminha apenas contas autorizadas ao Postiz, com fila persistente, tentativas automáticas e recuperação de entregas pendentes.
 
 - Integração da base Robô MultiPost com as melhorias Aireset: preserva sincronização do histórico do Instagram, recorrência, relatórios, comentários, webhooks e administração. Migração aditiva e validação de preservação dos dados legados.
 - Automações passam a reservar envios no banco antes de chamar a Meta, bloqueando repetições após timeout ou confirmação incerta; histórico e permissões por perfil preservados. Workflows já em produção permanecem compatíveis, com versões novas isoladas.

@@ -1,0 +1,4 @@
+spool/
+.env
+*.secret
+__pycache__/
