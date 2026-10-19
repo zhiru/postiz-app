@@ -1054,6 +1054,8 @@
   "posts_sync_now": "Sincronizar agora",
   "posts_sync_title": "Sincronizar publicações do perfil",
   "posts_sync_imported": "Publicado pela rede social",
+  "posts_sync_imported_short": "Importado",
+  "webhook_ok": "Webhook ativo na Meta",
   "posts_sync_view_original": "Ver publicação original",
   "posts_sync_read_only": "Esta publicação foi importada. Gerencie o conteúdo original pela rede social.",
   "posts_sync_hide_confirm": "Ocultar esta publicação importada no Postiz? O original continuará disponível na rede social.",

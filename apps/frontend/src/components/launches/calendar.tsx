@@ -1543,20 +1543,30 @@ const CalendarItem: FC<{
         </div>
         <div
           className={clsx(
-            'w-full flex-1 flex flex-col min-h-[40px]',
+            'w-full min-w-0 flex-1 flex flex-col min-h-[40px]',
             display === 'month' && 'mobile:hidden'
           )}
         >
           <div className="text-start">
             {post.importedFromPlatform && (
-              <span>
-                {t('posts_sync_imported', 'Published on the social platform')}
+              <span
+                className="block truncate text-[10px] leading-[14px]"
+                title={t(
+                  'posts_sync_imported',
+                  'Published on the social platform'
+                )}
+                aria-label={t(
+                  'posts_sync_imported',
+                  'Published on the social platform'
+                )}
+              >
+                {t('posts_sync_imported_short', 'Imported')}
               </span>
             )}
             {state === 'DRAFT' ? t('draft', 'Draft') + ': ' : ''}
           </div>
-          <div className="w-full relative">
-            <div className="absolute top-0 start-0 w-full text-ellipsis break-words line-clamp-1 text-start">
+          <div className="w-full min-w-0">
+            <div className="truncate text-start">
               {stripHtmlValidation('none', post.content, false, true, false) ||
                 t('no_content', 'no content')}
             </div>
