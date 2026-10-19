@@ -38,6 +38,7 @@ import {
 } from '@copilotkit/runtime-client-gql';
 import { AddEditModal } from '@gitroom/frontend/components/new-launch/add.edit.modal';
 import dayjs from 'dayjs';
+import { fromUtc } from '@gitroom/frontend/components/layout/set.timezone';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { ExistingDataContextProvider } from '@gitroom/frontend/components/launches/helpers/use.existing.data';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -188,7 +189,7 @@ You can select the channels you want to use from the left menu.
 
 You can see your previous conversations from the right menu.
 
-You can also use me as an MCP Server, check Settings >> Agents
+You can also use me as an MCP Server, check Settings >> Agents / Dev
 `
               ),
             }}
@@ -494,7 +495,7 @@ const OpenModal: FC<{
               }}
             >
               <AddEditModal
-                date={dayjs.utc(integration.date)}
+                date={fromUtc(integration.date)}
                 allIntegrations={properties}
                 integrations={[foundIntegration]}
                 onlyValues={integration.posts.map((p) => ({

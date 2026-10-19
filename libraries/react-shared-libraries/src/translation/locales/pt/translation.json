@@ -2303,5 +2303,10 @@
   "shares": "Compartilhamentos",
   "saves": "Salvamentos",
   "platform_branding_title": "Logo da plataforma",
-  "platform_branding_public": "Visível para todos"
+  "platform_branding_public": "Visível para todos",
+  "autopost_creates_drafts_from_your_rss_new_items": "O Autopost cria rascunhos a partir dos novos itens do seu RSS; revise-os e agende a publicação deles pelo calendário.",
+  "agents_dev": "Agentes / Dev",
+  "timezone": "Fuso horário",
+  "automatic_timezone": "Automático ({{timezone}})",
+  "could_not_save_timezone": "Não foi possível salvar o fuso horário"
 }

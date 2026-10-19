@@ -166,7 +166,7 @@ export const SettingsPopup: FC<{
       arr.push({ tab: 'signatures', label: t('signatures', 'Signatures') });
     }
     if (user?.tier?.public_api && isGeneral && showLogout && isOrgAdmin) {
-      arr.push({ tab: 'agents', label: t('integrations_menu', 'Integrações') });
+      arr.push({ tab: 'agents', label: t('agents_dev', 'Agents / Dev') });
     }
     if (isOrgAdmin) {
       arr.push({
