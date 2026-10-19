@@ -100,6 +100,25 @@ export class AiCredentialService {
       }
     }
 
+    if (
+      payload.provider === 'openai-compatible' &&
+      (kind !== 'TEXT' || !validatedOptions?.baseURL || !payload.model?.trim())
+    ) {
+      throw new HttpException(
+        'Provedor compatível exige geração de texto, URL base e modelo.',
+        400
+      );
+    }
+    if (
+      validatedOptions?.baseURL &&
+      !['openai', 'openai-compatible'].includes(payload.provider)
+    ) {
+      throw new HttpException(
+        'URL base personalizada exige provedor OpenAI ou compatível.',
+        400
+      );
+    }
+
     let apiKey = payload.apiKey;
     if (apiKey === SENTINEL) {
       const existing = await this.getRaw(
@@ -111,6 +130,15 @@ export class AiCredentialService {
       if (!existing) {
         throw new HttpException(
           'Sentinel apiKey enviado sem credencial existente.',
+          400
+        );
+      }
+      if (
+        existing.provider !== payload.provider ||
+        (existing.options?.baseURL ?? '') !== (validatedOptions?.baseURL ?? '')
+      ) {
+        throw new HttpException(
+          'Informe a chave novamente ao mudar o provedor ou a URL base.',
           400
         );
       }
@@ -160,9 +188,7 @@ export class AiCredentialService {
       options: (record.options as Record<string, unknown> | null) ?? null,
       shareDefault: record.shareDefault,
       lastTestStatus: record.lastTestStatus,
-      lastUsedAt: record.lastUsedAt
-        ? record.lastUsedAt.toISOString()
-        : null,
+      lastUsedAt: record.lastUsedAt ? record.lastUsedAt.toISOString() : null,
       updatedAt: record.updatedAt.toISOString(),
     };
   }
@@ -216,9 +242,7 @@ export class AiCredentialService {
       options: (record.options as Record<string, unknown> | null) ?? null,
       shareDefault: record.shareDefault,
       lastTestStatus: record.lastTestStatus,
-      lastUsedAt: record.lastUsedAt
-        ? record.lastUsedAt.toISOString()
-        : null,
+      lastUsedAt: record.lastUsedAt ? record.lastUsedAt.toISOString() : null,
       updatedAt: record.updatedAt.toISOString(),
     }));
   }
@@ -250,7 +274,8 @@ export class AiCredentialService {
 
     const result = await this._testService.test(
       credential.provider,
-      credential.apiKey
+      credential.apiKey,
+      credential.options?.baseURL as string | undefined
     );
 
     try {

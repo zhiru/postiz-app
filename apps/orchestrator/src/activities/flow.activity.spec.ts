@@ -1,3 +1,6 @@
+jest.mock('@gitroom/nestjs-libraries/ai/ai-text.service', () => ({
+  AiTextService: class {},
+}));
 jest.mock(
   '@gitroom/nestjs-libraries/database/prisma/flows/flows.service',
   () => ({ FlowsService: class {} })
@@ -67,6 +70,7 @@ describe('FlowActivity delivery guards and workflow replay', () => {
   let flows: any;
   let provider: any;
   let messaging: any;
+  let ai: any;
   const pending = {
     id: 'pending',
     flowId: 'flow',
@@ -102,6 +106,7 @@ describe('FlowActivity delivery guards and workflow replay', () => {
       deletedAt: null,
       organizationId: 'org',
       integrationId: 'integration',
+      profileId: 'profile',
       nodes: [],
       edges: [],
     };
@@ -119,6 +124,11 @@ describe('FlowActivity delivery guards and workflow replay', () => {
     messaging = {
       sendDmWithToken: jest.fn(async () => ({ messageId: 'final-dm' })),
       sendStoryReply: jest.fn(async () => ({ messageId: 'story-dm' })),
+    };
+    ai = {
+      varyAutomationMessage: jest.fn(
+        async (_org: string, text: string) => 'AI: ' + text
+      ),
     };
     activity = new FlowActivity(
       flows,
@@ -138,7 +148,8 @@ describe('FlowActivity delivery guards and workflow replay', () => {
       { decrypt: jest.fn() } as any,
       new AutomationDeliveryService({
         model: { automationDelivery: model },
-      } as any)
+      } as any),
+      ai
     );
     for (const name of Object.keys(activities)) {
       activities[name].mockImplementation((...args: unknown[]) =>
@@ -310,5 +321,70 @@ describe('FlowActivity delivery guards and workflow replay', () => {
     expect(provider.sendPrivateReply).not.toHaveBeenCalled();
     expect(messaging.sendDmWithToken).not.toHaveBeenCalled();
     expect(messaging.sendStoryReply).not.toHaveBeenCalled();
+  });
+  it('does not call AI for existing automations without explicit opt-in', async () => {
+    await activity.replyToComment(
+      'integration',
+      'org',
+      'comment',
+      'media',
+      'Original',
+      'flow',
+      'action'
+    );
+    expect(ai.varyAutomationMessage).not.toHaveBeenCalled();
+    expect(provider.replyToComment.mock.calls[0][2]).toBe('Original');
+  });
+  it('varies public and private messages independently and deduplicates generation with delivery', async () => {
+    flow.nodes = [
+      node('trigger', 'TRIGGER', { aiReplyEnabled: true, aiDmEnabled: false }),
+    ];
+    await activity.replyToComment(
+      'integration',
+      'org',
+      'comment',
+      'media',
+      'Original',
+      'flow',
+      'action'
+    );
+    await activity.replyToComment(
+      'integration',
+      'org',
+      'comment',
+      'media',
+      'Original',
+      'flow',
+      'action'
+    );
+    await activity.sendDirectMessage(
+      'integration',
+      'org',
+      'person',
+      'Private original',
+      'comment',
+      undefined,
+      undefined,
+      'flow'
+    );
+    expect(ai.varyAutomationMessage).toHaveBeenCalledTimes(1);
+    expect(ai.varyAutomationMessage).toHaveBeenCalledWith(
+      'org',
+      'Original',
+      'profile'
+    );
+    expect(provider.replyToComment.mock.calls[0][2]).toBe('AI: Original');
+    expect(provider.sendPrivateReply.mock.calls[0][3]).toBe('Private original');
+  });
+  it('uses the independent follow-gate AI setting', async () => {
+    flow.nodes = [
+      node('trigger', 'TRIGGER', {
+        aiFollowGateEnabled: true,
+        aiDmEnabled: false,
+      }),
+    ];
+    await activity.sendOpeningDmWithPostback('pending');
+    expect(provider.sendPrivateReply.mock.calls[0][3]).toBe('AI: Opening DM');
+    expect(ai.varyAutomationMessage).toHaveBeenCalledTimes(1);
   });
 });

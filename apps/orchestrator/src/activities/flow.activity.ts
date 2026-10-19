@@ -1,5 +1,6 @@
+import { AiTextService } from '@gitroom/nestjs-libraries/ai/ai-text.service';
 import { AutomationDeliveryService } from '@gitroom/nestjs-libraries/database/prisma/flows/automation-delivery.service';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Activity, ActivityMethod } from 'nestjs-temporal-core';
 import { FlowsService } from '@gitroom/nestjs-libraries/database/prisma/flows/flows.service';
 import { UnmatchedCommentService } from '@gitroom/nestjs-libraries/database/prisma/flows/unmatched-comment.service';
@@ -30,7 +31,8 @@ export class FlowActivity {
     private _instagramMessagingService: InstagramMessagingService,
     private _unmatchedCommentService: UnmatchedCommentService,
     private _encryption: EncryptionService,
-    private _deliveries: AutomationDeliveryService
+    private _deliveries: AutomationDeliveryService,
+    @Optional() private _aiText?: AiTextService
   ) {}
 
   // Descriptografa integration.token in-place (B1). No-op em tokens sem prefixo
@@ -96,7 +98,20 @@ export class FlowActivity {
     );
     await this._deliveries.sendOnce(
       JSON.stringify([integrationId, commentId, 'public', actionId]),
-      () => provider.replyToComment(route.token, commentId, message, route.host)
+      async () => {
+        const text = await this.automationMessage(
+          flowId,
+          'aiReplyEnabled',
+          message
+        );
+        await this.requireActiveFlow(flowId);
+        return provider.replyToComment(
+          route.token,
+          commentId,
+          text,
+          route.host
+        );
+      }
     );
   }
 
@@ -142,12 +157,17 @@ export class FlowActivity {
     await this._deliveries.sendOnce(
       JSON.stringify([integrationId, commentId, 'private']),
       async () => {
+        const text = await this.automationMessage(
+          flowId,
+          'aiDmEnabled',
+          message
+        );
         await this.requireActiveFlow(flowId, true);
         return provider.sendPrivateReply(
           token,
           integration.internalId,
           commentId,
-          message,
+          text,
           button,
           host
         );
@@ -185,6 +205,11 @@ export class FlowActivity {
     return this._deliveries.sendOnce(
       JSON.stringify([integrationId, eventId, 'story']),
       async () => {
+        const text = await this.automationMessage(
+          flowId,
+          'aiDmEnabled',
+          message
+        );
         await this.requireActiveFlow(flowId, true);
         // Messaging uses a token configured in Settings > Credenciais (Meta
         // System User Token or per-account IG User Token), NOT the integration
@@ -195,7 +220,7 @@ export class FlowActivity {
           profileId: integration.profileId || null,
           igBusinessAccountId: integration.internalId,
           recipientIgsid: igScopedUserId,
-          message,
+          message: text,
           button,
           integrationName: integration.name || undefined,
         });
@@ -394,12 +419,17 @@ export class FlowActivity {
     await this._deliveries.sendOnce(
       JSON.stringify([integration.id, pb.igCommentId, 'private']),
       async () => {
+        const text = await this.automationMessage(
+          pb.flowId,
+          'aiFollowGateEnabled',
+          message
+        );
         await this.requireActiveFlow(pb.flowId, true);
         return provider.sendPrivateReply(
           token,
           integration.internalId,
           pb.igCommentId,
-          message,
+          text,
           button,
           host
         );
@@ -431,7 +461,11 @@ export class FlowActivity {
         }
         this.decryptToken(integration);
 
-        const message = pb.snapshotFinalDm?.trim();
+        const original = pb.snapshotFinalDm?.trim();
+        const message = original
+          ? await this.automationMessage(pb.flowId, 'aiDmEnabled', original)
+          : original;
+        await this.requireActiveFlow(pb.flowId, true);
         if (!message) {
           // Nothing to send — flow didn't configure a final DM. Just no-op.
           return;
@@ -507,8 +541,12 @@ export class FlowActivity {
         if (opts.exhausted) {
           // Apologetic message, no button. Avoids locking the user in a button
           // loop when they'll never follow.
-          const exhaustedMessage =
-            pb.snapshotExhaustedMessage?.trim() || GATE_EXHAUSTED_MESSAGE;
+          const exhaustedMessage = await this.automationMessage(
+            pb.flowId,
+            'aiFollowGateEnabled',
+            pb.snapshotExhaustedMessage?.trim() || GATE_EXHAUSTED_MESSAGE
+          );
+          await this.requireActiveFlow(pb.flowId, true);
           if (isStandalone) {
             return this._instagramMessagingService.sendDmWithToken({
               token: integration.token,
@@ -557,7 +595,12 @@ export class FlowActivity {
         // and the new pending carries the next attempt.
         await this._flowsService.consumePendingPostback(pb.id);
 
-        const gateMessage = pb.snapshotGateDm?.trim() || GATE_FALLBACK_MESSAGE;
+        const gateMessage = await this.automationMessage(
+          pb.flowId,
+          'aiFollowGateEnabled',
+          pb.snapshotGateDm?.trim() || GATE_FALLBACK_MESSAGE
+        );
+        await this.requireActiveFlow(pb.flowId, true);
         const button: InstagramDmButton = {
           kind: 'postback',
           title: pb.snapshotAlreadyBtnText?.trim() || 'Ja segui!',
@@ -596,6 +639,29 @@ export class FlowActivity {
       `enrichUnmatchedComment: iniciando id=${unmatchedCommentId}`
     );
     await this._unmatchedCommentService.enrich(unmatchedCommentId);
+  }
+
+  private async automationMessage(
+    flowId: string,
+    setting: 'aiReplyEnabled' | 'aiDmEnabled' | 'aiFollowGateEnabled',
+    original: string
+  ) {
+    if (!this._aiText) return original;
+    const flow = await this._flowsService.getFlowById(flowId);
+    if (!flow || flow.status !== 'ACTIVE' || flow.deletedAt) return original;
+    const trigger = flow.nodes.find((node) => node.type === 'TRIGGER');
+    let config: Record<string, unknown>;
+    try {
+      config = JSON.parse(trigger?.data || '{}');
+    } catch {
+      return original;
+    }
+    if (config[setting] !== true) return original;
+    return this._aiText.varyAutomationMessage(
+      flow.organizationId,
+      original,
+      flow.profileId || undefined
+    );
   }
 
   private async requireActiveFlow(flowId: string, privateMessage = false) {

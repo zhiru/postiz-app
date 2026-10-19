@@ -4,12 +4,14 @@ import { createMock } from '@gitroom/nestjs-libraries/test';
 import { MockProxy } from 'jest-mock-extended';
 import { HttpException } from '@nestjs/common';
 
-const openrouterTextSpy = jest.fn(
-  (id: string) => ({ kind: 'openrouter-text', id })
-);
-const openrouterImageSpy = jest.fn(
-  (id: string) => ({ kind: 'openrouter-image', id })
-);
+const openrouterTextSpy = jest.fn((id: string) => ({
+  kind: 'openrouter-text',
+  id,
+}));
+const openrouterImageSpy = jest.fn((id: string) => ({
+  kind: 'openrouter-image',
+  id,
+}));
 const openaiTextSpy = jest.fn((id: string) => ({ kind: 'openai-text', id }));
 const openaiImageSpy = jest.fn((id: string) => ({
   kind: 'openai-image',
@@ -28,6 +30,7 @@ jest.mock('@openrouter/ai-sdk-provider', () => ({
 jest.mock('@ai-sdk/openai', () => ({
   createOpenAI: jest.fn(({ apiKey }: { apiKey: string }) => {
     const fn = (id: string) => openaiTextSpy(id);
+    (fn as any).chat = (id: string) => openaiTextSpy(id);
     (fn as any).imageModel = (id: string) => openaiImageSpy(id);
     (fn as any)._apiKey = apiKey;
     return fn;
@@ -45,7 +48,9 @@ jest.mock('openai', () => ({
   }),
 }));
 
-const credential = (overrides: Record<string, any> = {}): Record<string, any> => ({
+const credential = (
+  overrides: Record<string, any> = {}
+): Record<string, any> => ({
   id: 'cred-1',
   scope: 'WORKSPACE',
   kind: 'TEXT',
@@ -111,9 +116,7 @@ describe('AiClientFactory', () => {
     });
 
     it('deve usar default model quando credential.model e null', async () => {
-      resolver.resolve.mockResolvedValue(
-        credential({ model: null }) as any
-      );
+      resolver.resolve.mockResolvedValue(credential({ model: null }) as any);
 
       await factory.text('org-1');
 
@@ -127,6 +130,29 @@ describe('AiClientFactory', () => {
 
       await expect(factory.text('org-1')).rejects.toThrow(HttpException);
     });
+  });
+
+  it('uses the configured compatible endpoint and explicit model for text and chat', async () => {
+    resolver.resolve.mockResolvedValue(
+      credential({
+        provider: 'openai-compatible',
+        model: 'omni-model',
+        options: { baseURL: 'https://omni.example.com/v1' },
+      }) as any
+    );
+    const result = await factory.text('org-1', 'profile-1');
+    expect(result.modelId).toBe('omni-model');
+    expect(
+      jest.requireMock('@ai-sdk/openai').createOpenAI
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseURL: 'https://omni.example.com/v1',
+        fetch: expect.any(Function),
+      })
+    );
+    expect(
+      (await factory.openAiCompatibleTextConfig('org-1', 'profile-1')).baseURL
+    ).toBe('https://omni.example.com/v1');
   });
 
   describe('image', () => {
@@ -196,7 +222,11 @@ describe('AiClientFactory', () => {
 
     it('deve devolver baseURL undefined para OpenAI direto', async () => {
       resolver.resolve.mockResolvedValue(
-        credential({ provider: 'openai', model: 'gpt-5.5', apiKey: 'sk-oai' }) as any
+        credential({
+          provider: 'openai',
+          model: 'gpt-5.5',
+          apiKey: 'sk-oai',
+        }) as any
       );
 
       const cfg = await factory.openAiCompatibleTextConfig('org-1');
@@ -225,14 +255,17 @@ describe('AiClientFactory', () => {
         credential({ provider: 'azure', model: 'gpt-x' }) as any
       );
 
-      await expect(
-        factory.openAiCompatibleTextConfig('org-1')
-      ).rejects.toThrow(HttpException);
+      await expect(factory.openAiCompatibleTextConfig('org-1')).rejects.toThrow(
+        HttpException
+      );
     });
 
     it('deve propagar 412 do resolver (credencial nao configurada/compartilhada)', async () => {
       resolver.resolve.mockRejectedValue(
-        new HttpException('Configure suas chaves em Configuracoes > Modelos de IA.', 412)
+        new HttpException(
+          'Configure suas chaves em Configuracoes > Modelos de IA.',
+          412
+        )
       );
 
       await expect(
@@ -261,7 +294,11 @@ describe('AiClientFactory', () => {
 
     it('deve construir cliente OpenAI direto com baseURL undefined', async () => {
       resolver.resolve.mockResolvedValue(
-        credential({ provider: 'openai', model: 'gpt-5.5', apiKey: 'sk-oai' }) as any
+        credential({
+          provider: 'openai',
+          model: 'gpt-5.5',
+          apiKey: 'sk-oai',
+        }) as any
       );
 
       const { model } = await factory.buildOpenAiCompatibleClient('org-1');
@@ -280,7 +317,11 @@ describe('AiClientFactory', () => {
       { id: 'o1', expected: true, reason: 'exato' },
       { id: 'o1-mini', expected: true, reason: 'hifen' },
       { id: 'o3-pro', expected: true, reason: 'hifen' },
-      { id: 'openai/o4-mini', expected: true, reason: 'prefixo openrouter + hifen' },
+      {
+        id: 'openai/o4-mini',
+        expected: true,
+        reason: 'prefixo openrouter + hifen',
+      },
       // Familia gpt-5 — variantes com `.` (versao) E com `-` (codinome)
       { id: 'gpt-5', expected: true, reason: 'exato' },
       { id: 'gpt-5.4', expected: true, reason: 'ponto (versao OpenAI)' },
