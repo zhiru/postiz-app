@@ -2309,5 +2309,13 @@
   "timezone": "Timezone",
   "automatic_timezone": "Automatic ({{timezone}})",
   "could_not_save_timezone": "Could not save the timezone",
-  "wizard_dm_disabled_hint": "When off, this automation will not send private messages."
+  "wizard_dm_disabled_hint": "When off, this automation will not send private messages.",
+  "automation_ai_reply": "Use AI for public replies",
+  "automation_ai_dm": "Use AI for private messages",
+  "automation_ai_follow": "Use AI for follow request messages",
+  "automation_ai_hint": "The provider configured under AI Models varies this base text while preserving its meaning and links. Provider credits may be used. If generation fails, the original text is sent.",
+  "ai_provider_compatible": "OpenAI compatible (Omni and others)",
+  "ai_provider_base_url": "API base URL",
+  "ai_provider_base_url_hint": "Use the compatible API HTTPS URL, including /v1 where required. Leave blank for the official OpenAI endpoint. Enter the key again when changing the destination.",
+  "ai_provider_model_id": "Exact provider model ID"
 }

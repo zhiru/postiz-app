@@ -172,4 +172,20 @@ describe('Optional private messages in comment automations', () => {
     repo.findPostbackById.mockResolvedValue(pending);
     expect(await service.getPendingPostback('pending-1')).toBe(pending);
   });
+  it('persists independent opt-in flags and suppresses private AI when DM is disabled', () => {
+    const { service } = setup();
+    const canvas = (service as any).buildQuickCanvas({
+      ...body,
+      aiReplyEnabled: true,
+      aiDmEnabled: true,
+      aiFollowGateEnabled: true,
+    });
+    expect(JSON.parse(canvas.nodes[0].data)).toEqual(
+      expect.objectContaining({
+        aiReplyEnabled: true,
+        aiDmEnabled: false,
+        aiFollowGateEnabled: false,
+      })
+    );
+  });
 });

@@ -43,13 +43,13 @@ interface KindCardProps {
 const PROVIDER_LABELS: Record<string, string> = {
   openrouter: 'OpenRouter',
   openai: 'OpenAI',
+  'openai-compatible': 'OpenAI compatible',
   kieai: 'KieAI',
   tavily: 'Tavily',
 };
 
 const labelForProvider = (id: string) =>
-  PROVIDER_LABELS[id] ??
-  id.charAt(0).toUpperCase() + id.slice(1).toLowerCase();
+  PROVIDER_LABELS[id] ?? id.charAt(0).toUpperCase() + id.slice(1).toLowerCase();
 
 const PROVIDER_ICON_PATHS: Record<string, string> = {
   openrouter: '/icons/ai/openrouter.svg',
@@ -473,7 +473,10 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    error?: string;
+  } | null>(null);
   const [form, setForm] = useState<FormState>(emptyState);
 
   const configured = !!credential;
@@ -559,9 +562,9 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
     (suffix = '') => {
       const base = `/ai/credentials/${kind}${suffix}`;
       return profileId
-        ? `${base}${suffix.includes('?') ? '&' : '?'}profileId=${encodeURIComponent(
-            profileId
-          )}`
+        ? `${base}${
+            suffix.includes('?') ? '&' : '?'
+          }profileId=${encodeURIComponent(profileId)}`
         : base;
     },
     [kind, profileId]
@@ -575,7 +578,12 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
       );
       return;
     }
-    if (!form.apiKey || (form.apiKey === SENTINEL && !configured)) {
+    const sameDestination =
+      configured &&
+      credential?.provider === form.provider &&
+      (credential.options?.baseURL || '') ===
+        (form.options.baseURL?.trim().replace(/\/+$/, '') || '');
+    if ((!form.apiKey || form.apiKey === SENTINEL) && !sameDestination) {
       toaster.show(
         t('ai_provider_apikey_required', 'API key obrigatória'),
         'warning'
@@ -589,11 +597,13 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
     try {
       const body: Record<string, unknown> = {
         provider: form.provider,
-        apiKey: form.apiKey,
+        apiKey: form.apiKey || SENTINEL,
         model: form.model || undefined,
         fallbackModel: form.fallbackModel || undefined,
         options:
-          Object.keys(sanitizedOptions).length > 0 ? sanitizedOptions : undefined,
+          Object.keys(sanitizedOptions).length > 0
+            ? sanitizedOptions
+            : undefined,
       };
       // shareDefault so faz sentido em scope=workspace
       if (isWorkspaceLevel) {
@@ -627,6 +637,7 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
   }, [
     form,
     configured,
+    credential,
     kind,
     fetch,
     invalidate,
@@ -660,7 +671,10 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
     const isOverride = isProfileOverride;
     const approved = await decision.open({
       title: isOverride
-        ? t('ai_provider_remove_override_title', 'Remover override deste perfil?')
+        ? t(
+            'ai_provider_remove_override_title',
+            'Remover override deste perfil?'
+          )
         : t('ai_provider_delete_title', 'Remover configuração?'),
       description: isOverride
         ? t(
@@ -700,7 +714,17 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
         'warning'
       );
     }
-  }, [fetch, buildUrl, invalidate, toaster, t, decision, isProfileOverride, onCancelOverride, providers]);
+  }, [
+    fetch,
+    buildUrl,
+    invalidate,
+    toaster,
+    t,
+    decision,
+    isProfileOverride,
+    onCancelOverride,
+    providers,
+  ]);
 
   return (
     <>
@@ -728,6 +752,27 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
         />
       </FieldRow>
 
+      {kind === 'TEXT' &&
+        ['openai', 'openai-compatible'].includes(form.provider) && (
+          <FieldRow label={t('ai_provider_base_url', 'URL base da API')}>
+            <input
+              aria-label={t('ai_provider_base_url', 'URL base da API')}
+              type="url"
+              className="w-full bg-newBgColorInner border border-newTableBorder rounded-[8px] h-[42px] px-[16px] text-[14px]"
+              placeholder="https://api.example.com/v1"
+              value={form.options.baseURL || ''}
+              disabled={isLocked}
+              onChange={(e) => updateOption('baseURL', e.target.value)}
+            />
+            <p className="text-[12px] text-customColor18 mt-[4px]">
+              {t(
+                'ai_provider_base_url_hint',
+                'Use a URL HTTPS da API compatível, incluindo /v1 quando necessário. Em branco, OpenAI usa a URL oficial. Ao mudar o destino, informe a chave novamente.'
+              )}
+            </p>
+          </FieldRow>
+        )}
+
       <FieldRow label={t('ai_provider_apikey', 'API Key')}>
         <div className="bg-newBgColorInner h-[42px] border-newTableBorder border rounded-[8px] flex items-center">
           <input
@@ -745,11 +790,7 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
                   )
             }
             value={
-              isLocked
-                ? MASK
-                : form.apiKey === SENTINEL
-                ? ''
-                : form.apiKey
+              isLocked ? MASK : form.apiKey === SENTINEL ? '' : form.apiKey
             }
             disabled={isLocked}
             onChange={(e) => updateField('apiKey', e.target.value)}
@@ -768,7 +809,20 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
       {form.provider && kind !== 'WEB_SEARCH' && (
         <>
           <FieldRow label={t('ai_provider_model', 'Modelo principal')}>
-            {kind === 'VIDEO' && form.provider === 'kieai' ? (
+            {kind === 'TEXT' &&
+            (form.provider === 'openai-compatible' || form.options.baseURL) ? (
+              <input
+                aria-label={t('ai_provider_model', 'Modelo principal')}
+                className="w-full bg-newBgColorInner border border-newTableBorder rounded-[8px] h-[42px] px-[16px]"
+                value={form.model}
+                disabled={isLocked}
+                placeholder={t(
+                  'ai_provider_model_id',
+                  'ID exato do modelo no provedor'
+                )}
+                onChange={(e) => updateField('model', e.target.value)}
+              />
+            ) : kind === 'VIDEO' && form.provider === 'kieai' ? (
               // Para VIDEO+kieai o backend NAO tem fallback aceitavel: a
               // chamada precisa de um model exato (Seedance vs Veo tem
               // payloads diferentes). Escondemos a opcao vazia "Default
@@ -808,17 +862,31 @@ const CredentialForm: React.FC<CredentialFormProps> = ({
             <FieldRow
               label={t('ai_provider_fallback_model', 'Fallback (opcional)')}
             >
-              <SearchableModelSelect
-                value={form.fallbackModel}
-                options={fallbackOptions}
-                placeholder={t('ai_provider_no_fallback', 'Sem fallback')}
-                emptyOptionLabel={t(
-                  'ai_provider_no_fallback',
-                  'Sem fallback'
-                )}
-                disabled={isLocked}
-                onChange={(v) => updateField('fallbackModel', v)}
-              />
+              {form.provider === 'openai-compatible' || form.options.baseURL ? (
+                <input
+                  aria-label={t(
+                    'ai_provider_fallback_model',
+                    'Fallback (opcional)'
+                  )}
+                  className="w-full bg-newBgColorInner border border-newTableBorder rounded-[8px] h-[42px] px-[16px]"
+                  value={form.fallbackModel}
+                  disabled={isLocked}
+                  placeholder={t('ai_provider_no_fallback', 'Sem fallback')}
+                  onChange={(e) => updateField('fallbackModel', e.target.value)}
+                />
+              ) : (
+                <SearchableModelSelect
+                  value={form.fallbackModel}
+                  options={fallbackOptions}
+                  placeholder={t('ai_provider_no_fallback', 'Sem fallback')}
+                  emptyOptionLabel={t(
+                    'ai_provider_no_fallback',
+                    'Sem fallback'
+                  )}
+                  disabled={isLocked}
+                  onChange={(v) => updateField('fallbackModel', v)}
+                />
+              )}
             </FieldRow>
           )}
         </>
@@ -1102,9 +1170,7 @@ const DynamicOptions: React.FC<{
 
     return (
       <>
-        <FieldRow
-          label={t('ai_provider_video_resolution', 'Resolução')}
-        >
+        <FieldRow label={t('ai_provider_video_resolution', 'Resolução')}>
           <div className="flex gap-[8px]">
             {(['480p', '720p', '1080p'] as const).map((res) => (
               <label
@@ -1131,9 +1197,7 @@ const DynamicOptions: React.FC<{
             ))}
           </div>
         </FieldRow>
-        <FieldRow
-          label={t('ai_provider_video_duration', 'Duração (segundos)')}
-        >
+        <FieldRow label={t('ai_provider_video_duration', 'Duração (segundos)')}>
           <input
             type="number"
             min={4}
@@ -1174,10 +1238,7 @@ const DynamicOptions: React.FC<{
               onChange={(e) => onChange('audio', e.target.checked)}
             />
             <span className="text-[14px]">
-              {t(
-                'ai_provider_video_audio',
-                'Gerar áudio junto com o vídeo'
-              )}
+              {t('ai_provider_video_audio', 'Gerar áudio junto com o vídeo')}
             </span>
           </label>
         </FieldRow>
@@ -1188,9 +1249,7 @@ const DynamicOptions: React.FC<{
   if (kind === 'WEB_SEARCH' && provider === 'tavily') {
     return (
       <>
-        <FieldRow
-          label={t('ai_provider_web_depth', 'Profundidade da busca')}
-        >
+        <FieldRow label={t('ai_provider_web_depth', 'Profundidade da busca')}>
           <div className="flex gap-[8px]">
             {(['basic', 'advanced'] as const).map((depth) => (
               <label
@@ -1223,7 +1282,9 @@ const DynamicOptions: React.FC<{
             )}
           </div>
         </FieldRow>
-        <FieldRow label={t('ai_provider_web_max_results', 'Máximo de resultados')}>
+        <FieldRow
+          label={t('ai_provider_web_max_results', 'Máximo de resultados')}
+        >
           <input
             type="number"
             min={1}
@@ -1263,6 +1324,15 @@ function sanitizeOptions(
   const out: Record<string, any> = {};
   for (const [key, value] of Object.entries(options)) {
     if (value === undefined || value === null || value === '') continue;
+    if (
+      key === 'baseURL' &&
+      (kind !== 'TEXT' || !['openai', 'openai-compatible'].includes(provider))
+    )
+      continue;
+    if (key === 'baseURL') {
+      out[key] = String(value).trim().replace(/\/+$/, '');
+      continue;
+    }
     if (kind === 'TEXT' && key === 'temperature') {
       const num = Number(value);
       if (Number.isNaN(num)) continue;

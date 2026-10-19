@@ -1,8 +1,37 @@
+import { isIP } from 'node:net';
+import {
+  isBlockedIPv4,
+  isBlockedIPv6,
+} from '../dtos/webhooks/webhook.url.validator';
 import { AiKind } from '@prisma/client';
 import { z } from 'zod';
+import { checkPublicHttpsUrl } from '../dtos/validators/is-public-https-url.validator';
 
 export const TextOptionsSchema = z
   .object({
+    baseURL: z
+      .string()
+      .trim()
+      .max(2048)
+      .url()
+      .refine((value) => {
+        const url = new URL(value);
+        const host = url.hostname.replace(/^\[|\]$/g, '');
+        if (
+          (isIP(host) === 4 && isBlockedIPv4(host)) ||
+          (isIP(host) === 6 && isBlockedIPv6(host))
+        )
+          return false;
+        return (
+          checkPublicHttpsUrl(value) === null &&
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash
+        );
+      }, 'Use uma URL HTTPS pública, sem credenciais, parâmetros ou fragmento.')
+      .transform((value) => value.replace(/\/+$/, ''))
+      .optional(),
     temperature: z.number().min(0).max(2).optional(),
     maxTokens: z.number().int().positive().optional(),
     topP: z.number().min(0).max(1).optional(),

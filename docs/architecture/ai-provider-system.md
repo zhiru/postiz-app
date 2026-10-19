@@ -616,3 +616,9 @@ Cobertura atual:
 | Trocar default de modelo OpenRouter | `DEFAULT_TEXT_MODELS` / `DEFAULT_IMAGE_MODELS` em `ai-client.factory.ts` |
 | Adicionar modelo OpenAI ao catalogo estatico | `ai-catalog.static.ts` |
 | Cache TTL do catalogo | `CACHE_TTL_SECONDS` em `ai-catalog.service.ts` (backend) e `dedupingInterval` em `use-ai-catalog.hook.ts` (frontend) |
+
+## OpenAI-compatible text endpoints
+
+TEXT credentials may use provider `openai-compatible` with explicit `options.baseURL` (public HTTPS without URL credentials/query/fragment) and model ID. Provider `openai` also accepts an optional base URL; when absent its existing SDK behavior is preserved. Custom endpoints use Chat Completions and the existing SSRF-safe dispatcher with redirects rejected, including Copilot SDK clients. Changing provider or endpoint requires re-entering the API key; a redacted sentinel cannot silently forward an existing key to a new destination. Stored credentials remain encrypted and resolution stays PROFILE → shared WORKSPACE → 412. No environment or session routing is changed.
+
+Comment automation flags (`aiReplyEnabled`, `aiDmEnabled`, `aiFollowGateEnabled`) are stored on TRIGGER config and default false. Activity parameters and existing workflow implementations remain unchanged. `AiTextService.varyAutomationMessage` produces a bounded text variation from the configured template, inside the existing delivery ledger; provider failure or protected-data changes fall back to the original. This path performs no tool calls or retrieval and does not activate AI for legacy flows.

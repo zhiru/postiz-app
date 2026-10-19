@@ -905,6 +905,14 @@ export class FlowsService {
     //   story_reply  -> sends gate text via regular DM
     //   comment_on_post -> sends gate text via private reply (button stripped)
     if (body.enableDm !== undefined) triggerConfig.enableDm = body.enableDm;
+    triggerConfig.aiReplyEnabled = body.aiReplyEnabled === true;
+    triggerConfig.aiDmEnabled =
+      body.enableDm !== false && body.aiDmEnabled === true;
+    triggerConfig.aiFollowGateEnabled =
+      body.enableDm !== false &&
+      body.requireFollow === true &&
+      body.aiFollowGateEnabled === true;
+
     triggerConfig.requireFollow =
       body.enableDm !== false && (body.requireFollow ?? false);
     if (body.followGateMessage !== undefined) {

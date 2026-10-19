@@ -265,11 +265,34 @@ export class QuickCreateFlowDto {
   replyMessages?: string[];
 
   @ApiPropertyOptional({
-    description: 'Desativa todas as mensagens privadas quando false. Ausente mantém a compatibilidade com fluxos e clientes existentes.',
+    description:
+      'Desativa todas as mensagens privadas quando false. Ausente mantém a compatibilidade com fluxos e clientes existentes.',
   })
   @IsOptional()
   @IsBoolean()
   enableDm?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Varia a resposta pública com IA a partir do texto configurado.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  aiReplyEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Varia a DM com IA a partir do texto configurado.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  aiDmEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Varia as mensagens do pedido para seguir com IA.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  aiFollowGateEnabled?: boolean;
 
   @ApiPropertyOptional({
     maxLength: 2000,

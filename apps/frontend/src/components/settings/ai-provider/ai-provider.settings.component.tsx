@@ -91,10 +91,7 @@ export const AiProviderSettingsSection: React.FC = () => {
           {t('ai_provider_title', 'Modelos de IA')}
         </h3>
         <p className="text-[14px] text-customColor18">
-          {t(
-            'ai_provider_description',
-            'Configure as chaves e modelos de IA'
-          )}
+          {t('ai_provider_description', 'Configure as chaves e modelos de IA')}
         </p>
       </div>
 
@@ -110,6 +107,13 @@ export const AiProviderSettingsSection: React.FC = () => {
           providers={[
             { value: 'openrouter', label: 'OpenRouter' },
             { value: 'openai', label: 'OpenAI' },
+            {
+              value: 'openai-compatible',
+              label: t(
+                'ai_provider_compatible',
+                'Compatível com OpenAI (Omni e outros)'
+              ),
+            },
           ]}
         />
 

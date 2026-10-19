@@ -12,7 +12,9 @@ jest.mock('ai', () => ({
   generateObject: (...args: any[]) => generateObjectMock(...args),
 }));
 
-const buildClient = (overrides: Partial<TextClientResult> = {}): TextClientResult => ({
+const buildClient = (
+  overrides: Partial<TextClientResult> = {}
+): TextClientResult => ({
   provider: 'openrouter',
   model: { id: 'gpt-5.5' } as any,
   modelId: 'openai/gpt-5.5',
@@ -90,12 +92,10 @@ describe('AiTextService', () => {
       factory.text.mockResolvedValue(buildClient());
       generateTextMock.mockResolvedValue({ text: 'ok' });
 
-      await service.caption(
-        'org-1',
-        'generate',
-        'conteudo',
-        { platform: 'X (Twitter)', tone: 'descontraido' }
-      );
+      await service.caption('org-1', 'generate', 'conteudo', {
+        platform: 'X (Twitter)',
+        tone: 'descontraido',
+      });
 
       const callArg = generateTextMock.mock.calls[0][0];
       expect(callArg.system).toContain('X (Twitter)');
@@ -117,15 +117,10 @@ describe('AiTextService', () => {
       factory.text.mockResolvedValue(buildClient());
       generateTextMock.mockResolvedValue({ text: 'ok' });
 
-      await service.caption(
-        'org-1',
-        'generate',
-        'conteudo',
-        {
-          personaBlock:
-            '=== PROFILE PERSONA ===\nWriting instructions: Crie 5 hashtags ao final.\n=== END PROFILE PERSONA ===',
-        }
-      );
+      await service.caption('org-1', 'generate', 'conteudo', {
+        personaBlock:
+          '=== PROFILE PERSONA ===\nWriting instructions: Crie 5 hashtags ao final.\n=== END PROFILE PERSONA ===',
+      });
 
       const callArg = generateTextMock.mock.calls[0][0];
       // Persona injetada
@@ -229,7 +224,9 @@ describe('AiTextService', () => {
     });
 
     it('deve omitir temperature em reasoning model (gpt-5.5)', async () => {
-      factory.text.mockResolvedValue(buildClient({ modelId: 'openai/gpt-5.5' }));
+      factory.text.mockResolvedValue(
+        buildClient({ modelId: 'openai/gpt-5.5' })
+      );
       generateTextMock.mockResolvedValue({ text: 'ok' });
 
       await service.generatePromptForPicture('org-1', 'qualquer');
@@ -337,7 +334,9 @@ describe('AiTextService', () => {
 
     it('deve traduzir 402 mesmo sem palavras-chave de credito (nunca vaza 402 cru)', async () => {
       factory.text.mockResolvedValue(buildClient());
-      generateTextMock.mockRejectedValue(providerError('Payment Required', 402));
+      generateTextMock.mockRejectedValue(
+        providerError('Payment Required', 402)
+      );
 
       expect.assertions(1);
       try {
@@ -435,6 +434,66 @@ describe('AiTextService', () => {
       await expect(
         service.caption('org-1', 'improve', 'algum texto')
       ).rejects.toThrow('falha de rede generica');
+    });
+  });
+  describe('automation message variation', () => {
+    it('uses only the original text and the flow profile credential with a bounded call', async () => {
+      factory.text.mockResolvedValue(buildClient());
+      generateTextMock.mockResolvedValue({
+        text: 'Confira os detalhes: https://example.com/offer',
+      });
+      expect(
+        await service.varyAutomationMessage(
+          'org-1',
+          'Veja os detalhes: https://example.com/offer',
+          'profile-1'
+        )
+      ).toBe('Confira os detalhes: https://example.com/offer');
+      expect(factory.text).toHaveBeenCalledWith('org-1', 'profile-1');
+      expect(generateTextMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          maxRetries: 0,
+          maxOutputTokens: 600,
+          abortSignal: expect.anything(),
+        })
+      );
+    });
+    it.each([
+      '',
+      'Veja https://evil.example.com',
+      'Oferta de 99 reais',
+      'X'.repeat(3000),
+    ])(
+      'falls back if generation changes protected data or is invalid: %s',
+      async (text) => {
+        factory.text.mockResolvedValue(buildClient());
+        generateTextMock.mockResolvedValue({ text });
+        const original = 'Confira: https://example.com/offer';
+        expect(await service.varyAutomationMessage('org-1', original)).toBe(
+          original
+        );
+      }
+    );
+    it('leaves compatible provider sampling defaults unchanged unless explicitly configured', async () => {
+      factory.text.mockResolvedValue(
+        buildClient({
+          provider: 'openai-compatible',
+          modelId: 'cx/gpt-6-luna-low',
+          options: {},
+        })
+      );
+      generateTextMock.mockResolvedValue({ text: 'Obrigado pelo interesse!' });
+      await service.varyAutomationMessage('org-1', 'Obrigado!');
+      expect(generateTextMock.mock.calls[0][0]).not.toHaveProperty(
+        'temperature'
+      );
+    });
+    it('falls back to the original when AI is not configured or unavailable', async () => {
+      factory.text.mockRejectedValue(new HttpException('not configured', 412));
+      expect(await service.varyAutomationMessage('org-1', 'Original')).toBe(
+        'Original'
+      );
+      expect(generateTextMock).not.toHaveBeenCalled();
     });
   });
 });

@@ -199,7 +199,11 @@ describe('AiCredentialService', () => {
 
       const result = await service.test('org-1', 'WORKSPACE', 'TEXT');
 
-      expect(testService.test).toHaveBeenCalledWith('openrouter', 'sk');
+      expect(testService.test).toHaveBeenCalledWith(
+        'openrouter',
+        'sk',
+        undefined
+      );
       expect(repository.updateMeta).toHaveBeenCalledWith('cred-1', {
         lastTestStatus: 'ok',
       });
@@ -265,5 +269,67 @@ describe('AiCredentialService', () => {
         })
       );
     });
+  });
+  it('validates compatible endpoints and requires an explicit model', async () => {
+    await expect(
+      service.save('org', 'WORKSPACE', 'TEXT', {
+        provider: 'openai-compatible',
+        apiKey: 'test',
+        options: { baseURL: 'https://omni.example.com/v1' },
+      })
+    ).rejects.toThrow('modelo');
+    await service.save('org', 'WORKSPACE', 'TEXT', {
+      provider: 'openai-compatible',
+      apiKey: 'test',
+      model: 'cx/gpt-6-luna-low',
+      options: { baseURL: 'https://omni.example.com/v1/' },
+    });
+    expect(repository.upsert).toHaveBeenCalledWith(
+      'org',
+      'WORKSPACE',
+      'TEXT',
+      expect.objectContaining({
+        options: { baseURL: 'https://omni.example.com/v1' },
+      }),
+      undefined
+    );
+  });
+  it.each([
+    'http://localhost:8000/v1',
+    'https://127.0.0.1/v1',
+    'https://100.64.0.1/v1',
+    'https://198.18.0.1/v1',
+    'https://[::]/v1',
+    'https://[fc01::1]/v1',
+    'https://[fd12:3456::1]/v1',
+    'https://[::ffff:7f00:1]/v1',
+    'https://user:secret@example.com/v1',
+    'https://example.com/v1?key=secret',
+  ])('rejects unsafe endpoint %s', async (baseURL) => {
+    await expect(
+      service.save('org', 'WORKSPACE', 'TEXT', {
+        provider: 'openai-compatible',
+        model: 'model',
+        apiKey: 'test',
+        options: { baseURL },
+      })
+    ).rejects.toBeInstanceOf(HttpException);
+    expect(repository.upsert).not.toHaveBeenCalled();
+  });
+  it('requires a new key before changing the credential destination', async () => {
+    jest.spyOn(service, 'getRaw').mockResolvedValue({
+      provider: 'openai',
+      apiKey: 'existing-secret',
+      options: null,
+    } as any);
+    await expect(
+      service.save('org', 'WORKSPACE', 'TEXT', {
+        provider: 'openai',
+        model: 'model',
+        apiKey: '__REDACTED__',
+        options: { baseURL: 'https://omni.example.com/v1' },
+      })
+    ).rejects.toThrow('chave novamente');
+    expect(repository.upsert).not.toHaveBeenCalled();
   });
 });

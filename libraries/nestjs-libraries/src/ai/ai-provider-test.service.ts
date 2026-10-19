@@ -1,3 +1,5 @@
+import { ssrfSafeFetch } from '../dtos/webhooks/ssrf.safe.dispatcher';
+import { TextOptionsSchema } from './ai-credential.schemas';
 import { Injectable } from '@nestjs/common';
 
 export interface AiProviderTestResult {
@@ -11,7 +13,11 @@ const TAVILY_SEARCH_URL = 'https://api.tavily.com/search';
 
 @Injectable()
 export class AiProviderTestService {
-  async test(provider: string, apiKey: string): Promise<AiProviderTestResult> {
+  async test(
+    provider: string,
+    apiKey: string,
+    baseURL?: string
+  ): Promise<AiProviderTestResult> {
     if (!apiKey) {
       return { ok: false, error: 'API key vazia.' };
     }
@@ -21,7 +27,8 @@ export class AiProviderTestService {
         case 'openrouter':
           return await this.testOpenRouter(apiKey);
         case 'openai':
-          return await this.testOpenAi(apiKey);
+        case 'openai-compatible':
+          return await this.testOpenAi(apiKey, baseURL);
         case 'tavily':
           return await this.testTavily(apiKey);
         case 'kieai':
@@ -38,7 +45,7 @@ export class AiProviderTestService {
     } catch (e: any) {
       return {
         ok: false,
-        error: e?.message || 'Erro inesperado ao testar provider.',
+        error: 'Não foi possível conectar ao provedor. Confira URL e chave.',
       };
     }
   }
@@ -56,9 +63,17 @@ export class AiProviderTestService {
     return { ok: true };
   }
 
-  private async testOpenAi(apiKey: string): Promise<AiProviderTestResult> {
-    const res = await fetch(OPENAI_MODELS_URL, {
+  private async testOpenAi(
+    apiKey: string,
+    baseURL?: string
+  ): Promise<AiProviderTestResult> {
+    const url = baseURL
+      ? TextOptionsSchema.parse({ baseURL }).baseURL + '/models'
+      : OPENAI_MODELS_URL;
+    const res = await ssrfSafeFetch(url, {
       headers: { Authorization: `Bearer ${apiKey}` },
+      redirect: 'error',
+      signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) {
       return {

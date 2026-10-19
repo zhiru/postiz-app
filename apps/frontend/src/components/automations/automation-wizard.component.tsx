@@ -82,6 +82,9 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
   const [enableReply, setEnableReply] = useState(false);
   const [replyMessages, setReplyMessages] = useState<string[]>(['']);
   const [enableDm, setEnableDm] = useState(false);
+  const [aiReplyEnabled, setAiReplyEnabled] = useState(false);
+  const [aiDmEnabled, setAiDmEnabled] = useState(false);
+  const [aiFollowGateEnabled, setAiFollowGateEnabled] = useState(false);
   const [dmMessage, setDmMessage] = useState('');
   const [dmButtonText, setDmButtonText] = useState('');
   const [dmButtonUrl, setDmButtonUrl] = useState('');
@@ -147,6 +150,9 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
       setReplyMessages([replyCfg.message]);
     }
     setEnableDm(!!dmNode);
+    setAiReplyEnabled(triggerCfg.aiReplyEnabled === true);
+    setAiDmEnabled(triggerCfg.aiDmEnabled === true);
+    setAiFollowGateEnabled(triggerCfg.aiFollowGateEnabled === true);
     setDmMessage(dmCfg.message || '');
     if (dmCfg.buttonText) setDmButtonText(dmCfg.buttonText);
     if (dmCfg.buttonUrl) setDmButtonUrl(dmCfg.buttonUrl);
@@ -272,6 +278,9 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
         triggerType: 'comment_on_post',
         postMode,
         enableDm,
+        aiReplyEnabled: enableReply && aiReplyEnabled,
+        aiDmEnabled: enableDm && aiDmEnabled,
+        aiFollowGateEnabled: enableDm && requireFollow && aiFollowGateEnabled,
       };
       if (postMode === 'specific' && selectedPostIds.length > 0) {
         body.postIds = selectedPostIds;
@@ -346,7 +355,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
     saving, integrationIds, activateAfterSave,
     canSave, name, integrationId, postMode, selectedPostIds,
     keywordMode, keywords, matchMode, enableReply, replyMessages,
-    enableDm, dmMessage, dmButtonText, dmButtonUrl,
+    enableDm, dmMessage, dmButtonText, dmButtonUrl, aiReplyEnabled, aiDmEnabled, aiFollowGateEnabled,
     requireFollow, followGateMessage,
     openingDmMessage, openingDmButtonText, alreadyFollowedButtonText, gateExhaustedMessage, maxGateAttempts,
     isEditing, flowId, fetchApi, router, toaster, t,
@@ -648,6 +657,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
                   >
                     + {t('wizard_add_reply_variant', 'Adicionar variação')}
                   </button>
+                  <AutomationAiSwitch label={t('automation_ai_reply', 'Usar IA na resposta pública')} checked={aiReplyEnabled} onChange={setAiReplyEnabled} />
                 </div>
               )}
             </div>
@@ -672,6 +682,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
               </div>
               {enableDm ? (
                 <div id="automation-private-message">
+                  <AutomationAiSwitch label={t('automation_ai_dm', 'Usar IA na mensagem privada')} checked={aiDmEnabled} onChange={setAiDmEnabled} />
               <div className={inputWrapperClass}>
                 <textarea
                   className={`${inputClass} min-h-[100px] resize-y`}
@@ -824,6 +835,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
                         )}
                         className="w-full bg-newBgColorInner border border-newTableBorder rounded-[6px] text-[12px] text-textColor px-[10px] py-[8px] outline-none resize-none"
                       />
+                      <AutomationAiSwitch label={t('automation_ai_follow', 'Usar IA nas mensagens de pedir para seguir')} checked={aiFollowGateEnabled} onChange={setAiFollowGateEnabled} />
                     </div>
 
                     <div className="flex flex-col gap-[6px]">
@@ -1059,6 +1071,43 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
           setDmButtonUrl(url);
         }}
       />
+    </div>
+  );
+};
+
+const AutomationAiSwitch: FC<{
+  label: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}> = ({ label, checked, onChange }) => {
+  const t = useT();
+  return (
+    <div className="my-[12px]">
+      <div className="flex items-center justify-between gap-[12px]">
+        <span className="text-[13px] text-textColor">{label}</span>
+        <button
+          type="button"
+          role="switch"
+          aria-label={label}
+          aria-checked={checked}
+          onClick={() => onChange(!checked)}
+          className={`relative w-[44px] h-[24px] shrink-0 rounded-full transition-colors ${
+            checked ? 'bg-btnPrimary' : 'bg-newTextColor/30'
+          }`}
+        >
+          <span
+            className={`absolute top-[2px] w-[20px] h-[20px] rounded-full bg-white transition-all ${
+              checked ? 'left-[22px]' : 'left-[2px]'
+            }`}
+          />
+        </button>
+      </div>
+      <p className="mt-[6px] text-[12px] text-newTextColor/60">
+        {t(
+          'automation_ai_hint',
+          'A IA configurada em Modelos de IA varia este texto base, mantendo o sentido e os links. Pode consumir créditos do provedor. Se falhar, envia o texto original.'
+        )}
+      </p>
     </div>
   );
 };

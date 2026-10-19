@@ -1,13 +1,18 @@
+import { ssrfSafeFetch } from '../dtos/webhooks/ssrf.safe.dispatcher';
 import { HttpException, Injectable } from '@nestjs/common';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import OpenAI from 'openai';
-import {
-  ImageOptions,
-  TextOptions,
-} from './ai-credential.schemas';
+import { ImageOptions, TextOptions } from './ai-credential.schemas';
 import { ResolvedAiCredential } from './ai-credential.service';
 import { AiProviderResolverService } from './ai-provider-resolver.service';
+
+const compatibleFetch: typeof fetch = (input, init) =>
+  ssrfSafeFetch(input, {
+    ...init,
+    redirect: 'error',
+    signal: init?.signal ?? AbortSignal.timeout(60000),
+  });
 
 const DEFAULT_TEXT_MODELS: Record<string, string> = {
   openrouter: 'openai/gpt-5.5',
@@ -154,10 +159,11 @@ export class AiClientFactory {
           model,
         };
       case 'openai':
+      case 'openai-compatible':
         return {
-          provider: 'openai',
+          provider: credential.provider,
           apiKey: credential.apiKey,
-          baseURL: undefined,
+          baseURL: (credential.options?.baseURL as string) || undefined,
           model,
         };
       default:
@@ -188,7 +194,13 @@ export class AiClientFactory {
       organizationId,
       profileId
     );
-    const client = new OpenAI({ apiKey: cfg.apiKey, baseURL: cfg.baseURL });
+    const client = new OpenAI({
+      apiKey: cfg.apiKey,
+      baseURL: cfg.baseURL,
+      ...(cfg.baseURL && cfg.provider !== 'openrouter'
+        ? { fetch: compatibleFetch }
+        : {}),
+    });
     const beta = (client as any).beta;
     if (beta && !beta.chat) {
       beta.chat = (client as any).chat;
@@ -222,9 +234,14 @@ export class AiClientFactory {
         const provider = createOpenRouter({ apiKey: credential.apiKey });
         return provider(modelId);
       }
-      case 'openai': {
-        const provider = createOpenAI({ apiKey: credential.apiKey });
-        return provider(modelId);
+      case 'openai':
+      case 'openai-compatible': {
+        const baseURL = credential.options?.baseURL as string | undefined;
+        const provider = createOpenAI({
+          apiKey: credential.apiKey,
+          ...(baseURL ? { baseURL, fetch: compatibleFetch } : {}),
+        });
+        return baseURL ? provider.chat(modelId) : provider(modelId);
       }
       default:
         throw new HttpException(

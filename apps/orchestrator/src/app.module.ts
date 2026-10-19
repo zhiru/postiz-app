@@ -1,3 +1,4 @@
+import { AiModule } from '@gitroom/nestjs-libraries/ai/ai.module';
 import { Module } from '@nestjs/common';
 import { PostActivity } from '@gitroom/orchestrator/activities/post.activity';
 import { PostsSyncActivity } from './activities/posts-sync.activity';
@@ -31,6 +32,7 @@ const activities = [
 @Module({
   imports: [
     DatabaseModule,
+    AiModule,
     VideoModule,
     getTemporalModule(true, require.resolve('./workflows'), activities),
   ],

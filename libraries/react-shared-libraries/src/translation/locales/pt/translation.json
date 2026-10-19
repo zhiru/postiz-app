@@ -2309,5 +2309,13 @@
   "timezone": "Fuso horário",
   "automatic_timezone": "Automático ({{timezone}})",
   "could_not_save_timezone": "Não foi possível salvar o fuso horário",
-  "wizard_dm_disabled_hint": "Com esta opção desligada, nenhuma mensagem privada será enviada."
+  "wizard_dm_disabled_hint": "Com esta opção desligada, nenhuma mensagem privada será enviada.",
+  "automation_ai_reply": "Usar IA na resposta pública",
+  "automation_ai_dm": "Usar IA na mensagem privada",
+  "automation_ai_follow": "Usar IA nas mensagens de pedir para seguir",
+  "automation_ai_hint": "A IA configurada em Modelos de IA varia este texto base, mantendo o sentido e os links. Pode consumir créditos do provedor. Se falhar, envia o texto original.",
+  "ai_provider_compatible": "Compatível com OpenAI (Omni e outros)",
+  "ai_provider_base_url": "URL base da API",
+  "ai_provider_base_url_hint": "Use a URL HTTPS da API compatível, incluindo /v1 quando necessário. Em branco, OpenAI usa a URL oficial. Ao mudar o destino, informe a chave novamente.",
+  "ai_provider_model_id": "ID exato do modelo no provedor"
 }

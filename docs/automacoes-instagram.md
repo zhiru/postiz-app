@@ -6,6 +6,14 @@ Guia completo para configurar e usar automacoes de comentarios do Instagram no R
 
 No assistente de comentários, use os switches de resposta pública e **Enviar mensagem privada** separadamente. Para responder somente nos comentários, ligue a resposta pública e desligue a DM. O texto e os links da DM ficam ocultos; o pedido para seguir também fica desativado, pois ele envia mensagens privadas. A alteração só é aplicada ao salvar. Ao salvar com DM desligada, os botões pendentes de pedir para seguir são cancelados e mensagens privadas ainda na fila verificam a configuração atual antes de enviar. Mensagens já enviadas não são removidas. Automações existentes com uma ação de DM abrem com o switch ligado, sem mudança automática na configuração ou no status.
 
+## Variações opcionais com IA
+
+O assistente de comentários oferece switches independentes **Usar IA na resposta pública**, **Usar IA na mensagem privada** e **Usar IA nas mensagens de pedir para seguir**. Todos começam desligados; automações existentes continuam com seu texto original até você editar e salvar. A IA parafraseia o texto base já configurado, sem mudar links ou dados protegidos. O preview mostra o texto base; a variação ocorre no envio. O switch de mensagens de seguir vale para abertura, convite para seguir e encerramento por tentativas esgotadas; o texto final usa o switch de DM.
+
+Configure o provedor em **Configurações → Modelos de IA → Geração de texto**. Além de OpenRouter e OpenAI, escolha **Compatível com OpenAI (Omni e outros)** e preencha URL base, modelo exato e chave. Exemplo informado para Omni: URL `https://omni.neuraltalk.com.br/v1`, modelo `cx/gpt-6-luna-low`. A chave é digitada e criptografada na plataforma; ao mudar o destino, informe-a novamente. O botão **Testar conexão** consulta `/models` sem gerar texto; disponibilidade do modelo depende do provedor.
+
+As chamadas usam a configuração do perfil da automação, com a herança já existente do workspace. Podem consumir créditos do provedor. Cada variação tem timeout de 10 segundos, saída limitada e sem ferramentas; falha, falta de configuração ou alteração de links/números usa o texto original. A geração ocorre dentro da proteção de envio único, portanto reentregas não geram outra mensagem. Desligar DM continua bloqueando ações privadas, mesmo com IA ligada.
+
 ## O que e
 
 Permite criar fluxos visuais que respondem automaticamente a comentarios em postagens do Instagram. Por exemplo:
