@@ -1085,10 +1085,12 @@ export class InstagramProvider
     try {
       if (!appId) throw new Error();
       const token = pageAccessToken.split('___')[0];
+      // Page installation/messaging is separate from the app-level Instagram
+      // comments subscription, which is checked before flow activation.
       const requiredFields =
         type === 'graph.instagram.com'
           ? ['comments', 'messages']
-          : ['feed', 'messages'];
+          : ['messages'];
       const current = await this.checkWebhookSubscription(
         igAccountId,
         token,

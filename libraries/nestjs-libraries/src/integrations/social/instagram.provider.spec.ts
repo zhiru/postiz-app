@@ -546,7 +546,7 @@ describe('InstagramProvider webhook account subscriptions', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it.each([
-    ['graph.facebook.com', 'page-id', 'feed,messages'],
+    ['graph.facebook.com', 'page-id', 'messages'],
     ['graph.instagram.com', 'ig-id', 'comments,messages'],
   ])(
     'subscribes the correct object and fields for %s',
@@ -704,7 +704,7 @@ describe('InstagramProvider shared app subscription preservation', () => {
   it('unions the existing Chatwoot fields before subscribing without touching callbacks', async () => {
     const provider = new InstagramProvider();
     jest.spyOn(provider, 'getPageIdForIgAccount').mockResolvedValue('page-id');
-    const existing = ['messages', 'message_reads', 'messaging_postbacks'];
+    const existing = ['feed', 'message_reads', 'messaging_postbacks'];
     const request = jest
       .spyOn(global, 'fetch')
       .mockResolvedValueOnce({
@@ -733,13 +733,13 @@ describe('InstagramProvider shared app subscription preservation', () => {
     const mutation = new URL(String(request.mock.calls[1][0]));
     expect(mutation.searchParams.get('subscribed_fields')?.split(',')).toEqual([
       ...existing,
-      'feed',
+      'messages',
     ]);
     expect(mutation.searchParams.has('callback_url')).toBe(false);
     expect(mutation.searchParams.has('verify_token')).toBe(false);
   });
 
-  it('does not mutate a shared app subscription that already has the required fields', async () => {
+  it('does not mutate a Page subscription that already has messages', async () => {
     const provider = new InstagramProvider();
     jest.spyOn(provider, 'getPageIdForIgAccount').mockResolvedValue('page-id');
     const request = jest.spyOn(global, 'fetch').mockResolvedValue({
@@ -748,7 +748,7 @@ describe('InstagramProvider shared app subscription preservation', () => {
         data: [
           {
             id: 'app-id',
-            subscribed_fields: ['feed', 'messages', 'messaging_postbacks'],
+            subscribed_fields: ['messages'],
           },
         ],
       }),
@@ -807,7 +807,7 @@ describe('InstagramProvider subscription app identity', () => {
             },
             {
               id: 'app-id',
-              subscribed_fields: ['messages', 'messaging_postbacks'],
+              subscribed_fields: ['messaging_postbacks'],
             },
           ],
         }),
@@ -829,9 +829,8 @@ describe('InstagramProvider subscription app identity', () => {
     expect(request).toHaveBeenCalledTimes(2);
     const mutation = new URL(String(request.mock.calls[1][0]));
     expect(mutation.searchParams.get('subscribed_fields')?.split(',')).toEqual([
-      'messages',
       'messaging_postbacks',
-      'feed',
+      'messages',
     ]);
   });
 
