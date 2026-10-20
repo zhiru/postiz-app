@@ -206,14 +206,17 @@ export class PublicIntegrationsController {
   async uploadSimple(
     @GetOrgFromRequest() org: Organization,
     @GetPublicApiProfileId() publicApiProfileId: string | undefined,
-    @UploadedFile('file') file: Express.Multer.File
+    @UploadedFile('file') file: Express.Multer.File,
+    @Body('adjust') adjust: string = 'false'
   ) {
     Sentry.metrics.count('public_api-request', 1);
     if (!file) {
       throw new HttpException({ msg: 'No file provided' }, 400);
     }
 
-    return this._mediaService.saveFile(
+    return adjust === 'true' ? this._mediaService.saveUploadedFile(
+      org.id, file.filename, file.path, file.originalname, publicApiProfileId
+    ) : this._mediaService.saveFile(
       org.id,
       file.filename,
       file.path,
@@ -238,7 +241,7 @@ export class PublicIntegrationsController {
   ) {
     Sentry.metrics.count('public_api-request', 1);
     try {
-      return await this._mediaService.uploadFromUrl(org.id, body.url, publicApiProfileId);
+      return await this._mediaService.uploadFromUrl(org.id, body.url, publicApiProfileId, body.adjust);
     } catch (err) {
       // Validation failures keep this route's { msg } error shape
       if (err instanceof BadRequestException) {
@@ -497,6 +500,16 @@ export class PublicIntegrationsController {
         createdAt: p.createdAt,
       })),
     };
+  }
+
+  @Get('/media/:id/status')
+  async getMediaStatus(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string,
+    @GetPublicApiProfileId() publicApiProfileId: string | undefined
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._mediaService.getMediaUploadStatus(org.id, id, publicApiProfileId);
   }
 
   // `user` is only known for OAuth app tokens; an API key belongs to the

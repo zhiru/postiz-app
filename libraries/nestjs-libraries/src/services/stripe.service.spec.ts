@@ -21,7 +21,7 @@ jest.mock('@gitroom/nestjs-libraries/track/track.service', () => ({
 jest.mock('stripe', () =>
   jest.fn().mockImplementation(() => ({
     subscriptions: { retrieve: jest.fn() },
-    invoices: { list: jest.fn() },
+    invoices: { list: jest.fn(), retrieve: jest.fn() },
   }))
 );
 
@@ -92,5 +92,21 @@ describe('Stripe conversion tracking', () => {
     await expect(
       (service as any).trackConversion(invoice)
     ).resolves.toBeUndefined();
+  });
+
+  it.each(['requires_action','requires_confirmation'])('returns the customer 3DS secret for %s', async status=>{
+    stripe.subscriptions.retrieve.mockResolvedValue({latest_invoice:{id:'in_3ds'}});
+    stripe.invoices.retrieve.mockResolvedValue({status:'open',payments:{data:[{payment:{payment_intent:{status,client_secret:'demo_client_secret'}}}]}});
+    await expect((service as any).getRequiredActionFromSubscription('sub_3ds')).resolves.toEqual({requiresAction:true,clientSecret:'demo_client_secret'});
+  });
+  it('rejects a declined interactive charge rather than reporting success',async()=>{
+    stripe.subscriptions.retrieve.mockResolvedValue({latest_invoice:{id:'in_declined'}});
+    stripe.invoices.retrieve.mockResolvedValue({status:'open',payments:{data:[{payment:{payment_intent:{status:'requires_payment_method'}}}]}});
+    await expect((service as any).getRequiredActionFromSubscription('sub_declined')).rejects.toThrow('subscription payment failed');
+  });
+  it('does not request action after the invoice is paid',async()=>{
+    stripe.subscriptions.retrieve.mockResolvedValue({latest_invoice:{id:'in_paid'}});
+    stripe.invoices.retrieve.mockResolvedValue({status:'paid',payments:{data:[]}});
+    await expect((service as any).getRequiredActionFromSubscription('sub_paid')).resolves.toEqual({requiresAction:false});
   });
 });

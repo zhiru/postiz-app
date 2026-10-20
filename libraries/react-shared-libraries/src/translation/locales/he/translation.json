@@ -598,6 +598,7 @@
   "billing_download_invoice": "הורדת חשבונית",
   "billing_view_invoice": "צפייה בחשבונית",
   "billing_no_matching_invoices": "אין חשבוניות שתואמות לחיפוש",
+  "billing_no_invoices": "עדיין אין חשבוניות",
   "select_channels": "בחר ערוצים",
   "start_a_new_chat": "התחל שיחה חדשה",
   "your_assistant": "העוזר שלך",
@@ -890,5 +891,16 @@
   "hubspot_installed_description": "חבר כאן ב-Postiz את הערוצים שאליהם תרצה לפרסם. לאחר מכן, ב-HubSpot, פתח את Agent Hub > Agent Builder, הוסף כלי, בחר את Postiz MCP תחת MCP Servers ולחץ על Connect and add.",
   "timezone": "אזור זמן",
   "automatic_timezone": "אוטומטי ({{timezone}})",
-  "could_not_save_timezone": "לא ניתן היה לשמור את אזור הזמן"
+  "could_not_save_timezone": "לא ניתן היה לשמור את אזור הזמן",
+  "finish_trial_failed": "לא הצלחנו לסיים את גרסת הניסיון שלך",
+  "finish_trial_failed_description": "לא הצלחנו לחייב את כרטיס האשראי שלך. נסה שוב.",
+  "try_again": "נסה שוב",
+  "finish_trial": "סיום תקופת הניסיון",
+  "finish_trial_confirmation": "סיום תקופת הניסיון יחייב את התוכנית שלך באופן מיידי, האם אתה בטוח?",
+  "finish_trial_charge_me_now": "סיים את תקופת הניסיון וחייב אותי עכשיו",
+  "trial": "תקופת ניסיון",
+  "thumbnails_and_alt_text": "תמונות ממוזערות וטקסט אלטרנטיבי",
+  "media_settings_section_description": "לחץ על פריט מדיה כדי להגדיר לו טקסט חלופי, או תמונת ממוזערת אם זהו וידאו.",
+  "media_settings_section_tooltip": "תמונות ממוזערות חלות על סרטונים בפוסט הראשי. יוטיוב עשויה להתעלם מתמונות ממוזערות מותאמות אישית בסרטונים שהיא מזהה כ-Shorts (אנכיים, עד 3 דקות), גם אם לא נכשל הפרסום.",
+  "youtube_thumbnail_overrides_media": "לפוסט זה קיימת תמונת ממוזערת מיוחדת ליוטיוב, המחליפה את התמונה שנקבעה בהגדרות המדיה."
 }

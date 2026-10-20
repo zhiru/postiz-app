@@ -21,7 +21,7 @@ import { PublicIntegrationsController } from './public.integrations.controller';
 
 const build = () => {
   const integrations = { getIntegrationsList: jest.fn().mockResolvedValue([]), validateIntegrationProfile: jest.fn() };
-  const media = { saveFile: jest.fn().mockResolvedValue({ id: 'media-1' }), uploadFromUrl: jest.fn().mockResolvedValue({ id: 'media-2' }) };
+  const media = { saveFile: jest.fn().mockResolvedValue({ id: 'media-1' }), uploadFromUrl: jest.fn().mockResolvedValue({ id: 'media-2' }), saveUploadedFile: jest.fn(), getMediaUploadStatus: jest.fn() };
   const comments = { getComments: jest.fn(), reply: jest.fn() };
   const controller = new PublicIntegrationsController(integrations as any, {} as any, media as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, comments as any);
   return { controller, integrations, media, comments };
@@ -52,7 +52,7 @@ describe('PublicIntegrationsController - limites de credencial', () => {
   it('delega download seguro com o perfil e conserva erros de validacao', async () => {
     const { controller, media } = build();
     await controller.uploadsFromUrl({ id: 'org-1' } as any, 'profile-1', { url: 'https://cdn.example.com/foto.jpg' });
-    expect(media.uploadFromUrl).toHaveBeenCalledWith('org-1', 'https://cdn.example.com/foto.jpg', 'profile-1');
+    expect(media.uploadFromUrl).toHaveBeenCalledWith('org-1', 'https://cdn.example.com/foto.jpg', 'profile-1', undefined);
     media.uploadFromUrl.mockRejectedValue(new BadRequestException('Unsupported file type.'));
     await expect(controller.uploadsFromUrl({ id: 'org-1' } as any, 'profile-1', { url: 'https://cdn.example.com/foto.svg' })).rejects.toThrow(HttpException);
   });
@@ -64,5 +64,25 @@ describe('PublicIntegrationsController - limites de credencial', () => {
   it('clipping recusa chave de perfil antes de criar trabalho', () => {
     const { controller } = build();
     expect(() => controller.startClipping({ id: 'org-1' } as any, 'profile-1', {} as any)).toThrow(HttpException);
+  });
+});
+
+
+describe('Public media adjustment and status scope', () => {
+  it('preserves the profile when adjustment is requested on file upload', async () => {
+    const {controller,media}=build();
+    await controller.uploadSimple({id:'org-1'} as any,'profile-1',{filename:'clip.mp4',path:'/uploads/clip.mp4',originalname:'Original.mp4'} as any,'true');
+    expect(media.saveUploadedFile).toHaveBeenCalledWith('org-1','clip.mp4','/uploads/clip.mp4','Original.mp4','profile-1');
+    expect(media.saveFile).not.toHaveBeenCalled();
+  });
+  it('preserves the profile and explicit opt-in when uploading from URL', async () => {
+    const {controller,media}=build();
+    await controller.uploadsFromUrl({id:'org-1'} as any,'profile-1',{url:'https://example.com/video.mp4',adjust:true});
+    expect(media.uploadFromUrl).toHaveBeenCalledWith('org-1','https://example.com/video.mp4','profile-1',true);
+  });
+  it('scopes upload status to the authenticated organization and profile', async () => {
+    const {controller,media}=build();
+    await controller.getMediaStatus({id:'org-1'} as any,'media-1','profile-1');
+    expect(media.getMediaUploadStatus).toHaveBeenCalledWith('org-1','media-1','profile-1');
   });
 });
