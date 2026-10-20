@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Apply the configured platform name and logo to browser titles and favicons, including navigation and live branding changes.
+
 - Added configurable OpenAI-compatible text endpoints (including Omni), explicit custom model IDs, and independent opt-in AI variations for public replies, DMs and follow-gate messages, preserving legacy automation behavior and delivery deduplication.
 
 - Add an independent private-message switch to Instagram comment automations. Turning it off removes private actions and follow-gate messages on save, including multi-account creation, while preserving existing flows by default.

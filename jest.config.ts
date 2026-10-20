@@ -1,7 +1,11 @@
 import type { Config } from 'jest';
 
 const config: Config = {
-  projects: ['<rootDir>/apps/backend', '<rootDir>/libraries/nestjs-libraries'],
+  projects: [
+    '<rootDir>/apps/backend',
+    '<rootDir>/libraries/nestjs-libraries',
+    '<rootDir>/apps/frontend',
+  ],
 };
 
 export default config;
