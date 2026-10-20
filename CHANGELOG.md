@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Apply the configured platform name and logo to browser titles and favicons, including navigation and live branding changes.
+
 - Imported 52 upstream commits through `651876e2`, including scoped MCP media status, opt-in upload adjustment, thumbnail settings, 3DS/invoice improvements, block-preserving previews, Deepgram privacy and YouTube quota feedback; retained local Instagram synchronization and automation delivery protections.
 
 - Added configurable OpenAI-compatible text endpoints (including Omni), explicit custom model IDs, and independent opt-in AI variations for public replies, DMs and follow-gate messages, preserving legacy automation behavior and delivery deduplication.
