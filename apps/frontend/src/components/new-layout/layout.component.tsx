@@ -38,6 +38,7 @@ import { ChromeExtensionComponent } from '@gitroom/frontend/components/layout/ch
 import NotificationComponent from '@gitroom/frontend/components/notifications/notification.component';
 import { OrganizationSelector } from '@gitroom/frontend/components/layout/organization.selector';
 import { ProfileSelector } from '@gitroom/frontend/components/layout/profile.selector';
+import { InvoicesComponent } from '@gitroom/frontend/components/layout/invoices.component';
 import { StreakComponent } from '@gitroom/frontend/components/layout/streak.component';
 import { PreConditionComponent } from '@gitroom/frontend/components/layout/pre-condition.component';
 import { NoProfileAssignedComponent } from '@gitroom/frontend/components/layout/no-profile-assigned.component';
@@ -181,6 +182,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                           <div className="w-[1px] h-[20px] bg-blockSeparator mobile:hidden" />
                           <OrganizationSelector />
                           <ProfileSelector />
+                          <InvoicesComponent />
                           <div className="hover:text-newTextColor">
                             <ModeComponent />
                           </div>

@@ -2317,5 +2317,15 @@
   "ai_provider_compatible": "OpenAI compatible (Omni and others)",
   "ai_provider_base_url": "API base URL",
   "ai_provider_base_url_hint": "Use the compatible API HTTPS URL, including /v1 where required. Leave blank for the official OpenAI endpoint. Enter the key again when changing the destination.",
-  "ai_provider_model_id": "Exact provider model ID"
+  "ai_provider_model_id": "Exact provider model ID",
+  "billing_no_invoices": "No invoices yet",
+  "finish_trial_failed": "We could not finish your trial",
+  "finish_trial_failed_description": "We could not charge your card. Please try again.",
+  "finish_trial": "Finish trial",
+  "finish_trial_confirmation": "Finishing the trial will charge your plan immediately, are you sure?",
+  "finish_trial_charge_me_now": "Finish the trial, charge me now",
+  "thumbnails_and_alt_text": "Thumbnails & alt text",
+  "media_settings_section_description": "Click a media item to set its alt text, or its thumbnail if it is a video.",
+  "media_settings_section_tooltip": "Thumbnails apply to videos in the main post. YouTube may ignore custom thumbnails on videos it treats as Shorts (vertical, up to 3 minutes) without failing the publish.",
+  "youtube_thumbnail_overrides_media": "This post has a YouTube-specific thumbnail, which overrides the thumbnail set in the media settings."
 }
