@@ -108,6 +108,113 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       };
     }
 
+    if (body.includes('invalidDescription')) {
+      return {
+        type: 'bad-body',
+        value:
+          'Your video description is invalid, it may contain disallowed characters such as < or >.',
+      };
+    }
+
+    if (body.includes('invalidCategoryId')) {
+      return {
+        type: 'bad-body',
+        value: 'The selected video category is invalid.',
+      };
+    }
+
+    if (body.includes('invalidPublishAt')) {
+      return {
+        type: 'bad-body',
+        value: 'The scheduled publishing time is invalid.',
+      };
+    }
+
+    if (body.includes('invalidRecordingDetails')) {
+      return {
+        type: 'bad-body',
+        value: 'The recording details for the video are invalid.',
+      };
+    }
+
+    if (body.includes('invalidVideoGameRating')) {
+      return {
+        type: 'bad-body',
+        value: 'The video game rating is invalid.',
+      };
+    }
+
+    if (body.includes('invalidFilename')) {
+      return {
+        type: 'bad-body',
+        value: 'The video file name is invalid.',
+      };
+    }
+
+    if (body.includes('defaultLanguageNotSet')) {
+      return {
+        type: 'bad-body',
+        value:
+          'We could not set the localized video details because no default language is set.',
+      };
+    }
+
+    if (body.includes('invalidVideoMetadata')) {
+      return {
+        type: 'bad-body',
+        value:
+          'Some of the video details are invalid, please review the title, description and tags.',
+      };
+    }
+
+    if (body.includes('mediaBodyRequired')) {
+      return {
+        type: 'bad-body',
+        value:
+          'The video file is missing or could not be read, please re-upload the video.',
+      };
+    }
+
+    if (body.includes('imageFormatUnsupported')) {
+      return {
+        type: 'bad-body',
+        value:
+          'We have uploaded your video but the thumbnail format is not supported, please use JPEG or PNG.',
+      };
+    }
+
+    if (body.includes('imageTooTall')) {
+      return {
+        type: 'bad-body',
+        value:
+          'We have uploaded your video but the thumbnail image is too tall.',
+      };
+    }
+
+    if (body.includes('imageTooWide')) {
+      return {
+        type: 'bad-body',
+        value:
+          'We have uploaded your video but the thumbnail image is too wide.',
+      };
+    }
+
+    if (body.includes('defaultVideoInsertPerDayPerProject')) {
+      return {
+        type: 'bad-body',
+        value:
+          "YouTube's daily upload quota is exhausted for today, please reschedule this post for a later time.",
+      };
+    }
+
+    if (body.includes('rateLimitExceeded')) {
+      return {
+        type: 'bad-body',
+        value:
+          'You are sending requests too quickly, please wait a little while and try again.',
+      };
+    }
+
     if (body.includes('failedPrecondition')) {
       return {
         type: 'bad-body',
@@ -808,7 +915,10 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
           videoSize,
           path,
           uploadedBytes: 0,
-          thumbnail: settings?.thumbnail?.path || '',
+          // the YouTube setting wins, so posts that set both keep publishing
+          // with the one they always had
+          thumbnail:
+            settings?.thumbnail?.path || firstPost?.media?.[0]?.thumbnail || '',
           postDbId: firstPost.id,
         },
       },

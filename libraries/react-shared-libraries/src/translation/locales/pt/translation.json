@@ -2317,5 +2317,15 @@
   "ai_provider_compatible": "Compatível com OpenAI (Omni e outros)",
   "ai_provider_base_url": "URL base da API",
   "ai_provider_base_url_hint": "Use a URL HTTPS da API compatível, incluindo /v1 quando necessário. Em branco, OpenAI usa a URL oficial. Ao mudar o destino, informe a chave novamente.",
-  "ai_provider_model_id": "ID exato do modelo no provedor"
+  "ai_provider_model_id": "ID exato do modelo no provedor",
+  "billing_no_invoices": "Ainda não há faturas",
+  "finish_trial_failed": "Não foi possível finalizar sua avaliação",
+  "finish_trial_failed_description": "Não conseguimos cobrar no seu cartão. Por favor, tente novamente.",
+  "finish_trial": "Finalizar avaliação",
+  "finish_trial_confirmation": "Finalizar a avaliação cobrará seu plano imediatamente. Tem certeza?",
+  "finish_trial_charge_me_now": "Finalizar a avaliação, cobrar agora",
+  "thumbnails_and_alt_text": "Miniaturas e texto alternativo",
+  "media_settings_section_description": "Clique em um item de mídia para definir seu texto alternativo ou sua miniatura, se for um vídeo.",
+  "media_settings_section_tooltip": "As miniaturas se aplicam a vídeos na publicação principal. O YouTube pode ignorar miniaturas personalizadas em vídeos que trata como Shorts (verticais, com até 3 minutos), sem impedir a publicação.",
+  "youtube_thumbnail_overrides_media": "Esta publicação possui uma miniatura específica do YouTube, que substitui a miniatura definida nas configurações de mídia."
 }

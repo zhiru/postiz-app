@@ -598,6 +598,7 @@
   "billing_download_invoice": "Скачать счёт",
   "billing_view_invoice": "Просмотреть счёт",
   "billing_no_matching_invoices": "Нет счетов, соответствующих поиску",
+  "billing_no_invoices": "Пока нет счетов",
   "select_channels": "Выберите каналы",
   "start_a_new_chat": "Начать новый чат",
   "your_assistant": "Ваш помощник",
@@ -890,5 +891,16 @@
   "hubspot_installed_description": "Подключите здесь, в Postiz, каналы, в которых хотите публиковать. Затем в HubSpot откройте Agent Hub > Agent Builder, добавьте инструмент, выберите Postiz MCP в разделе MCP Servers и нажмите Connect and add.",
   "timezone": "Часовой пояс",
   "automatic_timezone": "Автоматически ({{timezone}})",
-  "could_not_save_timezone": "Не удалось сохранить часовой пояс"
+  "could_not_save_timezone": "Не удалось сохранить часовой пояс",
+  "finish_trial_failed": "Мы не смогли завершить ваш пробный период",
+  "finish_trial_failed_description": "Не удалось списать средства с вашей карты. Пожалуйста, попробуйте еще раз.",
+  "try_again": "Попробовать еще раз",
+  "finish_trial": "Завершить пробный период",
+  "finish_trial_confirmation": "Завершение пробного периода приведет к немедленному списанию оплаты по вашему тарифу. Вы уверены?",
+  "finish_trial_charge_me_now": "Завершить пробный период, списать оплату сейчас",
+  "trial": "Пробный период",
+  "thumbnails_and_alt_text": "Миниатюры и альтернативный текст",
+  "media_settings_section_description": "Нажмите на медиафайл, чтобы задать для него альтернативный текст или миниатюру, если это видео.",
+  "media_settings_section_tooltip": "Миниатюры применяются к видео в основном посте. YouTube может игнорировать пользовательские миниатюры для видео, которые оно рассматривает как Shorts (вертикальные, до 3 минут), без сообщения об ошибке при публикации.",
+  "youtube_thumbnail_overrides_media": "В этом посте задана миниатюра для YouTube, которая заменяет миниатюру, установленную в настройках медиа."
 }

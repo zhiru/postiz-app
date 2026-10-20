@@ -269,7 +269,39 @@ describe('MediaService - sessoes de upload por perfil', () => {
     const { service } = buildService();
     redis.get.mockResolvedValue(JSON.stringify({ org: 'org-1', profileId: 'profile-1' }));
     const save = jest.spyOn(service, 'saveUploadedFile').mockResolvedValue({ id: 'media-1' } as any);
-    await service.saveUploadSessionFile('org-1', 'session-1', 'safe.jpg', '/uploads/safe.jpg', 'Foto.jpg');
+    await service.saveUploadSessionFile('org-1', 'session-1', 'safe.jpg', '/uploads/safe.jpg', 'Foto.jpg', true);
     expect(save).toHaveBeenCalledWith('org-1', 'safe.jpg', '/uploads/safe.jpg', 'Foto.jpg', 'profile-1');
+  });
+});
+
+
+describe('MediaService uploaded media status', () => {
+  it.each(['processing','ready'])('keeps %s and scope without exposing extra fields',async status=>{
+    const {service,repository}=buildService();
+    repository.getMediaStatus.mockResolvedValue({id:'media-1',name:'clip.mp4',path:'https://example.com/clip.mp4',status,processingError:'private'} as any);
+    expect(await service.getMediaUploadStatus('org-1','media-1','profile-1')).toEqual({id:'media-1',path:'https://example.com/clip.mp4',status});
+    expect(repository.getMediaStatus).toHaveBeenCalledWith('org-1','media-1','profile-1');
+  });
+  it('does not expose missing or out-of-profile media',async()=>{
+    const {service,repository}=buildService();repository.getMediaStatus.mockResolvedValue(null);
+    await expect(service.getMediaUploadStatus('org-1','other-media','profile-1')).rejects.toMatchObject({status:404});
+  });
+  it.each([['clip.mp4','ready'],['clip.mov','failed']])('returns appropriate upload status for failed adjustment of %s',async(name,status)=>{
+    const {service,repository}=buildService();repository.getMediaStatus.mockResolvedValue({id:'media-1',name,path:'https://example.com/clip',status:'failed'} as any);
+    const result=await service.getMediaUploadStatus('org-1','media-1','profile-1');expect(result.status).toBe(status);
+    expect(status==='ready'?'warning' in result:'error' in result).toBe(true);
+  });
+});
+
+
+describe('Media upload widget opt-in adjustment', () => {
+  it('keeps original upload and the session profile when adjustment is omitted', async () => {
+    const {service}=buildService();
+    const redis=require('@gitroom/nestjs-libraries/redis/redis.service').ioRedis;
+    redis.get.mockResolvedValue(JSON.stringify({org:'org-1',profileId:'profile-1'}));
+    const save=jest.spyOn(service,'saveFile').mockResolvedValue({id:'media-1'} as any);
+    const adjust=jest.spyOn(service,'saveUploadedFile');
+    await service.saveUploadSessionFile('org-1','session-1','safe.jpg','/uploads/safe.jpg','Foto.jpg');
+    expect(save).toHaveBeenCalledWith('org-1','safe.jpg','/uploads/safe.jpg','Foto.jpg','profile-1');expect(adjust).not.toHaveBeenCalled();
   });
 });

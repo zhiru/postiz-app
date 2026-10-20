@@ -10,7 +10,6 @@ import { jakartaSans } from '@gitroom/frontend/fonts/plus-jakarta-sans/plus.jaka
 import PlausibleProvider from 'next-plausible';
 import clsx from 'clsx';
 import { VariableContextComponent } from '@gitroom/react/helpers/variable.context';
-import { PHProvider } from '@gitroom/react/helpers/posthog';
 import UtmSaver from '@gitroom/helpers/utils/utm.saver';
 import { DubAnalytics } from '@gitroom/frontend/components/layout/dubAnalytics';
 import { FacebookComponent } from '@gitroom/frontend/components/layout/facebook.component';
@@ -97,29 +96,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <HtmlComponent />
             <DubAnalytics />
             <FacebookComponent />
-            {!!process.env.STRIPE_PUBLISHABLE_KEY ? (
-              <PlausibleProvider domain={!!process.env.IS_GENERAL ? '' : ''}>
-                <PHProvider
-                  phkey={process.env.NEXT_PUBLIC_POSTHOG_KEY}
-                  host={process.env.NEXT_PUBLIC_POSTHOG_HOST}
-                >
-                  <LayoutContext>
-                    <UtmSaver />
-                    {children}
-                  </LayoutContext>
-                </PHProvider>
-              </PlausibleProvider>
-            ) : (
-              <PHProvider
-                phkey={process.env.NEXT_PUBLIC_POSTHOG_KEY}
-                host={process.env.NEXT_PUBLIC_POSTHOG_HOST}
-              >
-                <LayoutContext>
-                  <UtmSaver />
-                  {children}
-                </LayoutContext>
-              </PHProvider>
-            )}
+            <Plausible domain="">
+              <LayoutContext>
+                <UtmSaver />
+                {children}
+              </LayoutContext>
+            </Plausible>
           </SentryComponent>
         </VariableContextComponent>
       </body>
