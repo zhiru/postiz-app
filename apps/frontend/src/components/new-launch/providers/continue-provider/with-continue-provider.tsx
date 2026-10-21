@@ -22,6 +22,7 @@ export interface ContinueProviderProps {
   existingId: string[];
   initialData?: any[];
   isSaving?: boolean;
+  onCancel?: () => void;
 }
 
 export interface EmptyStateMessage {
@@ -30,6 +31,7 @@ export interface EmptyStateMessage {
 }
 
 export interface ContinueProviderConfig<TItem, TSelection> {
+  getSearchText?: (item: TItem) => string;
   endpoint: string;
   swrKey: string;
   titleKey: string;
@@ -46,6 +48,7 @@ export function withContinueProvider<TItem, TSelection>(
   config: ContinueProviderConfig<TItem, TSelection>
 ): FC<ContinueProviderProps> {
   const {
+    getSearchText,
     endpoint,
     swrKey,
     titleKey,
@@ -59,9 +62,10 @@ export function withContinueProvider<TItem, TSelection>(
   } = config;
 
   return function ContinueProviderComponent(props: ContinueProviderProps) {
-    const { onSave, existingId, initialData, isSaving } = props;
+    const { onSave, existingId, initialData, isSaving, onCancel } = props;
     const call = useCustomProviderFunction();
     const t = useT();
+    const [query, setQuery] = useState('');
     const [selection, setSelection] = useState<TSelection | null>(null);
 
     const loadData = useCallback(async () => {
@@ -92,10 +96,10 @@ export function withContinueProvider<TItem, TSelection>(
     );
 
     const handleSave = useCallback(async () => {
-      if (selection) {
+      if (selection && !isSaving) {
         await onSave(transformSaveData(selection));
       }
-    }, [onSave, selection]);
+    }, [onSave, selection, isSaving]);
 
     const filteredData = useMemo(() => {
       return (
@@ -108,6 +112,7 @@ export function withContinueProvider<TItem, TSelection>(
     if (!isLoading && !resolvedData?.length) {
       return (
         <div className="text-center flex flex-col justify-center items-center text-[18px] leading-[26px] h-[300px]">
+          {onCancel && <Button secondary onClick={onCancel}>{t('cancel', 'Cancel')}</Button>}
           {emptyStateMessages.map((msg, index) => (
             <span key={msg.key}>
               {t(msg.key, msg.text)}
@@ -123,26 +128,65 @@ export function withContinueProvider<TItem, TSelection>(
       );
     }
 
+    const normalize = (value: string) =>
+      value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase().replace(/@/g, '').trim();
+    const visibleData = getSearchText
+      ? filteredData.filter((item) => normalize(getSearchText(item)).includes(normalize(query)))
+      : filteredData;
+
     return (
-      <div className="flex flex-col gap-[20px]">
+      <div className="flex min-h-0 min-w-0 flex-col gap-4">
         <div>{t(titleKey, titleDefault)}</div>
-        <div className="max-h-[50vh] overflow-y-auto">
-          <div className="grid grid-cols-3 justify-items-center select-none cursor-pointer gap-[10px]">
-            {filteredData.map((item) => (
-              <div
+        {getSearchText && (
+          <label className="flex flex-col gap-2 text-sm">
+            {t('channel_search', 'Search by name or @username')}
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t('channel_search_placeholder', 'Type a name or @username')}
+              className="w-full min-w-0 rounded-lg border border-[var(--new-border)] bg-[var(--new-bgColor)] px-4 py-3 text-textColor focus-visible:ring-2 focus-visible:ring-[var(--new-btn-primary)]"
+            />
+          </label>
+        )}
+        <div className="min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain max-h-[45vh] pr-1">
+          <div className={clsx('grid gap-2', getSearchText ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-3')}>
+            {visibleData.map((item) => (
+              <button
+                type="button"
                 key={getItemId(item)}
+                aria-pressed={isSelected(item, selection)}
+                disabled={isSaving}
                 className={clsx(
-                  'flex flex-col w-full text-center gap-[10px] border border-input p-[10px] hover:bg-seventh rounded-[8px]',
-                  isSelected(item, selection) && 'bg-seventh border-primary'
+                  'flex min-w-0 w-full gap-3 rounded-lg border p-3 text-textColor focus-visible:ring-2 focus-visible:ring-[var(--new-btn-primary)] disabled:opacity-50',
+                  getSearchText ? 'items-center text-left' : 'flex-col items-center text-center',
+                  isSelected(item, selection)
+                    ? 'border-[var(--new-btn-primary)] bg-[var(--new-box-hover)]'
+                    : 'border-[var(--new-border)] hover:bg-[var(--new-box-hover)]'
                 )}
                 onClick={handleSelect(item)}
               >
                 {renderItem(item, isSelected(item, selection))}
-              </div>
+                {getSearchText && (
+                  <span aria-hidden="true" className="ml-auto shrink-0 text-xl">
+                    {isSelected(item, selection) ? '●' : '○'}
+                  </span>
+                )}
+              </button>
             ))}
           </div>
+          {!isLoading && !visibleData.length && (
+            <p role="status" className="py-8 text-center text-sm">
+              {t('channel_search_empty', 'No accounts found. Try another name or @username.')}
+            </p>
+          )}
         </div>
-        <div>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--new-border)] pt-4">
+          {onCancel && (
+            <Button secondary onClick={onCancel} disabled={isSaving}>
+              {t('cancel', 'Cancel')}
+            </Button>
+          )}
           <Button disabled={!selection || isSaving} loading={isSaving} onClick={handleSave}>
             {t('save', 'Save')}
           </Button>

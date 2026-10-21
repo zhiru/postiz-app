@@ -868,3 +868,26 @@ describe('InstagramProvider subscription app identity', () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('InstagramProvider.pages usernames', () => {
+  it('returns the Instagram username for account search without tokens', async () => {
+    const mockFetch = jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      const data = url.includes('/me/accounts?')
+        ? { data: [{ id: 'page-1', instagram_business_account: { id: 'ig-1' } }] }
+        : url.includes('/me/businesses?')
+        ? { data: [] }
+        : { id: 'ig-1', name: 'Grupo Mali', username: 'grupomalioficial', profile_picture_url: 'https://example.com/avatar.jpg' };
+      return { json: async () => data } as Response;
+    });
+    try {
+      expect(await new InstagramProvider().pages('test-token')).toEqual([{
+        pageId: 'page-1', id: 'ig-1', name: 'Grupo Mali', username: 'grupomalioficial',
+        picture: { data: { url: 'https://example.com/avatar.jpg' } },
+      }]);
+      expect(String(mockFetch.mock.calls[2][0])).toContain('fields=name,username,profile_picture_url');
+    } finally {
+      mockFetch.mockRestore();
+    }
+  });
+});

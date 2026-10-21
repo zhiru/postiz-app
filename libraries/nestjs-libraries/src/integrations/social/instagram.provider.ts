@@ -643,7 +643,7 @@ export class InstagramProvider
               pageId: p.id,
               ...(await (
                 await fetchWithTimeout(
-                  `${META_FACEBOOK_GRAPH_URL}/${p.instagram_business_account.id}?fields=name,profile_picture_url&access_token=${accessToken}`
+                  `${META_FACEBOOK_GRAPH_URL}/${p.instagram_business_account.id}?fields=name,username,profile_picture_url&access_token=${accessToken}`
                 )
               ).json()),
               id: p.instagram_business_account.id,
@@ -661,6 +661,7 @@ export class InstagramProvider
         pageId: p.pageId,
         id: p.id,
         name: p.name,
+        username: p.username || '',
         picture: { data: { url: p.profile_picture_url } },
       }));
   }
