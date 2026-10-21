@@ -7,6 +7,10 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Configure custom HTTPS endpoints and discover models for text, images, Omni video and web search, preserving scoped encrypted credentials.
+- Apply reasoning effort to text/chat and supported image requests; lock model presets to the default and prevent conflicting overrides on fallback requests.
+- Keep Instagram automation definitions, delivery deduplication and synchronization unchanged.
+
 - Instagram: selecione várias contas e reutilize autorizações salvas no mesmo perfil, com busca, resultados por conta e retomada sem repetir OAuth. Contas existentes, automações e credenciais são preservadas; limites do plano e acessos da Meta continuam sendo validados.
 
 - Accelerated Instagram account discovery using expanded account metadata and four concurrent Business reads; reconnect now stops at the required account. Preserved pagination and bounded metadata fallback, and surfaced Meta throttling instead of presenting a quota-truncated list.

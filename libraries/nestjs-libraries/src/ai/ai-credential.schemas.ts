@@ -1,3 +1,4 @@
+import { REASONING_EFFORTS } from '@gitroom/helpers/utils/ai.model';
 import { isIP } from 'node:net';
 import {
   isBlockedIPv4,
@@ -7,35 +8,37 @@ import { AiKind } from '@prisma/client';
 import { z } from 'zod';
 import { checkPublicHttpsUrl } from '../dtos/validators/is-public-https-url.validator';
 
+const ApiBaseURLSchema = z
+  .string()
+  .trim()
+  .max(2048)
+  .url()
+  .refine((value) => {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^\[|\]$/g, '');
+    if (
+      (isIP(host) === 4 && isBlockedIPv4(host)) ||
+      (isIP(host) === 6 && isBlockedIPv6(host))
+    )
+      return false;
+    return (
+      checkPublicHttpsUrl(value) === null &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    );
+  }, 'Use uma URL HTTPS pública, sem credenciais, parâmetros ou fragmento.')
+  .transform((value) => value.replace(/\/+$/, ''))
+  .optional();
+
 export const TextOptionsSchema = z
   .object({
-    baseURL: z
-      .string()
-      .trim()
-      .max(2048)
-      .url()
-      .refine((value) => {
-        const url = new URL(value);
-        const host = url.hostname.replace(/^\[|\]$/g, '');
-        if (
-          (isIP(host) === 4 && isBlockedIPv4(host)) ||
-          (isIP(host) === 6 && isBlockedIPv6(host))
-        )
-          return false;
-        return (
-          checkPublicHttpsUrl(value) === null &&
-          !url.username &&
-          !url.password &&
-          !url.search &&
-          !url.hash
-        );
-      }, 'Use uma URL HTTPS pública, sem credenciais, parâmetros ou fragmento.')
-      .transform((value) => value.replace(/\/+$/, ''))
-      .optional(),
+    baseURL: ApiBaseURLSchema,
     temperature: z.number().min(0).max(2).optional(),
     maxTokens: z.number().int().positive().optional(),
     topP: z.number().min(0).max(1).optional(),
-    reasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
+    reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
     verbosity: z.enum(['low', 'medium', 'high']).optional(),
     providerOrder: z.array(z.string()).optional(),
     allowFallbacks: z.boolean().optional(),
@@ -48,6 +51,8 @@ export type TextOptions = z.infer<typeof TextOptionsSchema>;
 
 export const ImageOptionsSchema = z
   .object({
+    baseURL: ApiBaseURLSchema,
+    reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
     quality: z.enum(['low', 'medium', 'high', 'auto']).optional(),
     imageSize: z.enum(['0.5K', '1K', '2K', '4K']).optional(),
     numImages: z.number().int().min(1).max(4).optional(),
@@ -58,6 +63,8 @@ export type ImageOptions = z.infer<typeof ImageOptionsSchema>;
 
 export const VideoOptionsSchema = z
   .object({
+    baseURL: ApiBaseURLSchema,
+    reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
     /** Resolucao do video. Aplicavel apenas a Seedance (Veo escolhe automatico). */
     resolution: z.enum(['480p', '720p', '1080p']).optional(),
     /** Duracao em segundos (4-15). Aplicavel apenas a Seedance. Veo gera ~8s fixo. */
@@ -71,6 +78,11 @@ export type VideoOptions = z.infer<typeof VideoOptionsSchema>;
 
 export const WebSearchOptionsSchema = z
   .object({
+    baseURL: ApiBaseURLSchema,
+    reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
+    fetchProvider: z
+      .enum(['firecrawl', 'jina-reader', 'tavily-search', 'tinyfish'])
+      .optional(),
     maxResults: z.number().int().min(1).max(20).optional(),
     depth: z.enum(['basic', 'advanced']).optional(),
     includeRawContent: z.boolean().optional(),

@@ -761,4 +761,32 @@ describe('AiVideoService', () => {
       }
     });
   });
+  it('uses the Omni video protocol and returns the normalized URL', async () => {
+    resolver.resolve.mockResolvedValue(
+      credentialFor({
+        provider: 'omni',
+        model: 'video/provider-model',
+        options: { baseURL: 'https://omni.example.com/v1' },
+      }) as any
+    );
+    globalThis.fetch = jest.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            created: 123,
+            data: [{ url: 'https://example.com/video.mp4' }],
+          })
+        )
+    ) as any;
+    const result = await service.generate(
+      'org-1',
+      { prompt: 'test', mode: 'T2V', enrichPrompt: false },
+      'profile-1'
+    );
+    expect(result.url).toBe('https://example.com/video.mp4');
+    const [url, init] = (globalThis.fetch as jest.Mock).mock.calls[0];
+    expect(url).toBe('https://omni.example.com/v1/videos/generations');
+    expect(init.redirect).toBe('error');
+    expect(JSON.parse(init.body).model).toBe('video/provider-model');
+  });
 });

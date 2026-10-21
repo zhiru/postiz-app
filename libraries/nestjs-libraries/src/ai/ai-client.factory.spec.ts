@@ -1,4 +1,8 @@
-import { AiClientFactory, isReasoningModel } from './ai-client.factory';
+import {
+  AiClientFactory,
+  isReasoningModel,
+  reasoningFetch,
+} from './ai-client.factory';
 import { AiProviderResolverService } from './ai-provider-resolver.service';
 import { createMock } from '@gitroom/nestjs-libraries/test';
 import { MockProxy } from 'jest-mock-extended';
@@ -216,6 +220,7 @@ describe('AiClientFactory', () => {
         provider: 'openrouter',
         apiKey: 'sk-or-real',
         baseURL: 'https://openrouter.ai/api/v1',
+        options: { temperature: 0.7 },
         model: 'openai/gpt-5.5',
       });
     });
@@ -236,6 +241,7 @@ describe('AiClientFactory', () => {
         provider: 'openai',
         apiKey: 'sk-oai',
         baseURL: undefined,
+        options: { temperature: 0.7 },
         model: 'gpt-5.5',
       });
     });
@@ -286,10 +292,39 @@ describe('AiClientFactory', () => {
       expect(openAiClientCtorSpy).toHaveBeenCalledWith({
         apiKey: 'sk-or-real',
         baseURL: 'https://openrouter.ai/api/v1',
+        fetch: expect.any(Function),
       });
       expect(model).toBe('openai/gpt-5.5');
       // Shim aplicado: beta.chat passa a apontar para chat (v6 nao tem beta.chat)
       expect((client as any).beta.chat).toBe((client as any).chat);
+    });
+
+    it('uses the configured reasoning effort in the Copilot transport', async () => {
+      resolver.resolve.mockResolvedValue(
+        credential({
+          provider: 'openai-compatible',
+          model: 'cx/gpt-6-luna',
+          options: {
+            baseURL: 'https://example.com/v1',
+            reasoningEffort: 'max',
+          },
+        }) as any
+      );
+      await factory.buildOpenAiCompatibleClient('org-1', 'prof-1');
+      const request = jest
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response('{}'));
+      try {
+        await openAiClientCtorSpy.mock.calls[0][0].fetch(
+          'https://example.com/v1/chat/completions',
+          { method: 'POST', body: JSON.stringify({ model: 'cx/gpt-6-luna' }) }
+        );
+        expect(
+          JSON.parse(request.mock.calls[0][1]!.body as string).reasoning_effort
+        ).toBe('max');
+      } finally {
+        request.mockRestore();
+      }
     });
 
     it('deve construir cliente OpenAI direto com baseURL undefined', async () => {
@@ -306,6 +341,7 @@ describe('AiClientFactory', () => {
       expect(openAiClientCtorSpy).toHaveBeenCalledWith({
         apiKey: 'sk-oai',
         baseURL: undefined,
+        fetch: expect.any(Function),
       });
       expect(model).toBe('gpt-5.5');
     });
@@ -344,6 +380,55 @@ describe('AiClientFactory', () => {
       it(`isReasoningModel('${id}') = ${expected} (${reason})`, () => {
         expect(isReasoningModel(id)).toBe(expected);
       });
+    }
+  });
+});
+
+describe('reasoning transport', () => {
+  it.each(['cx/gpt-6-luna-low', 'cx/gpt-6-luna-max'])(
+    'preserves the effort preset of %s, including fallback requests',
+    async (model) => {
+      const request = jest
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response('{}'));
+      try {
+        await reasoningFetch({
+          provider: 'openai-compatible',
+          options: { reasoningEffort: 'high' },
+        })('https://example.com/v1/chat/completions', {
+          method: 'POST',
+          body: JSON.stringify({
+            model,
+            reasoning_effort: 'high',
+            reasoning: { effort: 'high' },
+          }),
+        });
+        const body = JSON.parse(request.mock.calls[0][1]!.body as string);
+        expect(body.reasoning_effort).toBeUndefined();
+        expect(body.reasoning.effort).toBeUndefined();
+        expect(request.mock.calls[0][1]!.redirect).toBe('error');
+      } finally {
+        request.mockRestore();
+      }
+    }
+  );
+  it('forwards provider-specific max effort without narrowing the SDK enum', async () => {
+    const request = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}'));
+    try {
+      await reasoningFetch({
+        provider: 'openai-compatible',
+        options: { reasoningEffort: 'max' },
+      })('https://example.com/v1/chat/completions', {
+        method: 'POST',
+        body: JSON.stringify({ model: 'cx/gpt-6-luna' }),
+      });
+      expect(
+        JSON.parse(request.mock.calls[0][1]!.body as string).reasoning_effort
+      ).toBe('max');
+    } finally {
+      request.mockRestore();
     }
   });
 });

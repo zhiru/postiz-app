@@ -1,3 +1,7 @@
+import { ssrfSafeFetch } from '../dtos/webhooks/ssrf.safe.dispatcher';
+import { TextOptionsSchema } from './ai-credential.schemas';
+import { ResolvedAiCredential } from './ai-credential.service';
+import { isSafePublicHttpsUrl } from '../dtos/webhooks/webhook.url.validator';
 import { HttpException, Injectable, Logger } from '@nestjs/common';
 import {
   tavily,
@@ -66,6 +70,9 @@ export class AiWebSearchService {
       'WEB_SEARCH',
       profileId
     );
+    if (credential.provider === 'omni' || credential.options?.baseURL) {
+      return this.customSearch(credential, query, opts);
+    }
     if (credential.provider !== 'tavily') {
       throw new HttpException(
         `Provider sem suporte para web search: ${credential.provider}`,
@@ -98,7 +105,9 @@ export class AiWebSearchService {
       if (e instanceof HttpException) throw e;
       this.logSanitized('search', e);
       throw new HttpException(
-        `Tavily search falhou: ${(e as Error).message?.slice(0, 200) ?? 'erro desconhecido'}`,
+        `Tavily search falhou: ${
+          (e as Error).message?.slice(0, 200) ?? 'erro desconhecido'
+        }`,
         502
       );
     }
@@ -135,6 +144,9 @@ export class AiWebSearchService {
       'WEB_SEARCH',
       profileId
     );
+    if (credential.provider === 'omni' || credential.options?.baseURL) {
+      return this.customExtract(credential, urls, opts);
+    }
     if (credential.provider !== 'tavily') {
       throw new HttpException(
         `Provider sem suporte para web search: ${credential.provider}`,
@@ -162,10 +174,151 @@ export class AiWebSearchService {
       if (e instanceof HttpException) throw e;
       this.logSanitized('extract', e);
       throw new HttpException(
-        `Tavily extract falhou: ${(e as Error).message?.slice(0, 200) ?? 'erro desconhecido'}`,
+        `Tavily extract falhou: ${
+          (e as Error).message?.slice(0, 200) ?? 'erro desconhecido'
+        }`,
         502
       );
     }
+  }
+
+  private async customRequest(
+    credential: ResolvedAiCredential,
+    path: string,
+    body: Record<string, unknown>
+  ) {
+    const baseURL = TextOptionsSchema.parse({
+      baseURL: credential.options?.baseURL,
+    }).baseURL;
+    if (!baseURL) throw new HttpException('Configure a URL de busca web.', 412);
+    try {
+      const response = await ssrfSafeFetch(baseURL + path, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${credential.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        redirect: 'error',
+        signal: AbortSignal.timeout(TAVILY_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error('Search provider unavailable');
+      return await response.json();
+    } catch {
+      throw new HttpException(
+        'Falha no provedor de busca. Confira URL, chave e opções.',
+        412
+      );
+    }
+  }
+
+  private async customSearch(
+    credential: ResolvedAiCredential,
+    query: string,
+    opts: SearchOpts
+  ): Promise<TavilySearchResponse> {
+    const options = (credential.options || {}) as WebSearchOptions;
+    const omni = credential.provider === 'omni';
+    if (!omni && credential.provider !== 'tavily')
+      throw new HttpException('Protocolo de busca não suportado.', 400);
+    const body = {
+      query,
+      max_results: opts.maxResults ?? options.maxResults ?? 5,
+      ...(omni
+        ? { provider: credential.model, search_type: 'web' }
+        : {
+            api_key: credential.apiKey,
+            search_depth: opts.searchDepth ?? options.depth ?? 'advanced',
+            include_answer: opts.includeAnswer ?? false,
+            topic: opts.topic ?? 'general',
+          }),
+    };
+    if (omni && !credential.model)
+      throw new HttpException('Selecione o provedor de busca do Omni.', 412);
+    const data = await this.customRequest(credential, '/search', body);
+    if (!Array.isArray(data.results))
+      throw new HttpException('Resposta de busca inválida.', 412);
+    return {
+      query,
+      answer: typeof data.answer === 'string' ? data.answer : '',
+      images: [],
+      responseTime: 0,
+      requestId: typeof data.id === 'string' ? data.id : '',
+      results: data.results
+        .slice(0, 20)
+        .filter((item: any) => typeof item?.url === 'string')
+        .map((item: any) => ({
+          title: typeof item.title === 'string' ? item.title : '',
+          url: item.url,
+          content:
+            typeof item.content === 'string'
+              ? item.content
+              : typeof item.snippet === 'string'
+              ? item.snippet
+              : '',
+          score: typeof item.score === 'number' ? item.score : 0,
+          rawContent:
+            typeof item.raw_content === 'string' ? item.raw_content : undefined,
+        })),
+    } as TavilySearchResponse;
+  }
+
+  private async customExtract(
+    credential: ResolvedAiCredential,
+    urls: string[],
+    opts: ExtractOpts
+  ): Promise<TavilyExtractResponse> {
+    for (const url of urls)
+      if (!(await isSafePublicHttpsUrl(url)))
+        throw new HttpException('URL de extração não permitida.', 400);
+    const options = (credential.options || {}) as WebSearchOptions;
+    if (credential.provider === 'tavily') {
+      const data = await this.customRequest(credential, '/extract', {
+        api_key: credential.apiKey,
+        urls,
+        extract_depth: opts.extractDepth || 'basic',
+        format: opts.format || 'markdown',
+      });
+      return {
+        responseTime: 0,
+        results: (data.results || []).map((item: any) => ({
+          url: item.url,
+          rawContent: item.raw_content || item.rawContent || '',
+        })),
+        failedResults: data.failed_results || [],
+      } as TavilyExtractResponse;
+    }
+    if (credential.provider !== 'omni')
+      throw new HttpException('Protocolo de extração não suportado.', 400);
+    const provider =
+      options.fetchProvider ||
+      (['firecrawl', 'jina-reader', 'tavily-search', 'tinyfish'].includes(
+        credential.model || ''
+      )
+        ? credential.model
+        : undefined);
+    if (!provider)
+      throw new HttpException(
+        'Selecione em Modelos de IA um provedor de extração de links para o Omni.',
+        412
+      );
+    const results = [];
+    for (const url of urls) {
+      const data = await this.customRequest(credential, '/web/fetch', {
+        url,
+        provider,
+        format: 'markdown',
+        depth: opts.extractDepth === 'advanced' ? 1 : 0,
+      });
+      if (typeof data.content !== 'string')
+        throw new HttpException('Resposta de extração inválida.', 412);
+      results.push({ url, rawContent: data.content });
+    }
+    return {
+      results,
+      failedResults: [],
+      responseTime: 0,
+    } as TavilyExtractResponse;
   }
 
   // ---------------- helpers internos ----------------
@@ -182,10 +335,7 @@ export class AiWebSearchService {
       throw new HttpException(`URL invalida: ${raw.slice(0, 80)}`, 400);
     }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new HttpException(
-        `Protocolo nao aceito: ${parsed.protocol}`,
-        400
-      );
+      throw new HttpException(`Protocolo nao aceito: ${parsed.protocol}`, 400);
     }
     const host = parsed.hostname;
     for (const pattern of PRIVATE_HOST_PATTERNS) {
@@ -208,12 +358,7 @@ export class AiWebSearchService {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        reject(
-          new HttpException(
-            `Tavily ${operation} excedeu ${ms}ms`,
-            504
-          )
-        );
+        reject(new HttpException(`Tavily ${operation} excedeu ${ms}ms`, 504));
       }, ms);
     });
     try {

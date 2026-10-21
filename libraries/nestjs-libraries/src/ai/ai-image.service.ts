@@ -1,3 +1,7 @@
+import { modelReasoningPreset } from '@gitroom/helpers/utils/ai.model';
+import { ssrfSafeFetch } from '../dtos/webhooks/ssrf.safe.dispatcher';
+import { TextOptionsSchema } from './ai-credential.schemas';
+import { isSafePublicHttpsUrl } from '../dtos/webhooks/webhook.url.validator';
 import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { AiProviderResolverService } from './ai-provider-resolver.service';
 import { ImageOptions } from './ai-credential.schemas';
@@ -104,7 +108,9 @@ export class AiImageService {
     const mode: ImageMode = opts.mode ?? 'T2I';
     if (mode === 'I2I' && !opts.referenceImageUrl) {
       this._logger.warn(
-        `generate rejeitado: mode=I2I sem referenceImageUrl (org=${organizationId} profile=${profileId ?? '-'})`
+        `generate rejeitado: mode=I2I sem referenceImageUrl (org=${organizationId} profile=${
+          profileId ?? '-'
+        })`
       );
       throw new HttpException(
         'referenceImageUrl e obrigatorio quando mode=I2I.',
@@ -121,13 +127,17 @@ export class AiImageService {
     const aspectRatio: AiAspectRatio = opts.aspectRatio ?? DEFAULT_ASPECT_RATIO;
 
     this._logger.log(
-      `generate start mode=${mode} provider=${credential.provider} model=${credential.model ?? '(default)'} aspect=${aspectRatio} promptLen=${prompt.length} hasRef=${opts.referenceImageUrl ? 'y' : 'n'} profile=${profileId ?? '-'}`
+      `generate start mode=${mode} provider=${credential.provider} model=${
+        credential.model ?? '(default)'
+      } aspect=${aspectRatio} promptLen=${prompt.length} hasRef=${
+        opts.referenceImageUrl ? 'y' : 'n'
+      } profile=${profileId ?? '-'}`
     );
 
     let base64: string;
     let modelUsed: string;
 
-    if (credential.provider === 'openai') {
+    if (['openai', 'openai-compatible'].includes(credential.provider)) {
       modelUsed = credential.model ?? DEFAULT_OPENAI_MODEL;
       base64 =
         mode === 'I2I'
@@ -193,19 +203,35 @@ export class AiImageService {
       body.quality = options.quality;
     }
 
+    if (options.reasoningEffort && !modelReasoningPreset(model))
+      body.reasoning_effort = options.reasoningEffort;
+    if (options.baseURL) body.response_format = 'b64_json';
     let res: Response;
     try {
-      res = await fetch(OPENAI_IMAGE_GEN_URL, {
+      const url = options.baseURL
+        ? TextOptionsSchema.parse({ baseURL: options.baseURL }).baseURL +
+          '/images/generations'
+        : OPENAI_IMAGE_GEN_URL;
+      res = await ssrfSafeFetch(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
+        redirect: 'error',
+        signal: AbortSignal.timeout(180000),
       });
     } catch (err) {
+      if (options.baseURL)
+        throw new HttpException(
+          'Falha ao conectar ao provedor de imagem. Confira URL e chave.',
+          412
+        );
       this._logger.error(
-        `OpenAI images.generate fetch falhou (network): ${(err as Error).message}`
+        `OpenAI images.generate fetch falhou (network): ${
+          (err as Error).message
+        }`
       );
       throw new HttpException(
         `Falha de rede ao chamar OpenAI: ${(err as Error).message}`,
@@ -214,15 +240,36 @@ export class AiImageService {
     }
 
     if (!res.ok) {
+      if (options.baseURL)
+        throw new HttpException(
+          `Provedor de imagem retornou HTTP ${res.status}. Confira modelo, chave e opções.`,
+          412
+        );
       const errBody = await res.text();
       this._logger.warn(
-        `OpenAI images.generate retornou ${res.status}: ${errBody.slice(0, 200)}`
+        `OpenAI images.generate retornou ${res.status}: ${errBody.slice(
+          0,
+          200
+        )}`
       );
       throw new HttpException(extractOpenAiError(errBody, res.status), 502);
     }
 
     const json = (await res.json()) as { data?: Array<{ b64_json?: string }> };
-    const b64 = json?.data?.[0]?.b64_json;
+    const item = json?.data?.[0] as
+      | { b64_json?: string; url?: string }
+      | undefined;
+    let b64 = item?.b64_json;
+    if (!b64 && item?.url && options.baseURL) {
+      if (!(await isSafePublicHttpsUrl(item.url)))
+        throw new HttpException('URL de imagem inválida.', 412);
+      const image = await ssrfSafeFetch(item.url, {
+        redirect: 'error',
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!image.ok) throw new HttpException('Falha ao baixar imagem.', 412);
+      b64 = Buffer.from(await image.arrayBuffer()).toString('base64');
+    }
     if (!b64) {
       this._logger.warn(
         `OpenAI images.generate respondeu 200 mas sem b64_json (model=${model})`
@@ -250,13 +297,29 @@ export class AiImageService {
     //    o usuario e responsavel por fornecer URL com formato compativel.
     let refRes: Response;
     try {
-      refRes = await fetch(referenceImageUrl);
+      if (options.baseURL && !(await isSafePublicHttpsUrl(referenceImageUrl)))
+        throw new Error('Unsafe reference URL');
+      refRes = options.baseURL
+        ? await ssrfSafeFetch(referenceImageUrl, {
+            redirect: 'error',
+            signal: AbortSignal.timeout(30000),
+          })
+        : await fetch(referenceImageUrl);
     } catch (err) {
+      if (options.baseURL)
+        throw new HttpException(
+          'Falha ao conectar ao provedor de imagem. Confira URL e chave.',
+          412
+        );
       this._logger.error(
-        `Falha de rede ao baixar reference image (${referenceImageUrl}): ${(err as Error).message}`
+        `Falha de rede ao baixar reference image (${referenceImageUrl}): ${
+          (err as Error).message
+        }`
       );
       throw new HttpException(
-        `Nao foi possivel baixar a imagem de referencia (rede): ${(err as Error).message}`,
+        `Nao foi possivel baixar a imagem de referencia (rede): ${
+          (err as Error).message
+        }`,
         502
       );
     }
@@ -293,14 +356,27 @@ export class AiImageService {
     // 3. POST. NAO setamos Content-Type: o fetch detecta o boundary do FormData.
     let res: Response;
     try {
-      res = await fetch(OPENAI_IMAGE_EDIT_URL, {
+      const url = options.baseURL
+        ? TextOptionsSchema.parse({ baseURL: options.baseURL }).baseURL +
+          '/images/edits'
+        : OPENAI_IMAGE_EDIT_URL;
+      if (options.reasoningEffort && !modelReasoningPreset(model))
+        form.set('reasoning_effort', options.reasoningEffort);
+      res = await ssrfSafeFetch(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
         },
         body: form,
+        redirect: 'error',
+        signal: AbortSignal.timeout(180000),
       });
     } catch (err) {
+      if (options.baseURL)
+        throw new HttpException(
+          'Falha ao conectar ao provedor de imagem. Confira URL e chave.',
+          412
+        );
       this._logger.error(
         `OpenAI images.edits fetch falhou (network): ${(err as Error).message}`
       );
@@ -311,6 +387,11 @@ export class AiImageService {
     }
 
     if (!res.ok) {
+      if (options.baseURL)
+        throw new HttpException(
+          `Provedor de imagem retornou HTTP ${res.status}. Confira modelo, chave e opções.`,
+          412
+        );
       const errBody = await res.text();
       this._logger.warn(
         `OpenAI images.edits retornou ${res.status}: ${errBody.slice(0, 200)}`
@@ -319,7 +400,20 @@ export class AiImageService {
     }
 
     const json = (await res.json()) as { data?: Array<{ b64_json?: string }> };
-    const b64 = json?.data?.[0]?.b64_json;
+    const item = json?.data?.[0] as
+      | { b64_json?: string; url?: string }
+      | undefined;
+    let b64 = item?.b64_json;
+    if (!b64 && item?.url && options.baseURL) {
+      if (!(await isSafePublicHttpsUrl(item.url)))
+        throw new HttpException('URL de imagem inválida.', 412);
+      const image = await ssrfSafeFetch(item.url, {
+        redirect: 'error',
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!image.ok) throw new HttpException('Falha ao baixar imagem.', 412);
+      b64 = Buffer.from(await image.arrayBuffer()).toString('base64');
+    }
     if (!b64) {
       this._logger.warn(
         `OpenAI images.edits respondeu 200 mas sem b64_json (model=${model})`
@@ -368,15 +462,28 @@ export class AiImageService {
 
     let res: Response;
     try {
-      res = await fetch(OPENROUTER_CHAT_URL, {
+      const url = options.baseURL
+        ? TextOptionsSchema.parse({ baseURL: options.baseURL }).baseURL +
+          '/chat/completions'
+        : OPENROUTER_CHAT_URL;
+      if (options.reasoningEffort && !modelReasoningPreset(model))
+        body.reasoning = { effort: options.reasoningEffort };
+      res = await ssrfSafeFetch(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
+        redirect: 'error',
+        signal: AbortSignal.timeout(180000),
       });
     } catch (err) {
+      if (options.baseURL)
+        throw new HttpException(
+          'Falha ao conectar ao provedor de imagem. Confira URL e chave.',
+          412
+        );
       this._logger.error(
         `OpenRouter chat fetch falhou (network): ${(err as Error).message}`
       );
@@ -387,6 +494,11 @@ export class AiImageService {
     }
 
     if (!res.ok) {
+      if (options.baseURL)
+        throw new HttpException(
+          `Provedor de imagem retornou HTTP ${res.status}. Confira modelo, chave e opções.`,
+          412
+        );
       const errBody = await res.text();
       this._logger.warn(
         `OpenRouter chat retornou ${res.status}: ${errBody.slice(0, 200)}`
@@ -406,8 +518,17 @@ export class AiImageService {
     const choice = json?.choices?.[0];
     const url = choice?.message?.images?.[0]?.image_url?.url ?? '';
     if (!url) {
+      if (options.baseURL)
+        throw new HttpException(
+          'O provedor não devolveu imagem. Confira o modelo.',
+          412
+        );
       this._logger.warn(
-        `OpenRouter chat respondeu 200 mas sem image_url (model=${model} finish=${choice?.finish_reason ?? 'unknown'}). Verifique se o modelo selecionado realmente suporta image generation (modalities=image). Resposta: ${JSON.stringify(json).slice(0, 400)}`
+        `OpenRouter chat respondeu 200 mas sem image_url (model=${model} finish=${
+          choice?.finish_reason ?? 'unknown'
+        }). Verifique se o modelo selecionado realmente suporta image generation (modalities=image). Resposta: ${JSON.stringify(
+          json
+        ).slice(0, 400)}`
       );
       throw new HttpException(
         'OpenRouter nao devolveu imagem. Provavelmente o modelo selecionado nao suporta image generation — verifique em Settings > Modelos de IA > Imagem.',

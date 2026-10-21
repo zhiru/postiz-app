@@ -1623,7 +1623,7 @@
   "ai_provider_model_default": "Default do provedor",
   "ai_provider_fallback_model": "Fallback (opcional)",
   "ai_provider_no_fallback": "Sem fallback",
-  "ai_provider_default": "Default do modelo",
+  "ai_provider_default": "Padrão do modelo",
   "ai_provider_temperature": "Temperature (0-2)",
   "ai_provider_reasoning_effort": "Esforço de raciocínio",
   "ai_provider_image_size": "Resolução",
@@ -2316,7 +2316,7 @@
   "automation_ai_hint": "A IA configurada em Modelos de IA varia este texto base, mantendo o sentido e os links. Pode consumir créditos do provedor. Se falhar, envia o texto original.",
   "ai_provider_compatible": "Compatível com OpenAI (Omni e outros)",
   "ai_provider_base_url": "URL base da API",
-  "ai_provider_base_url_hint": "Use a URL HTTPS da API compatível, incluindo /v1 quando necessário. Em branco, OpenAI usa a URL oficial. Ao mudar o destino, informe a chave novamente.",
+  "ai_provider_base_url_hint": "Informe a URL HTTPS da API no protocolo do provedor escolhido. No Omni, inclua /v1. Em branco, os provedores nativos usam a URL oficial. Ao mudar o destino, informe a chave novamente.",
   "ai_provider_model_id": "ID exato do modelo no provedor",
   "billing_no_invoices": "Ainda não há faturas",
   "finish_trial_failed": "Não foi possível finalizar sua avaliação",
@@ -2350,5 +2350,8 @@
   "channel_choose_accounts": "Conectar contas autorizadas",
   "channel_account_limit": "O limite de canais do seu plano foi atingido.",
   "channel_selection_limit": "Selecione até 50 contas por lote.",
-  "channel_change_authorization": "Escolher outra autorização salva"
+  "channel_change_authorization": "Escolher outra autorização salva",
+  "ai_provider_models_failed": "Não foi possível carregar os modelos. Confira a URL e a chave.",
+  "ai_provider_load_models": "Carregar modelos",
+  "ai_provider_fetch_engine": "Provedor de leitura de páginas"
 }

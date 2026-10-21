@@ -128,6 +128,13 @@ export const AiProviderSettingsSection: React.FC = () => {
           providers={[
             { value: 'openrouter', label: 'OpenRouter' },
             { value: 'openai', label: 'OpenAI' },
+            {
+              value: 'openai-compatible',
+              label: t(
+                'ai_provider_compatible',
+                'Compatível com OpenAI (Omni e outros)'
+              ),
+            },
           ]}
         />
 
@@ -139,7 +146,10 @@ export const AiProviderSettingsSection: React.FC = () => {
             'Geração de vídeo via KieAI (Seedance 2.0, Veo 3.1).'
           )}
           icon={<VideoIcon />}
-          providers={[{ value: 'kieai', label: 'KieAI' }]}
+          providers={[
+            { value: 'kieai', label: 'KieAI' },
+            { value: 'omni', label: 'Omni' },
+          ]}
         />
 
         <AiKindCard
@@ -150,7 +160,10 @@ export const AiProviderSettingsSection: React.FC = () => {
             'Busca de contexto na web por tópico ou URL.'
           )}
           icon={<SearchIcon />}
-          providers={[{ value: 'tavily', label: 'Tavily' }]}
+          providers={[
+            { value: 'tavily', label: 'Tavily' },
+            { value: 'omni', label: 'Omni' },
+          ]}
         />
       </div>
     </div>

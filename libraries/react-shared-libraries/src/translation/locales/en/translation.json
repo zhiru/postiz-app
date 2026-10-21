@@ -2316,7 +2316,7 @@
   "automation_ai_hint": "The provider configured under AI Models varies this base text while preserving its meaning and links. Provider credits may be used. If generation fails, the original text is sent.",
   "ai_provider_compatible": "OpenAI compatible (Omni and others)",
   "ai_provider_base_url": "API base URL",
-  "ai_provider_base_url_hint": "Use the compatible API HTTPS URL, including /v1 where required. Leave blank for the official OpenAI endpoint. Enter the key again when changing the destination.",
+  "ai_provider_base_url_hint": "Enter the HTTPS API URL using the selected provider protocol. Include /v1 for Omni. Leave blank for native provider endpoints. Enter the key again when changing the destination.",
   "ai_provider_model_id": "Exact provider model ID",
   "billing_no_invoices": "No invoices yet",
   "finish_trial_failed": "We could not finish your trial",
@@ -2350,5 +2350,8 @@
   "channel_choose_accounts": "Connect authorized accounts",
   "channel_account_limit": "The channel limit for your plan has been reached.",
   "channel_selection_limit": "Select up to 50 accounts per batch.",
-  "channel_change_authorization": "Choose another saved authorization"
+  "channel_change_authorization": "Choose another saved authorization",
+  "ai_provider_models_failed": "Could not load models. Check the URL and API key.",
+  "ai_provider_load_models": "Load models",
+  "ai_provider_fetch_engine": "Web page extraction provider"
 }

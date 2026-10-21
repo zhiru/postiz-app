@@ -14,7 +14,9 @@ jest.mock('@tavily/core', () => ({
   })),
 }));
 
-const credentialFor = (overrides: Record<string, any> = {}): Record<string, any> => ({
+const credentialFor = (
+  overrides: Record<string, any> = {}
+): Record<string, any> => ({
   id: 'cred-1',
   scope: 'WORKSPACE',
   kind: 'WEB_SEARCH',
@@ -85,9 +87,7 @@ describe('AiWebSearchService', () => {
         credentialFor({ provider: 'firecrawl' }) as any
       );
 
-      await expect(service.search('org-1', 'q')).rejects.toThrow(
-        HttpException
-      );
+      await expect(service.search('org-1', 'q')).rejects.toThrow(HttpException);
     });
 
     it('deve relancar HttpException 502 sanitizado quando Tavily falha', async () => {
@@ -158,9 +158,7 @@ describe('AiWebSearchService', () => {
       resolver.resolve.mockResolvedValue(credentialFor() as any);
       extractMock.mockResolvedValue({
         results: [{ url: 'https://ok.com', rawContent: '# titulo' }],
-        failedResults: [
-          { url: 'https://fail.com', error: 'unreachable' },
-        ],
+        failedResults: [{ url: 'https://fail.com', error: 'unreachable' }],
       });
 
       const result = await service.extract('org-1', [
@@ -171,5 +169,92 @@ describe('AiWebSearchService', () => {
       expect(result.results).toHaveLength(1);
       expect(result.failedResults).toHaveLength(1);
     });
+  });
+  it('maps the Omni search response to the existing result contract', async () => {
+    resolver.resolve.mockResolvedValue(
+      credentialFor({
+        provider: 'omni',
+        model: 'brave-search',
+        options: { baseURL: 'https://omni.example.com/v1' },
+      }) as any
+    );
+    const request = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [
+            {
+              title: 'Test',
+              url: 'https://example.com',
+              snippet: 'Found content',
+            },
+          ],
+        })
+      )
+    );
+    try {
+      const result = await service.search('org-1', 'test query', 'profile-1');
+      expect(result.results[0].content).toBe('Found content');
+      expect(JSON.parse((request.mock.calls[0][1] as any).body).provider).toBe(
+        'brave-search'
+      );
+      expect(request.mock.calls[0][0]).toBe(
+        'https://omni.example.com/v1/search'
+      );
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  it('extracts pages through the explicitly configured Omni engine', async () => {
+    resolver.resolve.mockResolvedValue(
+      credentialFor({
+        provider: 'omni',
+        model: 'brave-search',
+        options: {
+          baseURL: 'https://omni.example.com/v1',
+          fetchProvider: 'jina-reader',
+        },
+      }) as any
+    );
+    const request = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ content: '# Page content' }))
+      );
+    try {
+      const result = await service.extract(
+        'org-1',
+        ['https://example.com'],
+        'profile-1'
+      );
+      expect(result.results[0].rawContent).toBe('# Page content');
+      expect(request.mock.calls[0][0]).toBe(
+        'https://omni.example.com/v1/web/fetch'
+      );
+      expect(
+        JSON.parse(request.mock.calls[0][1]!.body as string).provider
+      ).toBe('jina-reader');
+      expect(request.mock.calls[0][1]!.redirect).toBe('error');
+    } finally {
+      request.mockRestore();
+    }
+  });
+  it('does not silently choose an extraction engine', async () => {
+    resolver.resolve.mockResolvedValue(
+      credentialFor({
+        provider: 'omni',
+        model: 'brave-search',
+        options: { baseURL: 'https://omni.example.com/v1' },
+      }) as any
+    );
+    const request = jest.spyOn(globalThis, 'fetch');
+    try {
+      await expect(
+        service.extract('org-1', ['https://example.com'])
+      ).rejects.toMatchObject({ status: 412 });
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      request.mockRestore();
+    }
   });
 });

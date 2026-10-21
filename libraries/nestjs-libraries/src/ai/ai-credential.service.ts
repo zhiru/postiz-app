@@ -1,3 +1,5 @@
+import { modelReasoningPreset } from '@gitroom/helpers/utils/ai.model';
+import { AiCatalogService } from './ai-catalog.service';
 import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { AiKind, AiScope } from '@prisma/client';
 import { EncryptionService } from '@gitroom/nestjs-libraries/crypto/encryption.service';
@@ -64,7 +66,8 @@ export class AiCredentialService {
   constructor(
     private _repository: AiCredentialRepository,
     private _encryptionService: EncryptionService,
-    private _testService: AiProviderTestService
+    private _testService: AiProviderTestService,
+    private _catalog: AiCatalogService
   ) {}
 
   async save(
@@ -101,22 +104,26 @@ export class AiCredentialService {
     }
 
     if (
-      payload.provider === 'openai-compatible' &&
-      (kind !== 'TEXT' || !validatedOptions?.baseURL || !payload.model?.trim())
+      ['openai-compatible', 'omni'].includes(payload.provider) &&
+      (!validatedOptions?.baseURL ||
+        !payload.model?.trim() ||
+        (payload.provider === 'openai-compatible' &&
+          !['TEXT', 'IMAGE'].includes(kind)) ||
+        (payload.provider === 'omni' &&
+          !['VIDEO', 'WEB_SEARCH'].includes(kind)))
     ) {
       throw new HttpException(
-        'Provedor compatível exige geração de texto, URL base e modelo.',
+        'Provedor compatível exige URL base e modelo; escolha o protocolo adequado à categoria.',
         400
       );
     }
     if (
-      validatedOptions?.baseURL &&
-      !['openai', 'openai-compatible'].includes(payload.provider)
+      validatedOptions &&
+      (modelReasoningPreset(payload.model) ||
+        kind === 'VIDEO' ||
+        kind === 'WEB_SEARCH')
     ) {
-      throw new HttpException(
-        'URL base personalizada exige provedor OpenAI ou compatível.',
-        400
-      );
+      delete validatedOptions.reasoningEffort;
     }
 
     let apiKey = payload.apiKey;
@@ -275,7 +282,8 @@ export class AiCredentialService {
     const result = await this._testService.test(
       credential.provider,
       credential.apiKey,
-      credential.options?.baseURL as string | undefined
+      credential.options?.baseURL as string | undefined,
+      kind
     );
 
     try {
@@ -289,6 +297,57 @@ export class AiCredentialService {
     }
 
     return result;
+  }
+
+  async previewModels(
+    organizationId: string,
+    scope: AiScope,
+    kind: AiKind,
+    payload: SaveAiCredentialPayload,
+    profileId?: string
+  ) {
+    if (scope === 'PROFILE' && !profileId)
+      throw new HttpException('profileId obrigatório.', 400);
+    let options;
+    try {
+      SaveAiCredentialPayloadSchema.parse(payload);
+      options = optionsSchemaFor(kind).parse(payload.options || {});
+    } catch (error) {
+      throw zodErrorTo400(error);
+    }
+    let apiKey = payload.apiKey;
+    if (apiKey === SENTINEL) {
+      const existing = await this.getRaw(
+        organizationId,
+        scope,
+        kind,
+        profileId
+      );
+      if (
+        !existing ||
+        existing.provider !== payload.provider ||
+        (existing.options?.baseURL || '') !== (options.baseURL || '')
+      ) {
+        throw new HttpException(
+          'Informe a chave ao carregar modelos de outro destino.',
+          400
+        );
+      }
+      apiKey = existing.apiKey;
+    }
+    const defaults: Record<string, string> = {
+      openai: 'https://api.openai.com/v1',
+      openrouter: 'https://openrouter.ai/api/v1',
+    };
+    const baseURL = options.baseURL || defaults[payload.provider];
+    if (!baseURL)
+      throw new HttpException('Informe a URL base do provedor.', 400);
+    return this._catalog.compatibleCatalog(
+      payload.provider,
+      kind,
+      apiKey,
+      baseURL
+    );
   }
 
   async markUsed(credentialId: string) {

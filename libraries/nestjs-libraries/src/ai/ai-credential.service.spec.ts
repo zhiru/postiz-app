@@ -16,7 +16,55 @@ describe('AiCredentialService', () => {
     repository = createMock<AiCredentialRepository>();
     encryption = createMock<EncryptionService>();
     testService = createMock<AiProviderTestService>();
-    service = new AiCredentialService(repository, encryption, testService);
+    service = new AiCredentialService(
+      repository,
+      encryption,
+      testService,
+      {} as any
+    );
+  });
+
+  describe('model discovery', () => {
+    it('scopes saved-key lookup and never reuses it for another destination', async () => {
+      repository.findOne.mockResolvedValue({
+        id: 'cred',
+        provider: 'openai-compatible',
+        encryptedData: 'encrypted',
+        options: { baseURL: 'https://old.example.com/v1' },
+      } as any);
+      encryption.decryptJson.mockReturnValue({ apiKey: 'private-key' });
+      await expect(
+        service.previewModels(
+          'org-1',
+          'PROFILE',
+          'IMAGE',
+          {
+            provider: 'openai-compatible',
+            apiKey: '__REDACTED__',
+            options: { baseURL: 'https://other.example.com/v1' },
+            shareDefault: false,
+          },
+          'profile-1'
+        )
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.findOne).toHaveBeenCalledWith(
+        'org-1',
+        'PROFILE',
+        'IMAGE',
+        'profile-1'
+      );
+      expect(repository.upsert).not.toHaveBeenCalled();
+    });
+    it('rejects profile scope without a profile before looking up credentials', async () => {
+      await expect(
+        service.previewModels('org-1', 'PROFILE', 'TEXT', {
+          provider: 'openai',
+          apiKey: '__REDACTED__',
+          shareDefault: false,
+        })
+      ).rejects.toMatchObject({ status: 400 });
+      expect(repository.findOne).not.toHaveBeenCalled();
+    });
   });
 
   describe('save', () => {
@@ -202,7 +250,8 @@ describe('AiCredentialService', () => {
       expect(testService.test).toHaveBeenCalledWith(
         'openrouter',
         'sk',
-        undefined
+        undefined,
+        'TEXT'
       );
       expect(repository.updateMeta).toHaveBeenCalledWith('cred-1', {
         lastTestStatus: 'ok',
@@ -331,5 +380,41 @@ describe('AiCredentialService', () => {
       })
     ).rejects.toThrow('chave novamente');
     expect(repository.upsert).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['IMAGE', 'openai-compatible'],
+    ['VIDEO', 'omni'],
+    ['WEB_SEARCH', 'omni'],
+  ])('saves a custom endpoint for %s', async (kind, provider) => {
+    await service.save('org', 'WORKSPACE', kind as any, {
+      provider,
+      model: 'provider/model',
+      apiKey: 'test-only',
+      options: { baseURL: 'https://omni.example.com/v1' },
+    });
+    expect(repository.upsert).toHaveBeenCalledWith(
+      'org',
+      'WORKSPACE',
+      kind,
+      expect.objectContaining({
+        provider,
+        options: { baseURL: 'https://omni.example.com/v1' },
+      }),
+      undefined
+    );
+  });
+  it('drops a conflicting reasoning option when the model already encodes its effort', async () => {
+    await service.save('org', 'WORKSPACE', 'TEXT', {
+      provider: 'openai-compatible',
+      model: 'cx/gpt-6-luna-low',
+      apiKey: 'test-only',
+      options: {
+        baseURL: 'https://omni.example.com/v1',
+        reasoningEffort: 'high',
+      },
+    });
+    expect(repository.upsert.mock.calls[0][3].options).not.toHaveProperty(
+      'reasoningEffort'
+    );
   });
 });

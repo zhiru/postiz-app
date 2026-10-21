@@ -25,6 +25,7 @@ interface Props {
   onChange: (value: string) => void;
   /** Quando false, esconde o input de busca (util para dropdowns curtos). */
   searchable?: boolean;
+  allowCustom?: boolean;
 }
 
 /**
@@ -41,6 +42,7 @@ export const SearchableModelSelect: React.FC<Props> = ({
   disabled,
   onChange,
   searchable = true,
+  allowCustom = false,
 }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -49,8 +51,11 @@ export const SearchableModelSelect: React.FC<Props> = ({
 
   const selected = useMemo(() => {
     if (!value) return null;
-    return options.find((o) => o.value === value) ?? null;
-  }, [value, options]);
+    return (
+      options.find((o) => o.value === value) ??
+      (allowCustom ? { value, label: value } : null)
+    );
+  }, [value, options, allowCustom]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return options;
@@ -113,10 +118,7 @@ export const SearchableModelSelect: React.FC<Props> = ({
           </span>
         )}
         <span
-          className={clsx(
-            'flex-1 truncate',
-            !value && 'text-customColor18'
-          )}
+          className={clsx('flex-1 truncate', !value && 'text-customColor18')}
         >
           {selected?.label ?? emptyOptionLabel ?? placeholder}
         </span>
@@ -167,6 +169,17 @@ export const SearchableModelSelect: React.FC<Props> = ({
                 <span className="text-customColor18">{emptyOptionLabel}</span>
               </button>
             )}
+            {allowCustom &&
+              query.trim() &&
+              !options.some((o) => o.value === query.trim()) && (
+                <button
+                  type="button"
+                  className="w-full text-left px-[16px] py-[8px] hover:bg-boxHover"
+                  onClick={() => handleSelect(query.trim())}
+                >
+                  {query.trim()}
+                </button>
+              )}
             {filtered.length === 0 && (
               <div className="px-[16px] py-[12px] text-[13px] text-customColor18 text-center">
                 Nenhum item encontrado

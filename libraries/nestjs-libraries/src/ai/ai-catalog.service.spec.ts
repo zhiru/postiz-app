@@ -85,25 +85,26 @@ describe('AiCatalogService', () => {
 
   describe('getCatalog (OpenRouter)', () => {
     it('deve mapear resposta da API para CatalogModel', async () => {
-      globalThis.fetch = jest.fn(async () =>
-        new Response(
-          JSON.stringify({
-            data: [
-              {
-                id: 'openai/gpt-5.5',
-                name: 'GPT-5.5',
-                context_length: 200000,
-                architecture: {
-                  input_modalities: ['text', 'image'],
-                  output_modalities: ['text'],
+      globalThis.fetch = jest.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 'openai/gpt-5.5',
+                  name: 'GPT-5.5',
+                  context_length: 200000,
+                  architecture: {
+                    input_modalities: ['text', 'image'],
+                    output_modalities: ['text'],
+                  },
+                  supported_parameters: ['temperature', 'tools'],
+                  pricing: { prompt: '0.000001', completion: '0.000003' },
                 },
-                supported_parameters: ['temperature', 'tools'],
-                pricing: { prompt: '0.000001', completion: '0.000003' },
-              },
-            ],
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        )
+              ],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
       ) as any;
 
       const result = await service.getCatalog('openrouter', 'TEXT');
@@ -127,8 +128,8 @@ describe('AiCatalogService', () => {
     });
 
     it('deve retornar lista vazia quando OpenRouter falha', async () => {
-      globalThis.fetch = jest.fn(async () =>
-        new Response('{}', { status: 500 })
+      globalThis.fetch = jest.fn(
+        async () => new Response('{}', { status: 500 })
       ) as any;
 
       const result = await service.getCatalog('openrouter', 'TEXT');
@@ -148,5 +149,39 @@ describe('AiCatalogService', () => {
       expect(redisStore.has('outra:key')).toBe(true);
       expect(redisStore.has('ai:catalog:openai:TEXT')).toBe(false);
     });
+  });
+  it('filters specialty models and exposes safe reasoning metadata without remote secrets', async () => {
+    globalThis.fetch = jest.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 'cx/gpt-6-luna-low',
+                name: 'Luna low',
+                capabilities: {
+                  supportsThinking: true,
+                  effort_tiers: ['low', 'high'],
+                },
+                apiKey: 'must-not-leak',
+              },
+              { id: 'image/model', type: 'image' },
+            ],
+          })
+        )
+    ) as any;
+    const result = await (service as any).compatibleCatalog(
+      'openai-compatible',
+      'TEXT',
+      'test-only',
+      'https://omni.example.com/v1'
+    );
+    expect(result.models).toHaveLength(1);
+    expect(result.models[0].reasoning).toEqual({
+      supported: true,
+      efforts: ['low', 'high'],
+      preset: 'low',
+    });
+    expect(JSON.stringify(result)).not.toContain('must-not-leak');
   });
 });
