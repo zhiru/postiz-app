@@ -627,4 +627,12 @@ describe('IntegrationService reusable account authorization', () => {
     expect(provider.fetchPageInformation).not.toHaveBeenCalled();
     expect(repo.connectAuthorizedAccount).not.toHaveBeenCalled();
   });
+  it('keeps a fresh pending authorization when every selected channel was already connected', async () => {
+    const { repo, service } = setup();
+    repo.getAccountAuthorization.mockResolvedValue({ ...source, inBetweenSteps: true });
+    repo.getConnectedAccount.mockResolvedValue({ id: 'active' });
+    expect((await service.connectProviderAccounts('org', 'source', 'profile', [account])).results).toEqual([{ id: '123', status: 'already_connected' }]);
+    expect(repo.finishAccountSelection).not.toHaveBeenCalled();
+  });
+
 });

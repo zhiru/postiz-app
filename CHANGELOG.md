@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Instagram: mantém a autorização salva ao selecionar apenas contas já conectadas, permitindo reutilizá-la para outras conexões e reconexões.
+
 - Configure custom HTTPS endpoints and discover models for text, images, Omni video and web search, preserving scoped encrypted credentials.
 - Apply reasoning effort to text/chat and supported image requests; lock model presets to the default and prevent conflicting overrides on fallback requests.
 - Keep Instagram automation definitions, delivery deduplication and synchronization unchanged.

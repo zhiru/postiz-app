@@ -625,6 +625,7 @@ export class IntegrationService {
     }
     if (
       source.inBetweenSteps &&
+      results.some(result => result.status === 'connected') &&
       results.every((r) =>
         ['connected', 'already_connected'].includes(r.status)
       )
