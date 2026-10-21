@@ -320,6 +320,8 @@ export interface SocialProvider
     | { none: true }
   >;
   mentionFormat?(idOrHandle: string, name: string): string;
+  reusableAccountAuthorization?: boolean;
+  pages?(accessToken: string): Promise<any[]>;
   fetchPageInformation?(
     accessToken: string,
     data: any

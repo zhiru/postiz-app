@@ -19,6 +19,7 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import clsx from 'clsx';
 import copy from 'copy-to-clipboard';
 import { capitalize } from 'lodash';
+import { ReusableAccountModal } from './reusable-account-modal';
 import { ZernioAccountModal } from '@gitroom/frontend/components/launches/zernio/zernio-account-modal';
 import { ZernioInviteModal } from '@gitroom/frontend/components/launches/zernio/zernio-invite-modal';
 const resolver = classValidatorResolver(ApiKeyDto);
@@ -396,6 +397,7 @@ export const AddProviderComponent: FC<{
     toolTip?: string;
     isExternal: boolean;
     isWeb3: boolean;
+    reusableAccountAuthorization?: boolean;
     isChromeExtension?: boolean;
     extensionCookies?: Array<{
       name: string;
@@ -724,6 +726,29 @@ export const AddProviderComponent: FC<{
                   onboarding={onboarding}
                 />
               </div>
+            ),
+          });
+          return;
+        }
+        if (
+          !invite &&
+          social.find((item) => item.identifier === identifier)
+            ?.reusableAccountAuthorization
+        ) {
+          modal.openModal({
+            title: t('channel_choose_accounts', 'Connect authorized accounts'),
+            withCloseButton: true,
+            children: (
+              <ReusableAccountModal
+                provider={identifier}
+                onAuthorize={() => {
+                  void gotoIntegration();
+                }}
+                onClose={() => {
+                  modal.closeAll();
+                  update?.();
+                }}
+              />
             ),
           });
           return;

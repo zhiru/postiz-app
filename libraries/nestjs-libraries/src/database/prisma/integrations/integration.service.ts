@@ -14,6 +14,8 @@ import {
 import { Integration, Organization } from '@prisma/client';
 import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
 import dayjs from 'dayjs';
+import { createHash } from 'crypto';
+import { ProviderAccountDto } from '@gitroom/nestjs-libraries/dtos/integrations/connect.accounts.dto';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import {
@@ -23,7 +25,7 @@ import {
 import { IntegrationTimeDto } from '@gitroom/nestjs-libraries/dtos/integrations/integration.time.dto';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { PlugDto } from '@gitroom/nestjs-libraries/dtos/plugs/plug.dto';
-import { difference, uniq } from 'lodash';
+import { difference, uniq, uniqBy } from 'lodash';
 import utc from 'dayjs/plugin/utc';
 import { AutopostRepository } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.repository';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
@@ -460,6 +462,180 @@ export class IntegrationService {
 
   async checkForDeletedOnceAndUpdate(org: string, page: string) {
     return this._integrationRepository.checkForDeletedOnceAndUpdate(org, page);
+  }
+
+  async accountAuthorizations(
+    org: string,
+    providerId: string,
+    profileId: string | null
+  ) {
+    const provider = this._integrationManager.getSocialIntegration(providerId);
+    if (!provider?.reusableAccountAuthorization) return [];
+    const sources = await this._integrationRepository.getAccountAuthorizations(
+      org,
+      providerId,
+      profileId
+    );
+    return sources.map(({ id, name, picture }) => ({ id, name, picture }));
+  }
+
+  private async accountAuthorization(
+    org: string,
+    id: string,
+    profileId: string | null
+  ) {
+    const source = await this._integrationRepository.getAccountAuthorization(
+      org,
+      id,
+      profileId
+    );
+    if (!source) throw new HttpException('Authorization not found', 404);
+    const provider = this._integrationManager.getSocialIntegration(
+      source.providerIdentifier
+    );
+    if (
+      !provider?.reusableAccountAuthorization ||
+      !provider.pages ||
+      !provider.fetchPageInformation
+    ) {
+      throw new HttpException(
+        'Provider does not support reusable account selection',
+        400
+      );
+    }
+    const token = decryptIntegrationToken(
+      this._encryption,
+      source.inBetweenSteps ? source.token : source.refreshToken
+    );
+    if (!token) throw new HttpException({ code: 'AUTHORIZATION_EXPIRED' }, 412);
+    return { source, provider, token };
+  }
+
+  async providerAccounts(org: string, id: string, profileId: string | null) {
+    const { source, provider, token } = await this.accountAuthorization(
+      org,
+      id,
+      profileId
+    );
+    const key = `provider-accounts:${org}:${profileId || 'none'}:${
+      source.providerIdentifier
+    }:${source.rootInternalId}:${createHash('sha256')
+      .update(token)
+      .digest('hex')}`;
+    const cached = await ioRedis.get(key);
+    if (cached) return JSON.parse(cached);
+    const pages = await provider.pages!(token);
+    // Explicit projection: never cache or return provider access tokens.
+    const safe = pages.map((p) => ({
+      id: p.id,
+      pageId: p.pageId,
+      name: p.name,
+      username: p.username,
+      picture: p.picture,
+    }));
+    await ioRedis.set(key, JSON.stringify(safe), 'EX', 600);
+    return safe;
+  }
+
+  async connectProviderAccounts(
+    org: string,
+    id: string,
+    profileId: string | null,
+    accounts: ProviderAccountDto[],
+    channelLimit?: number
+  ) {
+    const { source, provider, token } = await this.accountAuthorization(
+      org,
+      id,
+      profileId
+    );
+    const results: Array<{
+      id: string;
+      status:
+        | 'connected'
+        | 'already_connected'
+        | 'unavailable'
+        | 'failed'
+        | 'rate_limited'
+        | 'reauthorize'
+        | 'limit_reached';
+    }> = [];
+    const deadline = Date.now() + 40_000;
+    let blocked: 'rate_limited' | 'reauthorize' | undefined;
+    for (const account of uniqBy(accounts, 'id')) {
+      if (blocked || Date.now() >= deadline) {
+        results.push({ id: account.id, status: blocked || 'failed' });
+        continue;
+      }
+      try {
+        if (
+          await this._integrationRepository.getConnectedAccount(
+            org,
+            account.id,
+            profileId
+          )
+        ) {
+          results.push({ id: account.id, status: 'already_connected' });
+          continue;
+        }
+        if (channelLimit !== undefined) {
+          const channels =
+            await this._integrationRepository.getIntegrationsList(org);
+          if (
+            channels.filter(
+              (channel) => !channel.refreshNeeded && !channel.inBetweenSteps
+            ).length >= channelLimit
+          ) {
+            results.push({ id: account.id, status: 'limit_reached' });
+            continue;
+          }
+        }
+        const information = await provider.fetchPageInformation!(
+          token,
+          account
+        );
+        const saved =
+          await this._integrationRepository.connectAuthorizedAccount(
+            source,
+            information,
+            token
+          );
+        results.push({
+          id: account.id,
+          status: saved
+            ? saved.created
+              ? 'connected'
+              : 'already_connected'
+            : 'unavailable',
+        });
+        if (saved?.created) {
+          await this._refreshIntegrationService
+            .startRefreshWorkflow(org, saved.id, provider)
+            .catch(() => undefined);
+        }
+      } catch (error) {
+        const status =
+          error instanceof HttpException
+            ? error.getStatus()
+            : (error as any)?.status;
+        if (status === 429) blocked = 'rate_limited';
+        if (status === 412) blocked = 'reauthorize';
+        results.push({ id: account.id, status: blocked || 'failed' });
+      }
+    }
+    if (
+      source.inBetweenSteps &&
+      results.every((r) =>
+        ['connected', 'already_connected'].includes(r.status)
+      )
+    ) {
+      await this._integrationRepository.finishAccountSelection(
+        org,
+        id,
+        profileId
+      );
+    }
+    return { results };
   }
 
   async saveProviderPage(org: string, id: string, data: any) {

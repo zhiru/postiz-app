@@ -11,7 +11,13 @@ import { IntegrationContext } from '@gitroom/frontend/components/launches/helper
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 
+import {
+  AccountConnectionResult,
+  AccountConnectionResults,
+} from './account-connection-results';
+
 interface TwoStepState {
+  reusableAccountAuthorization?: boolean;
   integrationId: string;
   onboarding: boolean;
   pages: any[];
@@ -39,6 +45,9 @@ export const ContinueIntegration: FC<{
   const [twoStepState, setTwoStepState] = useState<TwoStepState | null>(null);
   const [successState, setSuccessState] = useState<SuccessState | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [accountResults, setAccountResults] = useState<
+    AccountConnectionResult[]
+  >([]);
 
   useEffect(() => {
     active.current = true;
@@ -120,8 +129,30 @@ export const ContinueIntegration: FC<{
     if (started.current) return;
     started.current = true;
     (async () => {
+      if (logged && searchParams.authorization) {
+        const response = await fetch(
+          `/integrations/provider/${encodeURIComponent(
+            searchParams.authorization
+          )}/accounts`
+        );
+        if (!response.ok) throw new Error('Unable to load authorized accounts');
+        const pages = await response.json();
+        if (!active.current) return;
+        setTwoStepState({
+          integrationId: searchParams.authorization,
+          onboarding: false,
+          pages,
+          reusableAccountAuthorization: true,
+        });
+        return;
+      }
       if (searchParams.error || !modifiedParams.code || !modifiedParams.state) {
-        setErrorMessage(t('channel_connection_restart', 'This connection expired or was cancelled. Return to the calendar and connect the channel again.'));
+        setErrorMessage(
+          t(
+            'channel_connection_restart',
+            'This connection expired or was cancelled. Return to the calendar and connect the channel again.'
+          )
+        );
         setError(true);
         return;
       }
@@ -168,7 +199,10 @@ export const ContinueIntegration: FC<{
         const errorData = await data.json().catch(() => ({}));
         setErrorMessage(
           errorData.code === 'PROVIDER_RATE_LIMIT'
-            ? t('channel_connection_rate_limit', 'The provider is temporarily limiting requests. Wait a few minutes and reconnect the channel.')
+            ? t(
+                'channel_connection_rate_limit',
+                'The provider is temporarily limiting requests. Wait a few minutes and reconnect the channel.'
+              )
             : errorData.message || errorData.msg || 'Could not add provider'
         );
         setError(true);
@@ -177,6 +211,7 @@ export const ContinueIntegration: FC<{
 
       const {
         inBetweenSteps,
+        reusableAccountAuthorization,
         id,
         onboarding: resOnboarding,
         pages,
@@ -222,11 +257,16 @@ export const ContinueIntegration: FC<{
         window.history.replaceState(
           {},
           '',
-          `/integrations/social/${provider}?step=2`
+          `/integrations/social/${provider}?${
+            logged && reusableAccountAuthorization
+              ? `authorization=${encodeURIComponent(id)}`
+              : 'step=2'
+          }`
         );
         if (!active.current) return;
         setTwoStepState({
           integrationId: id,
+          reusableAccountAuthorization: logged && reusableAccountAuthorization,
           onboarding,
           pages: pages || [],
           returnURL,
@@ -235,15 +275,21 @@ export const ContinueIntegration: FC<{
       }
 
       navigateOrShow(
-        `/launches?added=${provider}&msg=${t('channel_updated', 'Channel Updated')}${
-          onboarding ? '&onboarding=true' : ''
-        }`,
+        `/launches?added=${provider}&msg=${t(
+          'channel_updated',
+          'Channel Updated'
+        )}${onboarding ? '&onboarding=true' : ''}`,
         returnURL,
         t('channel_updated', 'Channel Updated')
       );
     })().catch(() => {
       if (!active.current) return;
-      setErrorMessage(t('channel_connection_network_error', 'We could not finish connecting. Check your connection and start again from the calendar.'));
+      setErrorMessage(
+        t(
+          'channel_connection_network_error',
+          'We could not finish connecting. Check your connection and start again from the calendar.'
+        )
+      );
       setError(true);
     });
   }, []);
@@ -257,7 +303,9 @@ export const ContinueIntegration: FC<{
       try {
         // Use public or authenticated endpoint based on the flow
         const endpoint = logged
-          ? `/integrations/provider/${twoStepState.integrationId}/connect`
+          ? `/integrations/provider/${twoStepState.integrationId}/${
+              twoStepState.reusableAccountAuthorization ? 'accounts' : 'connect'
+            }`
           : `/integrations/public/provider/${twoStepState.integrationId}/connect`;
 
         const response = await fetch(endpoint, {
@@ -271,22 +319,46 @@ export const ContinueIntegration: FC<{
         ) {
           const errorData = await response.json().catch(() => ({}));
           setErrorMessage(
-            errorData.message || t('failed_to_save_channel', 'Failed to save channel configuration')
+            errorData.message ||
+              t(
+                'failed_to_save_channel',
+                'Failed to save channel configuration'
+              )
           );
           setError(true);
           return;
         }
 
+        if (twoStepState.reusableAccountAuthorization) {
+          const result = await response.json();
+          if (active.current)
+            setAccountResults((previous) => [
+              ...previous.filter(
+                (old) =>
+                  !result.results.some(
+                    (next: AccountConnectionResult) => next.id === old.id
+                  )
+              ),
+              ...result.results,
+            ]);
+          return;
+        }
         navigateOrShow(
-          `/launches?added=${provider}&msg=${t('channel_added', 'Channel Added')}${
-            twoStepState.onboarding ? '&onboarding=true' : ''
-          }`,
+          `/launches?added=${provider}&msg=${t(
+            'channel_added',
+            'Channel Added'
+          )}${twoStepState.onboarding ? '&onboarding=true' : ''}`,
           twoStepState.returnURL,
           t('channel_added', 'Channel Added')
         );
       } catch {
         if (!active.current) return;
-        setErrorMessage(t('channel_connection_save_error', 'We could not confirm that the account was saved. Check the calendar before connecting it again.'));
+        setErrorMessage(
+          t(
+            'channel_connection_save_error',
+            'We could not confirm that the account was saved. Check the calendar before connecting it again.'
+          )
+        );
         setError(true);
       } finally {
         if (active.current) setIsSaving(false);
@@ -369,7 +441,8 @@ export const ContinueIntegration: FC<{
         <div className="relative z-10 w-full max-w-[720px] mx-auto px-[20px]">
           <div className="bg-[#1A1919] rounded-[16px] p-5 sm:p-8 flex flex-col gap-5 max-h-[90dvh] min-h-0 overflow-y-auto">
             <div className="flex flex-col gap-[8px] text-center">
-              <Link href={exitUrl} onClick={() => { active.current = false; }} className="self-start text-sm underline underline-offset-4">
+              <Link href={exitUrl} onClick={() => { active.current = false; }} className="self-start text-sm underline underline-offset-4"
+              >
                 {t('channel_back_calendar', 'Back to calendar')}
               </Link>
               <h1 className="text-[24px] font-semibold">
@@ -384,7 +457,27 @@ export const ContinueIntegration: FC<{
               </p>
             </div>
 
-            <IntegrationContext.Provider
+            {!!accountResults.length && (
+              <AccountConnectionResults
+                results={accountResults}
+                pages={twoStepState.pages}
+              />
+            )}
+            {accountResults.length > 0 &&
+            accountResults.every((result) =>
+              ['connected', 'already_connected'].includes(result.status)
+            ) ? (
+              <Link
+                href={exitUrl}
+                onClick={() => {
+                  active.current = false;
+                }}
+                className="rounded-lg bg-[var(--new-btn-primary)] px-5 py-3 text-center"
+              >
+                {t('done', 'Done')}
+              </Link>
+            ) : (
+              <IntegrationContext.Provider
               value={{
                 date: newDayjs(),
                 value: [],
@@ -406,13 +499,20 @@ export const ContinueIntegration: FC<{
               }}
             >
               <Provider
-                onSave={onSave}
-                onCancel={leave}
-                existingId={[]}
-                initialData={twoStepState.pages}
-                isSaving={isSaving}
-              />
-            </IntegrationContext.Provider>
+                  key={JSON.stringify(accountResults)}
+                  multiple={!!twoStepState.reusableAccountAuthorization}
+                  onSave={onSave}
+                  onCancel={leave}
+                  existingId={accountResults
+                    .filter((result) =>
+                      ['connected', 'already_connected'].includes(result.status)
+                    )
+                    .map((result) => result.id)}
+                  initialData={twoStepState.pages}
+                  isSaving={isSaving}
+                />
+              </IntegrationContext.Provider>
+            )}
           </div>
         </div>
       </div>
@@ -452,7 +552,8 @@ export const ContinueIntegration: FC<{
                 'An error occurred. Please try again.'
               )}
           </div>
-          <Link href={exitUrl} onClick={() => { active.current = false; }} className="mt-6 inline-block rounded-lg bg-[var(--new-btn-primary)] px-5 py-3 text-white">
+          <Link href={exitUrl} onClick={() => { active.current = false; }} className="mt-6 inline-block rounded-lg bg-[var(--new-btn-primary)] px-5 py-3 text-white"
+          >
             {t('channel_back_calendar', 'Back to calendar')}
           </Link>
         </div>
@@ -477,9 +578,13 @@ export const ContinueIntegration: FC<{
           {t('please_wait', 'Please wait while we connect your account...')}
         </div>
         <p className="mt-3 max-w-[400px] text-sm opacity-70">
-          {t('channel_connection_wait', 'The provider may take longer when loading many accounts. You can return to the calendar at any time.')}
+          {t(
+            'channel_connection_wait',
+            'The provider may take longer when loading many accounts. You can return to the calendar at any time.'
+          )}
         </p>
-        <Link href={exitUrl} onClick={() => { active.current = false; }} className="mt-6 inline-block underline underline-offset-4">
+        <Link href={exitUrl} onClick={() => { active.current = false; }} className="mt-6 inline-block underline underline-offset-4"
+        >
           {t('cancel', 'Cancel')}
         </Link>
         {/* Loading spinner */}

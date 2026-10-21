@@ -23,3 +23,14 @@ Missing metadata uses a bounded fallback. Reads keep their abort deadline while 
 HTTP 429 and Meta application, user, Page and Instagram quota errors stop discovery and return a translated wait/reconnect message. The app does not automatically repeat OAuth or present a quota-truncated list as complete.
 
 A deterministic test with 47 Businesses, 33 distinct accounts and 100ms per request drops from 129 reads / 9.7s to 96 reads / 2.6s. These are simulated timings, not a guaranteed Meta response time. Live speed still depends on Meta and its shared request limits.
+
+
+## Selecionar várias contas com a autorização salva
+
+Em **Adicionar canal → Instagram**, escolha **Usar autorização de…**. A plataforma carrega as contas permitidas por essa autorização, com busca por nome/@. Marque várias e use **Conectar selecionadas**. Cada conta recebe um resultado; contas já conectadas ficam intactas. Em falha parcial, tente novamente apenas as que falharam. A lista é reaproveitada por até 10 minutos para reduzir consultas.
+
+Use **Conectar ou renovar pela Meta** quando o acesso expirar/for revogado, precisar de outras permissões ou quiser usar outro usuário Meta. Não é necessário reabrir a Meta para cada conta já autorizada. A autorização deve pertencer ao mesmo perfil da plataforma; contas de outros perfis não são transferidas. O fluxo de convite público continua selecionando uma conta.
+
+Após uma autorização nova, a seleção de usuários autenticados pode ser retomada/recarregada sem reapresentar o código OAuth descartável. Tokens ficam cifrados no servidor e nunca são gravados no navegador. A conexão em lote usa a identidade única organização/conta, não atualiza canais existentes e mantém o limite do plano. Uma autorização pendente sem posts é retirada da lista de canais somente após todas as seleções do lote concluírem; cada canal novo mantém o vínculo de renovação original.
+
+Selecione até 50 contas por lote. Se o provedor limitar consultas ou o lote exceder o tempo de processamento, resultados pendentes são exibidos individualmente e podem ser tentados depois. Contas já concluídas não são recriadas.

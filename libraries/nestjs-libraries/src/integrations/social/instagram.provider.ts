@@ -420,7 +420,9 @@ export class InstagramProvider
     );
 
     if (!findPage) {
-      throw new Error('Instagram account is not available in this authorization');
+      throw new Error(
+        'Instagram account is not available in this authorization'
+      );
     }
     const information = await this.fetchPageInformation(accessToken, {
       id: requiredId,
@@ -551,12 +553,15 @@ export class InstagramProvider
     };
   }
 
+  reusableAccountAuthorization = true;
+
   async pages(accessToken: string) {
     return this.discoverPages(accessToken);
   }
 
   private async discoverPages(accessToken: string, requiredId?: string) {
     let throttled = false;
+    let authorizationExpired = false;
     const seenPageIds = new Set<string>();
     const allFacebookPages: any[] = [];
     // Request account metadata with its Page instead of one extra read per Instagram.
@@ -566,14 +571,19 @@ export class InstagramProvider
     const hasRequiredAccount = () => !!requiredId && allFacebookPages.some(
       (page) => page.instagram_business_account?.id === requiredId
     );
-    const shouldStop = () => throttled || budgetExceeded() || hasRequiredAccount();
+    const shouldStop = () => throttled ||
+      authorizationExpired ||
+      budgetExceeded() || hasRequiredAccount();
 
     const rateLimitError = () => {
       throttled = true;
-      return new HttpException({
-        code: 'PROVIDER_RATE_LIMIT',
+      return new HttpException(
+        {
+          code: 'PROVIDER_RATE_LIMIT',
         message: 'The provider is temporarily limiting requests. Wait a few minutes and reconnect the channel.',
-      }, 429);
+      },
+        429
+      );
     };
     const read = async (url: string) => {
       const remaining = overallDeadline - Date.now();
@@ -586,6 +596,10 @@ export class InstagramProvider
       const body = await response.json();
       if ([4, 17, 32, 613, 80001, 80002, 80004].includes(body?.error?.code)) {
         throw rateLimitError();
+      }
+      if (body?.error?.code === 190) {
+        authorizationExpired = true;
+        throw new HttpException({ code: 'AUTHORIZATION_EXPIRED' }, 412);
       }
       return body;
     };
@@ -612,60 +626,81 @@ export class InstagramProvider
         `${META_FACEBOOK_GRAPH_URL}/me/accounts?fields=${fields}&limit=100&access_token=${accessToken}`
       );
     } catch (error) {
-      if (throttled) throw error;
+      if (throttled || authorizationExpired) throw error;
       console.warn('[Instagram.pages] Could not read authorized Pages');
     }
 
     // Include Business Manager accounts too; keep at most four reads in flight.
     if (!shouldStop()) {
       try {
-        let bizUrl: string | undefined = `${META_FACEBOOK_GRAPH_URL}/me/businesses?limit=100&access_token=${accessToken}`;
+        let bizUrl:
+          | string | undefined = `${META_FACEBOOK_GRAPH_URL}/me/businesses?limit=100&access_token=${accessToken}`;
         const seenBusinessUrls = new Set<string>();
         while (bizUrl && !seenBusinessUrls.has(bizUrl) && !shouldStop()) {
           seenBusinessUrls.add(bizUrl);
           const bizResponse = await read(bizUrl);
-          const pageUrls = (bizResponse.data || []).flatMap((business: { id: string }) =>
-            ['owned_pages', 'client_pages'].map((edge) =>
-              `${META_FACEBOOK_GRAPH_URL}/${business.id}/${edge}?fields=${fields}&limit=100&access_token=${accessToken}`
-            )
+          const pageUrls = (bizResponse.data || []).flatMap(
+            (business: { id: string }) =>
+              ['owned_pages', 'client_pages'].map(
+                (edge) =>
+                  `${META_FACEBOOK_GRAPH_URL}/${business.id}/${edge}?fields=${fields}&limit=100&access_token=${accessToken}`
+              )
           );
-          for (let offset = 0; offset < pageUrls.length && !shouldStop(); offset += 4) {
-            await Promise.all(pageUrls.slice(offset, offset + 4).map(async (url: string) => {
+          for (
+            let offset = 0;
+            offset < pageUrls.length && !shouldStop();
+            offset += 4
+          ) {
+            await Promise.all(
+              pageUrls.slice(offset, offset + 4).map(async (url: string) => {
               try {
                 await fetchPaginated(url);
               } catch (error) {
-                if (throttled) throw error;
+                if (throttled || authorizationExpired) throw error;
                 // An inaccessible business must not hide accounts from other businesses.
               }
-            }));
+              })
+            );
           }
           bizUrl = bizResponse.paging?.next;
         }
       } catch (error) {
-        if (throttled) throw error;
+        if (throttled || authorizationExpired) throw error;
         // Business Manager access is not available for every authorization.
       }
     }
 
     if (budgetExceeded()) {
-      console.warn(`[Instagram.pages] Discovery time budget exceeded; collected ${allFacebookPages.length} Pages`);
+      console.warn(
+        `[Instagram.pages] Discovery time budget exceeded; collected ${allFacebookPages.length} Pages`
+      );
     }
 
-    const linkedPages = allFacebookPages.filter((page) =>
+    const linkedPages = allFacebookPages.filter(
+      (page) =>
       page.instagram_business_account && (!requiredId || page.instagram_business_account.id === requiredId)
     );
     const accounts: any[] = [];
-    for (let offset = 0; offset < linkedPages.length && !budgetExceeded(); offset += 4) {
-      const batch = await Promise.all(linkedPages.slice(offset, offset + 4).map(async (page: any) => {
+    for (
+      let offset = 0;
+      offset < linkedPages.length && !budgetExceeded();
+      offset += 4
+    ) {
+      const batch = await Promise.all(
+        linkedPages.slice(offset, offset + 4).map(async (page: any) => {
         let account = page.instagram_business_account;
         // Older/partial responses still need the metadata read. Reconnect only needs the Page ID.
-        if (!requiredId && (typeof account.name !== 'string' || typeof account.username !== 'string')) {
+        if (
+            !requiredId &&
+            (typeof account.name !== 'string' ||
+              typeof account.username !== 'string')
+          ) {
           try {
             account = await read(
               `${META_FACEBOOK_GRAPH_URL}/${account.id}?fields=name,username,profile_picture_url&access_token=${accessToken}`
             );
           } catch (error) {
-            if (throttled) throw error;
+            if (throttled || authorizationExpired) throw error;
             return null;
           }
         }
@@ -676,7 +711,8 @@ export class InstagramProvider
           username: account.username || '',
           picture: { data: { url: account.profile_picture_url } },
         };
-      }));
+        })
+      );
       accounts.push(...batch.filter((account) => account !== null));
     }
     return accounts;
@@ -686,24 +722,45 @@ export class InstagramProvider
     accessToken: string,
     data: { pageId: string; id: string }
   ) {
-    const { access_token, ...all } = await (
-      await fetch(
-        `${META_FACEBOOK_GRAPH_URL}/${data.pageId}?fields=access_token,name,picture.type(large)&access_token=${accessToken}`
-      )
-    ).json();
-
-    const { id, name, profile_picture_url, username } = await (
-      await fetch(
-        `${META_FACEBOOK_GRAPH_URL}/${data.id}?fields=username,name,profile_picture_url&access_token=${accessToken}`
-      )
-    ).json();
-
+    if (!/^\d{1,40}$/.test(data.id) || !/^\d{1,40}$/.test(data.pageId)) {
+      throw new HttpException('Invalid account selection', 400);
+    }
+    const response = await fetch(
+      `${META_FACEBOOK_GRAPH_URL}/${
+        data.pageId
+      }?fields=access_token,instagram_business_account{id,name,username,profile_picture_url}&access_token=${encodeURIComponent(
+        accessToken
+      )}`,
+      { signal: AbortSignal.timeout(10_000) }
+    );
+    if (response.status === 429) {
+      throw new HttpException({ code: 'PROVIDER_RATE_LIMIT' }, 429);
+    }
+    const body = await response.json();
+    if ([4, 17, 32, 613, 80001, 80002, 80004].includes(body.error?.code)) {
+      throw new HttpException({ code: 'PROVIDER_RATE_LIMIT' }, 429);
+    }
+    if (body.error?.code === 190) {
+      throw new HttpException({ code: 'AUTHORIZATION_EXPIRED' }, 412);
+    }
+    const account = body.instagram_business_account;
+    if (
+      !response.ok ||
+      !body.access_token ||
+      account?.id !== data.id ||
+      !account?.username
+    ) {
+      throw new HttpException(
+        'The page is not linked to the selected Instagram account or access was revoked',
+        400
+      );
+    }
     return {
-      id,
-      name,
-      picture: profile_picture_url,
-      access_token,
-      username,
+      id: account.id,
+      name: account.name || account.username,
+      picture: account.profile_picture_url,
+      access_token: body.access_token,
+      username: account.username,
     };
   }
 
@@ -933,7 +990,8 @@ export class InstagramProvider
           `${metaGraphUrl(
             type
           )}/${postId}/insights?metric=views,reach,saved,likes,comments,shares`,
-          { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15000) }
+          { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15000),
+          }
         )
       ).json();
 

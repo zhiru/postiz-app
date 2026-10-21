@@ -1,3 +1,7 @@
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service',
+  () => ({ NotificationService: class {} })
+);
 // integration.manager puxa todos os providers sociais (nostr-tools e ESM e
 // quebra o ts-jest); redis abre conexao no load do modulo. Mocks seguem o
 // padrao dos demais specs do repo.
@@ -5,7 +9,7 @@ jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
   IntegrationManager: class {},
 }));
 jest.mock('@gitroom/nestjs-libraries/redis/redis.service', () => ({
-  ioRedis: {},
+  ioRedis: { get: jest.fn().mockResolvedValue(null), set: jest.fn() },
 }));
 jest.mock('@gitroom/nestjs-libraries/upload/upload.factory', () => ({
   UploadFactory: { createStorage: jest.fn().mockReturnValue({}) },
@@ -101,7 +105,11 @@ describe('IntegrationService', () => {
   });
 
   describe('disconnectChannel', () => {
-    const buildService = (repo: any, notification: any, statusEvent: any = {}) =>
+    const buildService = (
+      repo: any,
+      notification: any,
+      statusEvent: any = {}
+    ) =>
       new IntegrationService(
         repo,
         {} as any,
@@ -175,9 +183,7 @@ describe('IntegrationService', () => {
   describe('createOrUpdateIntegration (fail-soft do avatar)', () => {
     it('persiste a integracao com a picture original quando o upload do avatar falha', async () => {
       const repo = {
-        createOrUpdateIntegration: jest
-          .fn()
-          .mockResolvedValue({ id: 'int-1' }),
+        createOrUpdateIntegration: jest.fn().mockResolvedValue({ id: 'int-1' }),
       };
       const service = new IntegrationService(
         repo as any,
@@ -260,7 +266,9 @@ describe('IntegrationService', () => {
         needsToBeRefreshed: jest.fn().mockResolvedValue(integrations),
       };
       const manager = {
-        getSocialIntegration: jest.fn().mockReturnValue({ oneTimeToken: false }),
+        getSocialIntegration: jest
+          .fn()
+          .mockReturnValue({ oneTimeToken: false }),
       };
       const service = buildService(repo, manager);
 
@@ -422,7 +430,9 @@ describe('IntegrationService', () => {
         needsToBeRefreshed: jest.fn().mockResolvedValue(integrations),
       };
       const manager = {
-        getSocialIntegration: jest.fn().mockReturnValue({ oneTimeToken: false }),
+        getSocialIntegration: jest
+          .fn()
+          .mockReturnValue({ oneTimeToken: false }),
       };
       const service = buildService(repo, manager);
 
@@ -442,5 +452,179 @@ describe('IntegrationService', () => {
       await expect(service.refreshTokens()).resolves.toBeUndefined();
       expect(upsert).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('IntegrationService reusable account authorization', () => {
+  const source = {
+    id: 'source',
+    organizationId: 'org',
+    profileId: 'profile',
+    providerIdentifier: 'instagram',
+    rootInternalId: 'fb-user',
+    token: 'page-token',
+    refreshToken: 'user-token',
+    inBetweenSteps: false,
+  };
+  const account = { id: '123', pageId: '456' };
+  const setup = () => {
+    const repo = {
+      getAccountAuthorization: jest.fn().mockResolvedValue(source),
+      connectAuthorizedAccount: jest
+        .fn()
+        .mockResolvedValue({ id: 'created', created: true }),
+      finishAccountSelection: jest.fn(),
+      getConnectedAccount: jest.fn().mockResolvedValue(null),
+    };
+    const provider = {
+      reusableAccountAuthorization: true,
+      pages: jest.fn(),
+      fetchPageInformation: jest
+        .fn()
+        .mockResolvedValue({
+          id: '123',
+          name: 'Account',
+          access_token: 'new-page-token',
+          username: 'account',
+        }),
+    };
+    const refresh = {
+      startRefreshWorkflow: jest.fn().mockResolvedValue(false),
+    };
+    const service = new IntegrationService(
+      repo as any,
+      {} as any,
+      { getSocialIntegration: () => provider } as any,
+      {} as any,
+      refresh as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any
+    );
+    return { repo, provider, refresh, service };
+  };
+  it('scopes the source to organization and profile, reuses the user token, and creates once per account', async () => {
+    const { repo, provider, service, refresh } = setup();
+    const result = await service.connectProviderAccounts(
+      'org',
+      'source',
+      'profile',
+      [account, account]
+    );
+    expect(repo.getAccountAuthorization).toHaveBeenCalledWith(
+      'org',
+      'source',
+      'profile'
+    );
+    expect(provider.fetchPageInformation).toHaveBeenCalledWith(
+      'user-token',
+      account
+    );
+    expect(repo.connectAuthorizedAccount).toHaveBeenCalledTimes(1);
+    expect(refresh.startRefreshWorkflow).toHaveBeenCalledWith(
+      'org',
+      'created',
+      provider
+    );
+    expect(result.results).toEqual([{ id: '123', status: 'connected' }]);
+    expect(JSON.stringify(result)).not.toContain('token');
+  });
+  it('rejects an inaccessible source before making a provider request', async () => {
+    const { repo, provider, service } = setup();
+    repo.getAccountAuthorization.mockResolvedValue(null);
+    await expect(
+      service.connectProviderAccounts('org', 'source', 'other-profile', [
+        account,
+      ])
+    ).rejects.toMatchObject({ status: 404 });
+    expect(provider.fetchPageInformation).not.toHaveBeenCalled();
+  });
+  it('never updates an already connected account or its refresh workflow', async () => {
+    const { repo, provider, refresh, service } = setup();
+    repo.getConnectedAccount.mockResolvedValue({ id: 'active' });
+    expect(
+      (
+        await service.connectProviderAccounts('org', 'source', 'profile', [
+          account,
+        ])
+      ).results[0].status
+    ).toBe('already_connected');
+    expect(repo.connectAuthorizedAccount).not.toHaveBeenCalled();
+    expect(provider.fetchPageInformation).not.toHaveBeenCalled();
+    expect(refresh.startRefreshWorkflow).not.toHaveBeenCalled();
+  });
+  it('reports partial failure without discarding successful connections or leaking provider details', async () => {
+    const { repo, provider, service } = setup();
+    provider.fetchPageInformation.mockRejectedValueOnce(
+      new Error('secret=user-token')
+    );
+    const result = await service.connectProviderAccounts(
+      'org',
+      'source',
+      'profile',
+      [account, { id: '789', pageId: '987' }]
+    );
+    expect(result.results.map((x) => x.status)).toEqual([
+      'failed',
+      'connected',
+    ]);
+    expect(JSON.stringify(result)).not.toContain('secret');
+    expect(repo.finishAccountSelection).not.toHaveBeenCalled();
+  });
+  it('stops provider reads after rate limiting, preserving existing channels', async () => {
+    const { repo, provider, service } = setup();
+    provider.fetchPageInformation.mockRejectedValueOnce({ status: 429 });
+    const result = await service.connectProviderAccounts(
+      'org',
+      'source',
+      'profile',
+      [account, { id: '789', pageId: '987' }]
+    );
+    expect(result.results.map((x) => x.status)).toEqual([
+      'rate_limited',
+      'rate_limited',
+    ]);
+    expect(provider.fetchPageInformation).toHaveBeenCalledTimes(1);
+    expect(repo.connectAuthorizedAccount).not.toHaveBeenCalled();
+  });
+  it('uses the pending token without changing the source until all selections succeed', async () => {
+    const { repo, provider, service } = setup();
+    repo.getAccountAuthorization.mockResolvedValue({
+      ...source,
+      inBetweenSteps: true,
+      token: 'pending-user-token',
+    });
+    await service.connectProviderAccounts('org', 'source', 'profile', [
+      account,
+    ]);
+    expect(provider.fetchPageInformation).toHaveBeenCalledWith(
+      'pending-user-token',
+      account
+    );
+    expect(repo.finishAccountSelection).toHaveBeenCalledWith(
+      'org',
+      'source',
+      'profile'
+    );
+  });
+  it('enforces the remaining plan capacity for each newly connected account', async () => {
+    const { repo, provider, service } = setup();
+    (repo as any).getIntegrationsList = jest
+      .fn()
+      .mockResolvedValue([{ refreshNeeded: false, inBetweenSteps: false }]);
+    expect(
+      (
+        await service.connectProviderAccounts(
+          'org',
+          'source',
+          'profile',
+          [account],
+          1
+        )
+      ).results[0].status
+    ).toBe('limit_reached');
+    expect(provider.fetchPageInformation).not.toHaveBeenCalled();
+    expect(repo.connectAuthorizedAccount).not.toHaveBeenCalled();
   });
 });
