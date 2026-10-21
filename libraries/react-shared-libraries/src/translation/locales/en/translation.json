@@ -2327,5 +2327,14 @@
   "thumbnails_and_alt_text": "Thumbnails & alt text",
   "media_settings_section_description": "Click a media item to set its alt text, or its thumbnail if it is a video.",
   "media_settings_section_tooltip": "Thumbnails apply to videos in the main post. YouTube may ignore custom thumbnails on videos it treats as Shorts (vertical, up to 3 minutes) without failing the publish.",
-  "youtube_thumbnail_overrides_media": "This post has a YouTube-specific thumbnail, which overrides the thumbnail set in the media settings."
+  "youtube_thumbnail_overrides_media": "This post has a YouTube-specific thumbnail, which overrides the thumbnail set in the media settings.",
+  "channel_search": "Search by name or @username",
+  "channel_search_placeholder": "Type a name or @username",
+  "channel_search_empty": "No accounts found. Try another name or @username.",
+  "channel_back_calendar": "Back to calendar",
+  "channel_connection_restart": "This connection expired or was cancelled. Return to the calendar and connect the channel again.",
+  "channel_connection_network_error": "We could not finish connecting. Check your connection and start again from the calendar.",
+  "channel_connection_save_error": "We could not confirm that the account was saved. Check the calendar before connecting it again.",
+  "channel_connection_wait": "The provider may take longer when loading many accounts. You can return to the calendar at any time.",
+  "channel_connection_rate_limit": "The provider is temporarily limiting requests. Wait a few minutes and reconnect the channel."
 }

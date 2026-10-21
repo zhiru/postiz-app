@@ -2327,5 +2327,14 @@
   "thumbnails_and_alt_text": "Miniaturas e texto alternativo",
   "media_settings_section_description": "Clique em um item de mídia para definir seu texto alternativo ou sua miniatura, se for um vídeo.",
   "media_settings_section_tooltip": "As miniaturas se aplicam a vídeos na publicação principal. O YouTube pode ignorar miniaturas personalizadas em vídeos que trata como Shorts (verticais, com até 3 minutos), sem impedir a publicação.",
-  "youtube_thumbnail_overrides_media": "Esta publicação possui uma miniatura específica do YouTube, que substitui a miniatura definida nas configurações de mídia."
+  "youtube_thumbnail_overrides_media": "Esta publicação possui uma miniatura específica do YouTube, que substitui a miniatura definida nas configurações de mídia.",
+  "channel_search": "Buscar por nome ou @usuário",
+  "channel_search_placeholder": "Digite um nome ou @usuário",
+  "channel_search_empty": "Nenhuma conta encontrada. Tente outro nome ou @usuário.",
+  "channel_back_calendar": "Voltar ao calendário",
+  "channel_connection_restart": "Esta conexão expirou ou foi cancelada. Volte ao calendário e conecte o canal novamente.",
+  "channel_connection_network_error": "Não foi possível concluir a conexão. Verifique sua conexão e recomece pelo calendário.",
+  "channel_connection_save_error": "Não foi possível confirmar se a conta foi salva. Confira o calendário antes de conectar novamente.",
+  "channel_connection_wait": "O provedor pode demorar mais ao carregar muitas contas. Você pode voltar ao calendário a qualquer momento.",
+  "channel_connection_rate_limit": "O provedor está limitando as consultas temporariamente. Aguarde alguns minutos e conecte o canal novamente."
 }
