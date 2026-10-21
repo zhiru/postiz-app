@@ -25,10 +25,13 @@ describe('IntegrationRepository (B1 Etapa 2 - criptografia na escrita)', () => {
     delete process.env.DISABLE_INTEGRATION_TOKEN_ENCRYPTION;
 
     prismaMock = createPrismaRepositoryMock('integration');
-    prismaMock.model.integration.upsert.mockResolvedValue({ id: 'int-1' } as any);
+    prismaMock.model.integration.upsert.mockResolvedValue({ id: 'int-1',
+    } as any);
 
     encryption = createMock<EncryptionService>();
-    encryption.encrypt.mockImplementation((plain: string) => `CIPHER(${plain})`);
+    encryption.encrypt.mockImplementation(
+      (plain: string) => `CIPHER(${plain})`
+    );
 
     repo = new IntegrationRepository(
       prismaMock as any,
@@ -72,10 +75,14 @@ describe('IntegrationRepository (B1 Etapa 2 - criptografia na escrita)', () => {
 
       const arg = upsertArg();
       expect(arg.create.token).toBe(`${TOKEN_ENC_PREFIX}CIPHER(PLAINTOKEN)`);
-      expect(arg.create.refreshToken).toBe(`${TOKEN_ENC_PREFIX}CIPHER(REFRESH)`);
+      expect(arg.create.refreshToken).toBe(
+        `${TOKEN_ENC_PREFIX}CIPHER(REFRESH)`
+      );
       expect(arg.create.tokenEncrypted).toBe(true);
       expect(arg.update.token).toBe(`${TOKEN_ENC_PREFIX}CIPHER(PLAINTOKEN)`);
-      expect(arg.update.refreshToken).toBe(`${TOKEN_ENC_PREFIX}CIPHER(REFRESH)`);
+      expect(arg.update.refreshToken).toBe(
+        `${TOKEN_ENC_PREFIX}CIPHER(REFRESH)`
+      );
       expect(arg.update.tokenEncrypted).toBe(true);
     });
 
@@ -132,7 +139,8 @@ describe('IntegrationRepository (B1 Etapa 2 - criptografia na escrita)', () => {
   describe('updateIntegration', () => {
     it('cifra params.token e seta tokenEncrypted=true por padrao', async () => {
       prismaMock.model.integration.findUnique.mockResolvedValue(null as any);
-      prismaMock.model.integration.update.mockResolvedValue({ id: 'int-1' } as any);
+      prismaMock.model.integration.update.mockResolvedValue({ id: 'int-1',
+      } as any);
 
       await repo.updateIntegration('int-1', {
         organizationId: 'org-1',
@@ -148,7 +156,8 @@ describe('IntegrationRepository (B1 Etapa 2 - criptografia na escrita)', () => {
     it('nao cifra e nao seta tokenEncrypted quando DISABLE_INTEGRATION_TOKEN_ENCRYPTION=true', async () => {
       process.env.DISABLE_INTEGRATION_TOKEN_ENCRYPTION = 'true';
       prismaMock.model.integration.findUnique.mockResolvedValue(null as any);
-      prismaMock.model.integration.update.mockResolvedValue({ id: 'int-1' } as any);
+      prismaMock.model.integration.update.mockResolvedValue({ id: 'int-1',
+      } as any);
 
       await repo.updateIntegration('int-1', {
         organizationId: 'org-1',
@@ -346,6 +355,93 @@ describe('IntegrationRepository (B1 Etapa 2 - criptografia na escrita)', () => {
 
       const arg = prismaMock.model.integration.update.mock.calls[0][0] as any;
       expect(arg.data.picture).toBe('https://provider.example/avatar.jpg');
+    });
+  });
+  describe('reusable account selection', () => {
+    it('scopes authorization reads exactly, without inheriting another profile', async () => {
+      const findFirst = jest.fn().mockResolvedValue(null);
+      (prismaMock.model.integration as any).findFirst = findFirst;
+      await repo.getAccountAuthorization('org-1', 'source', 'profile-1');
+      expect(findFirst.mock.calls[0][0].where).toMatchObject({
+        organizationId: 'org-1',
+        id: 'source',
+        profileId: 'profile-1',
+        deletedAt: null,
+        disabled: false,
+      });
+    });
+    it('inserts encrypted credentials without upserting or updating any active account', async () => {
+      const createMany = jest.fn().mockResolvedValue({ count: 1 });
+      (prismaMock.model.integration as any).createMany = createMany;
+      jest.spyOn(repo, 'getConnectedAccount').mockResolvedValue({ id: 'new' });
+      const source = {
+        organizationId: 'org-1',
+        profileId: 'profile-1',
+        rootInternalId: 'fb-user',
+        providerIdentifier: 'instagram',
+        postingTimes: '[]',
+        tokenExpiration: new Date(),
+      } as any;
+      expect(
+        await repo.connectAuthorizedAccount(
+          source,
+          {
+            id: '123',
+            name: 'Account',
+            username: 'account',
+            access_token: 'PAGE',
+          },
+          'USER'
+        )
+      ).toEqual({ id: 'new', created: true });
+      const arg = createMany.mock.calls[0][0];
+      expect(arg.skipDuplicates).toBe(true);
+      expect(arg.data[0]).toMatchObject({
+        organizationId: 'org-1',
+        profileId: 'profile-1',
+        rootInternalId: 'fb-user',
+        token: 'enc:v1:CIPHER(PAGE)',
+        refreshToken: 'enc:v1:CIPHER(USER)',
+        tokenEncrypted: true,
+      });
+      expect(prismaMock.model.integration.upsert).not.toHaveBeenCalled();
+      expect(prismaMock.model.integration.update).not.toHaveBeenCalled();
+    });
+    it('returns unavailable on an org-wide identity conflict without exposing another profile', async () => {
+      (prismaMock.model.integration as any).createMany = jest
+        .fn()
+        .mockResolvedValue({ count: 0 });
+      jest.spyOn(repo, 'getConnectedAccount').mockResolvedValue(null);
+      expect(
+        await repo.connectAuthorizedAccount(
+          {
+            organizationId: 'org-1',
+            profileId: 'profile-1',
+            providerIdentifier: 'instagram',
+          } as any,
+          {
+            id: '123',
+            name: 'Account',
+            username: 'account',
+            access_token: 'PAGE',
+          },
+          'USER'
+        )
+      ).toBeNull();
+      expect(prismaMock.model.integration.update).not.toHaveBeenCalled();
+    });
+    it('retires only a pending source with no posts in the exact profile', async () => {
+      const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      (prismaMock.model.integration as any).updateMany = updateMany;
+      await repo.finishAccountSelection('org-1', 'source', 'profile-1');
+      expect(updateMany.mock.calls[0][0].where).toEqual({
+        organizationId: 'org-1',
+        id: 'source',
+        profileId: 'profile-1',
+        inBetweenSteps: true,
+        deletedAt: null,
+        posts: { none: {} },
+      });
     });
   });
 });

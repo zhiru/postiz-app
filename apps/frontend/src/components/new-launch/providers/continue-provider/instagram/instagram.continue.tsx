@@ -23,6 +23,7 @@ export const InstagramContinue = withContinueProvider<
   InstagramItem,
   InstagramSelection
 >({
+  allowMultiple: true,
   getSearchText: (item) => `${item.name || ''} ${item.username || ''}`,
   endpoint: 'pages',
   swrKey: 'load-instagram-pages',
@@ -55,7 +56,11 @@ export const InstagramContinue = withContinueProvider<
       />
       <span className="min-w-0 flex-1 break-words">
         <span className="block font-semibold">{item.name}</span>
-        {item.username && <span className="block text-sm opacity-70">@{item.username.replace(/^@/, '')}</span>}
+        {item.username && (
+          <span className="block text-sm opacity-70">
+            @{item.username.replace(/^@/, '')}
+          </span>
+        )}
       </span>
     </>
   ),

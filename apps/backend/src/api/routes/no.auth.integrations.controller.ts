@@ -86,11 +86,14 @@ export class NoAuthIntegrationsController {
     // that a page refresh during step-2 selection doesn't cause "Invalid state".
     // The key expires naturally after 1 hour; the auth code itself is one-time
     // and will be rejected by the provider on any subsequent authenticate() call.
-    if (!integrationProvider.customFields && !integrationProvider.isBetweenSteps) {
+    if (
+      !integrationProvider.customFields &&
+      !integrationProvider.isBetweenSteps
+    ) {
       await ioRedis.del(`login:${body.state}`);
     }
 
-    const details = await ioRedis.get(`external:${body.state}`) || undefined;
+    const details = (await ioRedis.get(`external:${body.state}`)) || undefined;
 
     if (details) {
       await ioRedis.del(`external:${body.state}`);
@@ -106,7 +109,7 @@ export class NoAuthIntegrationsController {
       await ioRedis.del(`onboarding:${body.state}`);
     }
 
-    const profileId = await ioRedis.get(`profile:${body.state}`) || undefined;
+    const profileId = (await ioRedis.get(`profile:${body.state}`)) || undefined;
     if (profileId) {
       await ioRedis.del(`profile:${body.state}`);
     }
@@ -188,9 +191,12 @@ export class NoAuthIntegrationsController {
           });
         }
 
-        console.error(`[connectSocialMedia] ${integration} authentication failed`, {
-          name: (err as Error)?.name,
-        });
+        console.error(
+          `[connectSocialMedia] ${integration} authentication failed`,
+          {
+            name: (err as Error)?.name,
+          }
+        );
         return res({
           error: 'Authentication failed',
           accessToken: '',
@@ -378,6 +384,8 @@ export class NoAuthIntegrationsController {
 
     return {
       ...safeIntegration,
+      reusableAccountAuthorization:
+        !!integrationProvider.reusableAccountAuthorization,
       onboarding: onboarding === 'true',
       pages,
       ...(returnURL ? { returnURL } : {}),
@@ -416,7 +424,11 @@ export class NoAuthIntegrationsController {
     const provider = `zernio-${platform}`;
 
     // Redirect to frontend with the account data
-    const redirectUrl = `${process.env.FRONTEND_URL}/integrations/social/${provider}?code=${encodeURIComponent(accountId)}&state=${encodeURIComponent(state)}`;
+    const redirectUrl = `${
+      process.env.FRONTEND_URL
+    }/integrations/social/${provider}?code=${encodeURIComponent(
+      accountId
+    )}&state=${encodeURIComponent(state)}`;
     return res.redirect(redirectUrl);
   }
 

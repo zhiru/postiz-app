@@ -871,21 +871,31 @@ describe('InstagramProvider subscription app identity', () => {
 
 describe('InstagramProvider.pages usernames', () => {
   it('returns the Instagram username for account search without tokens', async () => {
-    const mockFetch = jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+    const mockFetch = jest
+      .spyOn(global, 'fetch')
+      .mockImplementation(async (input) => {
       const url = String(input);
       const data = url.includes('/me/accounts?')
-        ? { data: [{ id: 'page-1', instagram_business_account: { id: 'ig-1' } }] }
+        ? { data: [
+                { id: 'page-1', instagram_business_account: { id: 'ig-1' } },
+              ],
+            }
         : url.includes('/me/businesses?')
         ? { data: [] }
-        : { id: 'ig-1', name: 'Grupo Mali', username: 'grupomalioficial', profile_picture_url: 'https://example.com/avatar.jpg' };
+        : { id: 'ig-1', name: 'Grupo Mali', username: 'grupomalioficial', profile_picture_url: 'https://example.com/avatar.jpg',
+            };
       return { json: async () => data } as Response;
     });
     try {
-      expect(await new InstagramProvider().pages('test-token')).toEqual([{
-        pageId: 'page-1', id: 'ig-1', name: 'Grupo Mali', username: 'grupomalioficial',
+      expect(await new InstagramProvider().pages('test-token')).toEqual([
+        {
+          pageId: 'page-1', id: 'ig-1', name: 'Grupo Mali', username: 'grupomalioficial',
         picture: { data: { url: 'https://example.com/avatar.jpg' } },
-      }]);
-      expect(String(mockFetch.mock.calls[2][0])).toContain('fields=name,username,profile_picture_url');
+        },
+      ]);
+      expect(String(mockFetch.mock.calls[2][0])).toContain(
+        'fields=name,username,profile_picture_url'
+      );
     } finally {
       mockFetch.mockRestore();
     }
@@ -893,18 +903,31 @@ describe('InstagramProvider.pages usernames', () => {
 });
 
 describe('InstagramProvider account discovery performance', () => {
-  const account = (id: string) => ({ id, name: `Account ${id}`, username: `account${id}`, profile_picture_url: 'https://example.com/avatar.jpg' });
-  const page = (index: number) => ({ id: `page-${index}`, instagram_business_account: account(`ig-${index}`) });
+  const account = (id: string) => ({ id, name: `Account ${id}`, username: `account${id}`, profile_picture_url: 'https://example.com/avatar.jpg',
+  });
+  const page = (index: number) => ({
+    id: `page-${index}`,
+    instagram_business_account: account(`ig-${index}`),
+  });
   let request: jest.SpyInstance;
   beforeEach(() => { request = jest.spyOn(global, 'fetch'); });
   afterEach(() => { request.mockRestore(); jest.useRealTimers(); });
 
   it('uses expanded account details without requesting every Instagram again', async () => {
-    request.mockImplementation(async (input) => ({ json: async () => String(input).includes('/me/accounts?') ? { data: [page(1)] } : { data: [] as unknown[] } }));
+    request.mockImplementation(async (input) => ({ json: async () => String(input).includes('/me/accounts?') ? { data: [page(1)] } : { data: [] as unknown[] },
+    }));
     const result = await new InstagramProvider().pages('test-token');
-    expect(result).toEqual([{ pageId: 'page-1', id: 'ig-1', name: 'Account ig-1', username: 'accountig-1', picture: { data: { url: 'https://example.com/avatar.jpg' } } }]);
+    expect(result).toEqual([
+      {
+        pageId: 'page-1', id: 'ig-1', name: 'Account ig-1', username: 'accountig-1', picture: { data: { url: 'https://example.com/avatar.jpg' } },
+      },
+    ]);
     expect(request).toHaveBeenCalledTimes(2);
-    expect(new URL(String(request.mock.calls[0][0])).searchParams.get('fields')).toContain('instagram_business_account{id,name,username,profile_picture_url}');
+    expect(
+      new URL(String(request.mock.calls[0][0])).searchParams.get('fields')
+    ).toContain(
+      'instagram_business_account{id,name,username,profile_picture_url}'
+    );
   });
 
   it('discovers all 47 businesses with four concurrent reads and no duplicate accounts', async () => {
@@ -919,7 +942,7 @@ describe('InstagramProvider account discovery performance', () => {
         : url.pathname.endsWith('/me/businesses') ? Array.from({ length: 47 }, (_, i) => ({ id: `business-${i}` }))
         : /\/(owned_pages|client_pages)$/.test(url.pathname) ? [page(Number(url.pathname.match(/business-(\d+)/)![1]) % 33)]
         : account(url.pathname.split('/').pop()!);
-      return { json: async () => Array.isArray(data) ? { data } : data };
+      return { json: async () => (Array.isArray(data) ? { data } : data) };
     });
     const pending = new InstagramProvider().pages('test-token');
     await jest.runAllTimersAsync();
@@ -932,20 +955,35 @@ describe('InstagramProvider account discovery performance', () => {
   });
 
   it('reconnects an authorized account without scanning unrelated businesses', async () => {
-    request.mockImplementation(async (input) => ({ json: async () => String(input).includes('/me/accounts?') ? { data: [page(1), page(2)] } : { data: [] as unknown[] } }));
+    request.mockImplementation(async (input) => ({ json: async () => String(input).includes('/me/accounts?') ? { data: [page(1), page(2)] } : { data: [] as unknown[] },
+    }));
     const provider = new InstagramProvider();
-    const information = jest.spyOn(provider, 'fetchPageInformation').mockResolvedValue({ id: 'ig-2', name: 'Target', access_token: 'page-token', picture: 'avatar', username: 'target' } as any);
+    const information = jest
+      .spyOn(provider, 'fetchPageInformation')
+      .mockResolvedValue({
+        id: 'ig-2',
+        name: 'Target',
+        access_token: 'page-token',
+        picture: 'avatar',
+        username: 'target',
+      } as any);
     const result = await provider.reConnect('user-id', 'ig-2', 'test-token');
-    expect(information).toHaveBeenCalledWith('test-token', { id: 'ig-2', pageId: 'page-2' });
+    expect(information).toHaveBeenCalledWith('test-token', { id: 'ig-2', pageId: 'page-2',
+    });
     expect(result.accessToken).toBe('page-token');
     expect(request).toHaveBeenCalledTimes(1);
   });
 
   it('does not fetch a page token when the required account is absent', async () => {
-    request.mockResolvedValue({ json: async () => ({ data: [] as unknown[] }) });
+    request.mockResolvedValue({ json: async () => ({ data: [] as unknown[] }),
+    });
     const provider = new InstagramProvider();
     const information = jest.spyOn(provider, 'fetchPageInformation');
-    await expect(provider.reConnect('user-id', 'missing', 'test-token')).rejects.toThrow('Instagram account is not available in this authorization');
+    await expect(
+      provider.reConnect('user-id', 'missing', 'test-token')
+    ).rejects.toThrow(
+      'Instagram account is not available in this authorization'
+    );
     expect(information).not.toHaveBeenCalled();
   });
 
@@ -953,7 +991,8 @@ describe('InstagramProvider account discovery performance', () => {
     request.mockImplementation(async (input) => {
       const url = String(input);
       if (url.includes('business-b/owned_pages')) throw new Error('Unavailable');
-      const body = url.includes('/me/accounts?') ? { data: [] as unknown[], paging: { next: 'https://graph.facebook.com/v25.0/next-accounts' } }
+      const body = url.includes('/me/accounts?') ? { data: [] as unknown[], paging: { next: 'https://graph.facebook.com/v25.0/next-accounts' },
+          }
         : url.includes('/next-accounts') ? { data: [page(1)] }
         : url.includes('/me/businesses?') ? { data: [{ id: 'business-b' }] }
         : url.includes('business-b/client_pages') ? { data: [page(2)] }
@@ -969,9 +1008,14 @@ describe('Instagram account metadata fallback deadline', () => {
   it('does not start metadata batches after exhausting the discovery budget', async () => {
     jest.useFakeTimers({ now: 0 });
     const started: number[] = [];
-    const request = jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+    const request = jest
+      .spyOn(global, 'fetch')
+      .mockImplementation(async (input) => {
       const url = String(input);
-      if (url.includes('/me/accounts?')) return { json: async () => ({ data: Array.from({ length: 33 }, (_, i) => ({ id: `page-${i}`, instagram_business_account: { id: `ig-${i}` } })) }) } as Response;
+      if (url.includes('/me/accounts?')) return { json: async () => ({ data: Array.from({ length: 33 }, (_, i) => ({ id: `page-${i}`, instagram_business_account: { id: `ig-${i}` },
+              })),
+            }),
+          } as Response;
       if (url.includes('/me/businesses?')) return { json: async () => ({ data: [] as unknown[] }) } as Response;
       started.push(Date.now());
       await new Promise((resolve) => setTimeout(resolve, 15000));
@@ -990,15 +1034,33 @@ describe('Instagram account metadata fallback deadline', () => {
 
 describe('Instagram discovery throttling', () => {
   it('stops the scan on a Meta rate limit instead of returning an incomplete list', async () => {
-    const request = jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+    const request = jest
+      .spyOn(global, 'fetch')
+      .mockImplementation(async (input) => {
       const url = String(input);
-      const body = url.includes('/me/accounts?') ? { data: [{ id: 'page-1', instagram_business_account: { id: 'ig-1', name: 'One', username: 'one' } }] }
-        : url.includes('/me/businesses?') ? { data: Array.from({ length: 47 }, (_, i) => ({ id: `business-${i}` })) }
-        : { error: { code: 4, message: 'Should never expose provider data test-token' } };
+      const body = url.includes('/me/accounts?') ? { data: [
+                {
+                  id: 'page-1',
+                  instagram_business_account: {
+                    id: 'ig-1',
+                    name: 'One',
+                    username: 'one',
+                  },
+                },
+              ],
+            }
+        : url.includes('/me/businesses?') ? { data: Array.from({ length: 47 }, (_, i) => ({ id: `business-${i}`,
+              })),
+            }
+        : { error: { code: 4, message: 'Should never expose provider data test-token',
+              },
+            };
       return { status: 200, json: async () => body } as Response;
     });
     try {
-      await expect(new InstagramProvider().pages('test-token')).rejects.toMatchObject({
+      await expect(
+        new InstagramProvider().pages('test-token')
+      ).rejects.toMatchObject({
         status: 429,
         response: { code: 'PROVIDER_RATE_LIMIT' },
       });
@@ -1010,18 +1072,111 @@ describe('Instagram discovery throttling', () => {
 describe('Instagram discovery quota response formats', () => {
   it('recognizes HTTP 429 even when the body is empty or HTML', async () => {
     const json = jest.fn().mockRejectedValue(new Error('Invalid JSON'));
-    const request = jest.spyOn(global, 'fetch').mockResolvedValue({ status: 429, json } as any);
+    const request = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue({ status: 429, json } as any);
     try {
-      await expect(new InstagramProvider().pages('test-token')).rejects.toMatchObject({ status: 429 });
+      await expect(
+        new InstagramProvider().pages('test-token')
+      ).rejects.toMatchObject({ status: 429 });
       expect(json).not.toHaveBeenCalled();
       expect(request).toHaveBeenCalledTimes(1);
     } finally { request.mockRestore(); }
   });
-  it.each([80001, 80002])('recognizes Page and Instagram quota code %s', async (code) => {
-    const request = jest.spyOn(global, 'fetch').mockResolvedValue({ status: 400, json: async () => ({ error: { code } }) } as any);
-    try {
-      await expect(new InstagramProvider().pages('test-token')).rejects.toMatchObject({ status: 429 });
-      expect(request).toHaveBeenCalledTimes(1);
-    } finally { request.mockRestore(); }
+  it.each([80001, 80002])(
+    'recognizes Page and Instagram quota code %s', async (code) => {
+    const request = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue({
+          status: 400,
+          json: async () => ({ error: { code } }),
+        } as any);
+      try {
+        await expect(
+          new InstagramProvider().pages('test-token')
+        ).rejects.toMatchObject({ status: 429 });
+        expect(request).toHaveBeenCalledTimes(1);
+      } finally {
+        request.mockRestore();
+      }
+    }
+  );
+});
+
+describe('InstagramProvider account selection identity', () => {
+  let originalFetch: typeof global.fetch;
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+  const selection = { id: '123', pageId: '456' };
+  const valid = {
+    access_token: 'PAGE',
+    instagram_business_account: {
+      id: '123',
+      name: 'Account',
+      username: 'account',
+      profile_picture_url: 'avatar',
+    },
+  };
+  it('derives the token and account from the selected Page in one bounded request', async () => {
+    const request = jest
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200, json: async () => valid });
+    global.fetch = request;
+    expect(
+      await new InstagramProvider().fetchPageInformation('USER', selection)
+    ).toEqual({
+      id: '123',
+      name: 'Account',
+      username: 'account',
+      picture: 'avatar',
+      access_token: 'PAGE',
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][1].signal).toBeDefined();
+  });
+  it('rejects a forged association between a Page and another Instagram', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200, json: async () => valid });
+    await expect(
+      new InstagramProvider().fetchPageInformation('USER', {
+        ...selection,
+        id: '999',
+      })
+    ).rejects.toMatchObject({ status: 400 });
+  });
+  it.each([
+    ['bad/identity', '456'],
+    ['123', '456?token=secret'],
+  ])(
+    'rejects malformed identifiers before a provider request',
+    async (id, pageId) => {
+      global.fetch = jest.fn();
+      await expect(
+        new InstagramProvider().fetchPageInformation('USER', { id, pageId })
+      ).rejects.toMatchObject({ status: 400 });
+      expect(global.fetch).not.toHaveBeenCalled();
+    }
+  );
+  it.each([
+    [190, 412],
+    [4, 429],
+    [17, 429],
+    [80002, 429],
+  ])('sanitizes provider error %s to status %s', async (code, status) => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { code, message: 'token=SECRET' } }),
+      });
+    await expect(
+      new InstagramProvider().fetchPageInformation('USER', selection)
+    ).rejects.toMatchObject({ status });
   });
 });

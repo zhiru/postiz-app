@@ -2336,5 +2336,19 @@
   "channel_connection_network_error": "We could not finish connecting. Check your connection and start again from the calendar.",
   "channel_connection_save_error": "We could not confirm that the account was saved. Check the calendar before connecting it again.",
   "channel_connection_wait": "The provider may take longer when loading many accounts. You can return to the calendar at any time.",
-  "channel_connection_rate_limit": "The provider is temporarily limiting requests. Wait a few minutes and reconnect the channel."
+  "channel_connection_rate_limit": "The provider is temporarily limiting requests. Wait a few minutes and reconnect the channel.",
+  "channel_connect_selected": "Connect selected ({{count}})",
+  "channel_account_connected": "Connected",
+  "channel_account_existing": "Already connected — kept unchanged",
+  "channel_account_unavailable": "Unavailable here. Check whether this account is connected to another profile or needs reconnection.",
+  "channel_account_failed": "Could not connect. You can select this account and try again.",
+  "channel_authorization_expired": "This authorization expired or was revoked. Connect through Meta again.",
+  "channel_reuse_help": "Select several accounts using an existing authorization. Open Meta only to authorize another user, change permissions, or renew expired access.",
+  "channel_reuse_from": "Use authorization from {{name}}",
+  "channel_loading_accounts": "Loading authorized accounts…",
+  "channel_authorize_meta": "Connect or renew through Meta",
+  "channel_choose_accounts": "Connect authorized accounts",
+  "channel_account_limit": "The channel limit for your plan has been reached.",
+  "channel_selection_limit": "Select up to 50 accounts per batch.",
+  "channel_change_authorization": "Choose another saved authorization"
 }

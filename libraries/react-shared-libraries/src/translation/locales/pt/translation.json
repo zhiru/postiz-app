@@ -2336,5 +2336,19 @@
   "channel_connection_network_error": "Não foi possível concluir a conexão. Verifique sua conexão e recomece pelo calendário.",
   "channel_connection_save_error": "Não foi possível confirmar se a conta foi salva. Confira o calendário antes de conectar novamente.",
   "channel_connection_wait": "O provedor pode demorar mais ao carregar muitas contas. Você pode voltar ao calendário a qualquer momento.",
-  "channel_connection_rate_limit": "O provedor está limitando as consultas temporariamente. Aguarde alguns minutos e conecte o canal novamente."
+  "channel_connection_rate_limit": "O provedor está limitando as consultas temporariamente. Aguarde alguns minutos e conecte o canal novamente.",
+  "channel_connect_selected": "Conectar selecionadas ({{count}})",
+  "channel_account_connected": "Conectada",
+  "channel_account_existing": "Já conectada — mantida sem alterações",
+  "channel_account_unavailable": "Indisponível aqui. Confira se a conta está em outro perfil ou precisa ser reconectada.",
+  "channel_account_failed": "Não foi possível conectar. Selecione esta conta e tente novamente.",
+  "channel_authorization_expired": "Esta autorização expirou ou foi revogada. Conecte pela Meta novamente.",
+  "channel_reuse_help": "Selecione várias contas usando uma autorização existente. Abra a Meta apenas para autorizar outro usuário, mudar permissões ou renovar o acesso expirado.",
+  "channel_reuse_from": "Usar autorização de {{name}}",
+  "channel_loading_accounts": "Carregando contas autorizadas…",
+  "channel_authorize_meta": "Conectar ou renovar pela Meta",
+  "channel_choose_accounts": "Conectar contas autorizadas",
+  "channel_account_limit": "O limite de canais do seu plano foi atingido.",
+  "channel_selection_limit": "Selecione até 50 contas por lote.",
+  "channel_change_authorization": "Escolher outra autorização salva"
 }

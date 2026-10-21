@@ -1,3 +1,5 @@
+import { PermissionsService } from '@gitroom/backend/services/auth/permissions/permissions.service';
+import { ConnectAccountsDto } from '@gitroom/nestjs-libraries/dtos/integrations/connect.accounts.dto';
 import {
   Body,
   Controller,
@@ -56,19 +58,82 @@ export class IntegrationsController {
     private _organizationService: OrganizationService,
     private _profileService: ProfileService,
     private _encryption: EncryptionService,
-    private _postsSyncService: PostsSyncService
+    private _postsSyncService: PostsSyncService,
+    private _permissionsService: PermissionsService
   ) {}
 
   @Get('/:id/posts-sync')
   @CheckPolicies([AuthorizationActions.Read, Sections.CHANNEL])
-  getPostsSyncStatus(@GetOrgFromRequest() org: Organization, @GetProfileFromRequest() profile: Profile | null, @Param('id') id: string) {
+  getPostsSyncStatus(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string
+  ) {
     return this._postsSyncService.status(org.id, id, profile?.id);
   }
 
   @Post('/:id/posts-sync')
   @CheckPolicies([AuthorizationActions.Update, Sections.CHANNEL])
-  syncPosts(@GetOrgFromRequest() org: Organization, @GetProfileFromRequest() profile: Profile | null, @Param('id') id: string) {
+  syncPosts(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string
+  ) {
     return this._postsSyncService.request(org.id, id, profile?.id);
+  }
+
+  @Get('/provider/:provider/authorizations')
+  @CheckPolicies([AuthorizationActions.Create, Sections.CHANNEL])
+  accountAuthorizations(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('provider') provider: string
+  ) {
+    return this._integrationService.accountAuthorizations(
+      org.id,
+      provider,
+      profile?.id ?? null
+    );
+  }
+
+  @Get('/provider/:id/accounts')
+  @CheckPolicies([AuthorizationActions.Create, Sections.CHANNEL])
+  providerAccounts(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string
+  ) {
+    return this._integrationService.providerAccounts(
+      org.id,
+      id,
+      profile?.id ?? null
+    );
+  }
+
+  @Post('/provider/:id/accounts')
+  @CheckPolicies([AuthorizationActions.Create, Sections.CHANNEL])
+  async connectProviderAccounts(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string,
+    @Body() body: ConnectAccountsDto
+  ) {
+    const plan = process.env.STRIPE_PUBLISHABLE_KEY
+      ? await this._permissionsService.getPackageOptions(org.id)
+      : null;
+    const channelLimit = plan
+      ? Math.max(
+          plan.options.channel || 0,
+          plan.subscription?.totalChannels || 0
+        )
+      : undefined;
+    return this._integrationService.connectProviderAccounts(
+      org.id,
+      id,
+      profile?.id ?? null,
+      body.accounts,
+      channelLimit
+    );
   }
 
   @Post('/provider/:id/connect')
@@ -139,7 +204,10 @@ export class IntegrationsController {
     return {
       integrations: await Promise.all(
         (
-          await this._integrationService.getIntegrationsList(org.id, profile?.id)
+          await this._integrationService.getIntegrationsList(
+            org.id,
+            profile?.id
+          )
         ).map(async (p) => {
           const findIntegration = this._integrationManager.getSocialIntegration(
             p.providerIdentifier
@@ -296,18 +364,26 @@ export class IntegrationsController {
     }
 
     try {
-      let getExternalUrl: { client_id: string; client_secret: string; instanceUrl: string } | undefined;
+      let getExternalUrl:
+        | { client_id: string; client_secret: string; instanceUrl: string } | undefined;
 
       if (isZernioProvider) {
         let zernioApiKey: string | null = null;
         if (profile?.id) {
-          zernioApiKey = await this._profileService.getDecryptedZernioApiKey(profile.id);
+          zernioApiKey = await this._profileService.getDecryptedZernioApiKey(
+            profile.id
+          );
           // If profile has no key, check if org shares Zernio with profiles
           if (!zernioApiKey) {
             const shareSettings =
-              await this._organizationService.getShareZernioWithProfiles(org.id);
+              await this._organizationService.getShareZernioWithProfiles(
+                org.id
+              );
             if (shareSettings?.shareZernioWithProfiles) {
-              zernioApiKey = await this._organizationService.getDecryptedZernioApiKey(org.id);
+              zernioApiKey =
+                await this._organizationService.getDecryptedZernioApiKey(
+                  org.id
+                );
             }
           }
         } else {
@@ -315,7 +391,9 @@ export class IntegrationsController {
           zernioApiKey = await this._organizationService.getDecryptedZernioApiKey(org.id);
         }
         if (!zernioApiKey) {
-          throw new Error('Zernio API key not configured. Go to Settings > Zernio to configure it.');
+          throw new Error(
+            'Zernio API key not configured. Go to Settings > Zernio to configure it.'
+          );
         }
         getExternalUrl = {
           client_id: '',

@@ -77,6 +77,134 @@ export class IntegrationRepository {
     });
   }
 
+  getAccountAuthorizations(
+    org: string,
+    provider: string,
+    profileId: string | null
+  ) {
+    return this._integration.model.integration.findMany({
+      where: {
+        organizationId: org,
+        providerIdentifier: provider,
+        profileId,
+        deletedAt: null,
+        disabled: false,
+        OR: [{ inBetweenSteps: true }, { refreshToken: { not: '' } }],
+      },
+      orderBy: [
+        { inBetweenSteps: 'desc' },
+        { tokenExpiration: 'desc' },
+        { updatedAt: 'desc' },
+      ],
+      select: { id: true, name: true, picture: true },
+    });
+  }
+
+  getAccountAuthorization(org: string, id: string, profileId: string | null) {
+    return this._integration.model.integration.findFirst({
+      where: {
+        organizationId: org,
+        id,
+        profileId,
+        deletedAt: null,
+        disabled: false,
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        profileId: true,
+        providerIdentifier: true,
+        rootInternalId: true,
+        token: true,
+        refreshToken: true,
+        inBetweenSteps: true,
+        tokenExpiration: true,
+        postingTimes: true,
+      },
+    });
+  }
+
+  getConnectedAccount(
+    org: string,
+    internalId: string,
+    profileId: string | null
+  ) {
+    return this._integration.model.integration.findFirst({
+      where: {
+        organizationId: org,
+        internalId,
+        profileId,
+        deletedAt: null,
+        disabled: false,
+        refreshNeeded: false,
+        inBetweenSteps: false,
+      },
+      select: { id: true },
+    });
+  }
+
+  async connectAuthorizedAccount(
+    source: Awaited<
+      ReturnType<IntegrationRepository['getAccountAuthorization']>
+    > & {},
+    account: {
+      id: string;
+      name: string;
+      picture?: string;
+      username: string;
+      access_token: string;
+    },
+    authorizationToken: string
+  ) {
+    // Insert-only: the unique org/account identity prevents concurrent retries from modifying active channels.
+    const { count } = await this._integration.model.integration.createMany({
+      skipDuplicates: true,
+      data: [
+        {
+          organizationId: source.organizationId,
+          profileId: source.profileId,
+          internalId: account.id,
+          rootInternalId: source.rootInternalId,
+          name: account.name,
+          picture: account.picture,
+          profile: account.username,
+          type: 'social',
+          providerIdentifier: source.providerIdentifier,
+          token: this.shouldEncryptTokens
+            ? encryptIntegrationToken(this._encryption, account.access_token)
+            : account.access_token,
+          refreshToken: this.shouldEncryptTokens
+            ? encryptIntegrationToken(this._encryption, authorizationToken)
+            : authorizationToken,
+          tokenEncrypted: this.shouldEncryptTokens,
+          tokenExpiration: source.tokenExpiration,
+          postingTimes: source.postingTimes,
+          inBetweenSteps: false,
+        },
+      ],
+    });
+    const saved = await this.getConnectedAccount(
+      source.organizationId,
+      account.id,
+      source.profileId
+    );
+    return saved ? { id: saved.id, created: count === 1 } : null;
+  }
+
+  finishAccountSelection(org: string, id: string, profileId: string | null) {
+    return this._integration.model.integration.updateMany({
+      where: {
+        organizationId: org,
+        id,
+        profileId,
+        inBetweenSteps: true,
+        deletedAt: null,
+        posts: { none: {} },
+      },
+      data: { deletedAt: new Date() },
+    });
+  }
+
   async checkPreviousConnections(org: string, id: string) {
     const findIt = await this._integration.model.integration.findMany({
       where: {
