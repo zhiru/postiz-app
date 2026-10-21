@@ -11,6 +11,16 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 - Apply reasoning effort to text/chat and supported image requests; lock model presets to the default and prevent conflicting overrides on fallback requests.
 - Keep Instagram automation definitions, delivery deduplication and synchronization unchanged.
 
+- Instagram: selecione várias contas e reutilize autorizações salvas no mesmo perfil, com busca, resultados por conta e retomada sem repetir OAuth. Contas existentes, automações e credenciais são preservadas; limites do plano e acessos da Meta continuam sendo validados.
+
+- Accelerated Instagram account discovery using expanded account metadata and four concurrent Business reads; reconnect now stops at the required account. Preserved pagination and bounded metadata fallback, and surfaced Meta throttling instead of presenting a quota-truncated list.
+
+- Improved Instagram account selection with name/@username search, compact accessible rows, responsive scrolling and persistent save/cancel controls; handled failed, expired and stalled connection callbacks without replaying OAuth codes.
+
+- Apply the configured platform name and logo to browser titles and favicons, including navigation and live branding changes.
+
+- Imported 52 upstream commits through `651876e2`, including scoped MCP media status, opt-in upload adjustment, thumbnail settings, 3DS/invoice improvements, block-preserving previews, Deepgram privacy and YouTube quota feedback; retained local Instagram synchronization and automation delivery protections.
+
 - Added configurable OpenAI-compatible text endpoints (including Omni), explicit custom model IDs, and independent opt-in AI variations for public replies, DMs and follow-gate messages, preserving legacy automation behavior and delivery deduplication.
 
 - Add an independent private-message switch to Instagram comment automations. Turning it off removes private actions and follow-gate messages on save, including multi-account creation, while preserving existing flows by default.

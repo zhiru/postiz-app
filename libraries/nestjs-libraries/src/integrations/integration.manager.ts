@@ -255,6 +255,7 @@ export class IntegrationManager {
         identifier: p.identifier,
         toolTip: p.toolTip,
         editor: p.editor,
+        reusableAccountAuthorization: !!p.reusableAccountAuthorization,
         isExternal: !!p.externalUrl,
         isWeb3: !!p.isWeb3,
         isChromeExtension: !!p.isChromeExtension,
@@ -267,6 +268,7 @@ export class IntegrationManager {
     social.push({
       name: 'Zernio',
       identifier: 'zernio',
+      reusableAccountAuthorization: false,
       toolTip: undefined,
       editor: 'normal' as const,
       isExternal: false,

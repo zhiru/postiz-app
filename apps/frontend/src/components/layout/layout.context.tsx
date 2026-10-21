@@ -1,4 +1,5 @@
 'use client';
+import { BrandMetadata } from '@gitroom/frontend/components/ui/brand-logo.component';
 
 import { ReactNode, useCallback } from 'react';
 import { FetchWrapperComponent } from '@gitroom/helpers/utils/custom.fetch';
@@ -149,6 +150,7 @@ function LayoutContextInner(params: { children: ReactNode }) {
   );
   return (
     <FetchWrapperComponent baseUrl={backendUrl} afterRequest={afterRequest}>
+      <BrandMetadata />
       {params?.children || <></>}
     </FetchWrapperComponent>
   );

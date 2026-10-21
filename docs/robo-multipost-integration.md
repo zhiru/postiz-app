@@ -100,3 +100,12 @@ em produção por conta própria.
   encaminhamento autorizado desses eventos; o ensaio acima não comprova essa
   etapa de transporte. Não substituir o destino existente sem preservar o
   atendimento do Chatwoot.
+
+
+## Platform branding in browser tabs
+
+The public `/public/branding` response supplies the saved platform name and logo. `useBranding` shares its SWR cache between logos and browser metadata. `BrandMetadata` runs inside the common authenticated/public fetch context, updates the current page title and favicon, and retains them when Next replaces metadata during navigation. Saving branding invalidates the same cache; the existing one-minute refresh also picks up changes made in another session. Removing the logo restores `/favicon.ico`; a failed branding request preserves existing metadata.
+
+This is a browser update after hydration; server-rendered HTML and link-preview metadata remain unchanged. The official Postiz (ChatGPT) connector consent page belongs to Postiz Cloud and keeps its own branding.
+
+Regression: run `pnpm exec jest --selectProjects frontend --runInBand` from the repository root. The DOM-only test mocks optional native canvas support; no browser or canvas installation is required.

@@ -23,6 +23,8 @@ export const InstagramContinue = withContinueProvider<
   InstagramItem,
   InstagramSelection
 >({
+  allowMultiple: true,
+  getSearchText: (item) => `${item.name || ''} ${item.username || ''}`,
   endpoint: 'pages',
   swrKey: 'load-instagram-pages',
   titleKey: 'select_instagram_account',
@@ -47,14 +49,19 @@ export const InstagramContinue = withContinueProvider<
   isSelected: (item, selection) => selection?.id === item.id,
   renderItem: (item) => (
     <>
-      <div>
-        <img
-          className="w-full max-w-[156px]"
-          src={item.picture.data.url}
-          alt="profile"
-        />
-      </div>
-      <div>{item.name}</div>
+      <img
+        className="h-12 w-12 shrink-0 rounded-full object-cover"
+        src={item.picture?.data?.url}
+        alt=""
+      />
+      <span className="min-w-0 flex-1 break-words">
+        <span className="block font-semibold">{item.name}</span>
+        {item.username && (
+          <span className="block text-sm opacity-70">
+            @{item.username.replace(/^@/, '')}
+          </span>
+        )}
+      </span>
     </>
   ),
 });
