@@ -167,7 +167,9 @@ export const ContinueIntegration: FC<{
       ) {
         const errorData = await data.json().catch(() => ({}));
         setErrorMessage(
-          errorData.message || errorData.msg || 'Could not add provider'
+          errorData.code === 'PROVIDER_RATE_LIMIT'
+            ? t('channel_connection_rate_limit', 'The provider is temporarily limiting requests. Wait a few minutes and reconnect the channel.')
+            : errorData.message || errorData.msg || 'Could not add provider'
         );
         setError(true);
         return;

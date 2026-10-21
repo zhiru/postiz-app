@@ -1,3 +1,4 @@
+import { HttpException } from '@nestjs/common';
 import { ssrfSafeFetch } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { CommentAutomationDeliveryError } from './social.integrations.interface';
 import {
@@ -414,13 +415,16 @@ export class InstagramProvider
     requiredId: string,
     accessToken: string
   ): Promise<Omit<AuthTokenDetails, 'refreshToken' | 'expiresIn'>> {
-    const findPage = (await this.pages(accessToken)).find(
+    const findPage = (await this.discoverPages(accessToken, requiredId)).find(
       (p) => p.id === requiredId
     );
 
+    if (!findPage) {
+      throw new Error('Instagram account is not available in this authorization');
+    }
     const information = await this.fetchPageInformation(accessToken, {
       id: requiredId,
-      pageId: findPage?.pageId!,
+      pageId: findPage.pageId,
     });
 
     return {
@@ -548,21 +552,50 @@ export class InstagramProvider
   }
 
   async pages(accessToken: string) {
+    return this.discoverPages(accessToken);
+  }
+
+  private async discoverPages(accessToken: string, requiredId?: string) {
+    let throttled = false;
     const seenPageIds = new Set<string>();
     const allFacebookPages: any[] = [];
-
-    // Orcamento total de 90s para o pages() inteiro. Se ultrapassar, retornamos
-    // os resultados parciais ja coletados — evita 504 do Nginx em agencias com
-    // muitas pages via Business Manager.
+    // Request account metadata with its Page instead of one extra read per Instagram.
+    const fields = 'id,instagram_business_account{id,name,username,profile_picture_url}';
     const overallDeadline = Date.now() + 90000;
-    const budgetExceeded = () => Date.now() > overallDeadline;
+    const budgetExceeded = () => Date.now() >= overallDeadline;
+    const hasRequiredAccount = () => !!requiredId && allFacebookPages.some(
+      (page) => page.instagram_business_account?.id === requiredId
+    );
+    const shouldStop = () => throttled || budgetExceeded() || hasRequiredAccount();
 
+    const rateLimitError = () => {
+      throttled = true;
+      return new HttpException({
+        code: 'PROVIDER_RATE_LIMIT',
+        message: 'The provider is temporarily limiting requests. Wait a few minutes and reconnect the channel.',
+      }, 429);
+    };
+    const read = async (url: string) => {
+      const remaining = overallDeadline - Date.now();
+      if (remaining <= 0) throw new Error('Instagram discovery time budget exceeded');
+      const response = await ssrfSafeFetch(url, {
+        signal: AbortSignal.timeout(Math.min(15000, remaining)),
+        redirect: 'error',
+      });
+      if (response.status === 429) throw rateLimitError();
+      const body = await response.json();
+      if ([4, 17, 32, 613, 80001, 80002, 80004].includes(body?.error?.code)) {
+        throw rateLimitError();
+      }
+      return body;
+    };
     const fetchPaginated = async (startUrl: string) => {
+      const seenUrls = new Set<string>();
       let nextUrl: string | undefined = startUrl;
-      while (nextUrl) {
-        if (budgetExceeded()) return;
-        const response = await (await fetchWithTimeout(nextUrl)).json();
-        if (response.data) {
+      while (nextUrl && !seenUrls.has(nextUrl) && !shouldStop()) {
+        seenUrls.add(nextUrl);
+        const response = await read(nextUrl);
+        if (Array.isArray(response.data)) {
           for (const page of response.data) {
             if (!seenPageIds.has(page.id)) {
               seenPageIds.add(page.id);
@@ -574,96 +607,79 @@ export class InstagramProvider
       }
     };
 
-    // Fetch pages the user explicitly shared during the OAuth dialog
     try {
       await fetchPaginated(
-        `${META_FACEBOOK_GRAPH_URL}/me/accounts?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
+        `${META_FACEBOOK_GRAPH_URL}/me/accounts?fields=${fields}&limit=100&access_token=${accessToken}`
       );
-    } catch (err) {
-      console.warn(
-        '[Instagram.pages] /me/accounts failed:',
-        (err as Error)?.message
-      );
+    } catch (error) {
+      if (throttled) throw error;
+      console.warn('[Instagram.pages] Could not read authorized Pages');
     }
 
-    // Also fetch pages via Business Manager API to discover pages not selected
-    // during the OAuth page selection step. Atencao: o custo escala com o
-    // numero de BMs selecionados no Meta App — apps com muitos BMs podem
-    // estourar o rate limit (#4 "Application request limit reached"). Controle
-    // no painel do Meta App selecionando apenas os BMs necessarios. O budget
-    // de 90s + timeouts individuais garantem que nunca pendura indefinido.
-    if (!budgetExceeded()) {
+    // Include Business Manager accounts too; keep at most four reads in flight.
+    if (!shouldStop()) {
       try {
-        let bizUrl:
-          | string
-          | undefined = `${META_FACEBOOK_GRAPH_URL}/me/businesses?access_token=${accessToken}`;
-
-        while (bizUrl && !budgetExceeded()) {
-          const bizResponse = await (await fetchWithTimeout(bizUrl)).json();
-          if (bizResponse.data) {
-            for (const business of bizResponse.data) {
-              if (budgetExceeded()) break;
+        let bizUrl: string | undefined = `${META_FACEBOOK_GRAPH_URL}/me/businesses?limit=100&access_token=${accessToken}`;
+        const seenBusinessUrls = new Set<string>();
+        while (bizUrl && !seenBusinessUrls.has(bizUrl) && !shouldStop()) {
+          seenBusinessUrls.add(bizUrl);
+          const bizResponse = await read(bizUrl);
+          const pageUrls = (bizResponse.data || []).flatMap((business: { id: string }) =>
+            ['owned_pages', 'client_pages'].map((edge) =>
+              `${META_FACEBOOK_GRAPH_URL}/${business.id}/${edge}?fields=${fields}&limit=100&access_token=${accessToken}`
+            )
+          );
+          for (let offset = 0; offset < pageUrls.length && !shouldStop(); offset += 4) {
+            await Promise.all(pageUrls.slice(offset, offset + 4).map(async (url: string) => {
               try {
-                await fetchPaginated(
-                  `${META_FACEBOOK_GRAPH_URL}/${business.id}/owned_pages?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
-                );
-              } catch {
-                // Continue with other businesses
+                await fetchPaginated(url);
+              } catch (error) {
+                if (throttled) throw error;
+                // An inaccessible business must not hide accounts from other businesses.
               }
-
-              if (budgetExceeded()) break;
-              try {
-                await fetchPaginated(
-                  `${META_FACEBOOK_GRAPH_URL}/${business.id}/client_pages?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
-                );
-              } catch {
-                // Continue with other businesses
-              }
-            }
+            }));
           }
           bizUrl = bizResponse.paging?.next;
         }
-      } catch {
-        // Business Manager API not available for all users
+      } catch (error) {
+        if (throttled) throw error;
+        // Business Manager access is not available for every authorization.
       }
     }
 
     if (budgetExceeded()) {
-      console.warn(
-        `[Instagram.pages] budget de 90s estourado — retornando ${allFacebookPages.length} paginas coletadas ate agora`
-      );
+      console.warn(`[Instagram.pages] Discovery time budget exceeded; collected ${allFacebookPages.length} Pages`);
     }
 
-    const onlyConnectedAccounts = await Promise.all(
-      allFacebookPages
-        .filter((f: any) => f.instagram_business_account)
-        .map(async (p: any) => {
+    const linkedPages = allFacebookPages.filter((page) =>
+      page.instagram_business_account && (!requiredId || page.instagram_business_account.id === requiredId)
+    );
+    const accounts: any[] = [];
+    for (let offset = 0; offset < linkedPages.length && !budgetExceeded(); offset += 4) {
+      const batch = await Promise.all(linkedPages.slice(offset, offset + 4).map(async (page: any) => {
+        let account = page.instagram_business_account;
+        // Older/partial responses still need the metadata read. Reconnect only needs the Page ID.
+        if (!requiredId && (typeof account.name !== 'string' || typeof account.username !== 'string')) {
           try {
-            return {
-              pageId: p.id,
-              ...(await (
-                await fetchWithTimeout(
-                  `${META_FACEBOOK_GRAPH_URL}/${p.instagram_business_account.id}?fields=name,username,profile_picture_url&access_token=${accessToken}`
-                )
-              ).json()),
-              id: p.instagram_business_account.id,
-            };
-          } catch (err) {
-            // Pagina individual com timeout: ignora ao inves de quebrar tudo
+            account = await read(
+              `${META_FACEBOOK_GRAPH_URL}/${account.id}?fields=name,username,profile_picture_url&access_token=${accessToken}`
+            );
+          } catch (error) {
+            if (throttled) throw error;
             return null;
           }
-        })
-    );
-
-    return onlyConnectedAccounts
-      .filter((p): p is NonNullable<typeof p> => p !== null)
-      .map((p: any) => ({
-        pageId: p.pageId,
-        id: p.id,
-        name: p.name,
-        username: p.username || '',
-        picture: { data: { url: p.profile_picture_url } },
+        }
+        return {
+          pageId: page.id,
+          id: page.instagram_business_account.id,
+          name: account.name,
+          username: account.username || '',
+          picture: { data: { url: account.profile_picture_url } },
+        };
       }));
+      accounts.push(...batch.filter((account) => account !== null));
+    }
+    return accounts;
   }
 
   async fetchPageInformation(

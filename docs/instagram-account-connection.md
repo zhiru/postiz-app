@@ -13,3 +13,13 @@ For Facebook Login, Meta must expose a Facebook Page linked to the professional 
 [Meta documentation](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/business-login-for-instagram)
 
 This update does not alter schema, synchronization, automations, webhooks or credential settings.
+
+## Discovery performance and limits
+
+Instagram metadata is expanded with each Facebook Page, avoiding a separate read per Instagram account. Business discovery still includes owned and client Pages and follows pagination, with at most four reads running together. Reconnection stops scanning after locating the required account. Neither account credentials nor provider selection are changed or cached by this optimization.
+
+Missing metadata uses a bounded fallback. Reads keep their abort deadline while parsing the body and no fallback batches start after the existing overall discovery budget expires. Repeated pagination URLs are not followed again.
+
+HTTP 429 and Meta application, user, Page and Instagram quota errors stop discovery and return a translated wait/reconnect message. The app does not automatically repeat OAuth or present a quota-truncated list as complete.
+
+A deterministic test with 47 Businesses, 33 distinct accounts and 100ms per request drops from 129 reads / 9.7s to 96 reads / 2.6s. These are simulated timings, not a guaranteed Meta response time. Live speed still depends on Meta and its shared request limits.

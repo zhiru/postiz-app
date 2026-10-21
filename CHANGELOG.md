@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Accelerated Instagram account discovery using expanded account metadata and four concurrent Business reads; reconnect now stops at the required account. Preserved pagination and bounded metadata fallback, and surfaced Meta throttling instead of presenting a quota-truncated list.
+
 - Improved Instagram account selection with name/@username search, compact accessible rows, responsive scrolling and persistent save/cancel controls; handled failed, expired and stalled connection callbacks without replaying OAuth codes.
 
 - Apply the configured platform name and logo to browser titles and favicons, including navigation and live branding changes.

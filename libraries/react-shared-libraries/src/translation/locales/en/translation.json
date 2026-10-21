@@ -2335,5 +2335,6 @@
   "channel_connection_restart": "This connection expired or was cancelled. Return to the calendar and connect the channel again.",
   "channel_connection_network_error": "We could not finish connecting. Check your connection and start again from the calendar.",
   "channel_connection_save_error": "We could not confirm that the account was saved. Check the calendar before connecting it again.",
-  "channel_connection_wait": "The provider may take longer when loading many accounts. You can return to the calendar at any time."
+  "channel_connection_wait": "The provider may take longer when loading many accounts. You can return to the calendar at any time.",
+  "channel_connection_rate_limit": "The provider is temporarily limiting requests. Wait a few minutes and reconnect the channel."
 }

@@ -102,3 +102,12 @@ it('replaces an endless loading screen with an exit after a timeout, without ret
     expect(mockFetch).toHaveBeenCalledTimes(1);
   } finally { jest.useRealTimers(); }
 });
+
+it('explains provider throttling without showing partial accounts or retrying', async () => {
+  mockFetch.mockResolvedValue({ status: 429, json: async () => ({ code: 'PROVIDER_RATE_LIMIT', message: 'Provider internal detail' }) });
+  render(React.createElement(ContinueIntegration, { provider: 'instagram', searchParams: { code: 'test', state: 'test' }, logged: true }));
+  await flush();
+  expect(screen.getByText(/The provider is temporarily limiting/)).toBeTruthy();
+  expect(screen.queryByText('Provider internal detail')).toBeNull();
+  expect(mockFetch).toHaveBeenCalledTimes(1);
+});
