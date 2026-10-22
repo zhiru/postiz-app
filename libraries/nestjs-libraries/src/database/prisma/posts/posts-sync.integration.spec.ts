@@ -479,7 +479,7 @@ if (
         { model: db } as any,
         { model: db } as any
       );
-      const polled = await comments.getPostsToPoll(['instagram'], 7);
+      const polled = await comments.getPostsToPoll(['instagram']);
       expect(
         polled.filter((post) => post.integration.id === integration.id)
       ).toHaveLength(1);
