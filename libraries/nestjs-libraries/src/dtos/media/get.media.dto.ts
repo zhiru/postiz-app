@@ -30,8 +30,8 @@ export class GetMediaLibraryDto extends GetMediaDto {
   limit = 18;
 
   @IsOptional()
-  @IsIn(['all', 'image', 'video'])
-  type: 'all' | 'image' | 'video' = 'all';
+  @IsIn(['all', 'image', 'image-static', 'video'])
+  type: 'all' | 'image' | 'image-static' | 'video' = 'all';
 
   @IsOptional()
   @IsIn(['newest', 'oldest', 'name'])

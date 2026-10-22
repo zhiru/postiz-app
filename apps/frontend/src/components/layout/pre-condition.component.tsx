@@ -11,20 +11,20 @@ export const PreConditionComponentModal: FC = () => {
   return (
     <div className="flex flex-col gap-[16px]">
       <div className="whitespace-pre-line">
-        This social channel was connected previously to another Postiz account.
-        {'\n'}
-        To continue, please fast-track your trial for an immediate charge.{'\n'}
-        {'\n'}
-        ** Please be advised that the account will not eligible for a refund,
-        and the charge is final.
+        {t(
+          'previous_account_trial_notice',
+          "This social channel was previously connected to another Postiz account.\nTo connect it during your trial, you can end the trial now: your plan's first payment is charged today instead of at the end of the trial, and nothing extra is added.\n\nThis payment is final and not refundable."
+        )}
       </div>
       <div className="flex gap-[2px] justify-center">
         <Button
           onClick={() => (window.location.href = '/billing?finishTrial=true')}
         >
-          {t('fast_track_charge_now', 'Fast track - Charge me now')}
+          {t('fast_track_charge_now', 'End trial and pay now')}
         </Button>
-        <Button onClick={modal.closeCurrent} secondary={true}>{t('cancel', 'Cancel')}</Button>
+        <Button onClick={modal.closeCurrent} secondary={true}>
+          {t('cancel', 'Cancel')}
+        </Button>
       </div>
     </div>
   );
@@ -36,7 +36,10 @@ export const PreConditionComponent: FC = () => {
   useEffect(() => {
     if (query.get('precondition')) {
       modal.openModal({
-        title: t('suspicious_activity_detected', 'Suspicious activity detected'),
+        title: t(
+          'suspicious_activity_detected',
+          'Suspicious activity detected'
+        ),
         withCloseButton: true,
         classNames: {
           modal: 'text-textColor',

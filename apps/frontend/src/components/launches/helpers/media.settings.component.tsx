@@ -1,5 +1,8 @@
 'use client';
 
+import { useModals } from '@gitroom/frontend/components/layout/new-modal';
+import { MediaBox } from '@gitroom/frontend/components/media/media.component';
+
 import { EventEmitter } from 'events';
 import React, { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { TopTitle } from '@gitroom/frontend/components/launches/helpers/top.title.component';
@@ -319,6 +322,7 @@ export const MediaComponentInner: FC<{
   const t = useT();
   const setActivateExitButton = useLaunchStore((e) => e.setActivateExitButton);
   const newFetch = useFetch();
+  const modals = useModals();
   const [newThumbnail, setNewThumbnail] = useState<string | null>(null);
   const [isEditingThumbnail, setIsEditingThumbnail] = useState(false);
   const [altText, setAltText] = useState<string>(media?.alt || '');
@@ -408,15 +412,43 @@ export const MediaComponentInner: FC<{
                 )}
 
                 {/* Action Buttons */}
-                <div className="flex space-x-2">
+                <div className="flex flex-wrap gap-2 mt-[12px]">
                   <button
                     disabled={loading}
                     onClick={() => setIsEditingThumbnail(true)}
                     className="bg-third text-textColor px-6 py-2 rounded-lg hover:bg-opacity-80 transition-all flex-1 border border-tableBorder"
                   >
-                    {media.thumbnail || newThumbnail
-                      ? t('edit_thumbnail', 'Edit Thumbnail')
-                      : t('create_thumbnail', 'Create Thumbnail')}
+                    {t('select_video_frame', 'Select frame')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() =>
+                      modals.openModal({
+                        title: t('media_library', 'Media Library'),
+                        askClose: false,
+                        closeOnEscape: true,
+                        fullScreen: true,
+                        size: 'calc(100% - 32px)',
+                        height: 'calc(100% - 32px)',
+                        children: (close) => (
+                          <MediaBox
+                            type="image-static"
+                            closeModal={close}
+                            setMedia={(items) => {
+                              if (items[0]) {
+                                setNewThumbnail(null);
+                                setThumbnail(items[0].path);
+                                setThumbnailTimestamp(null);
+                              }
+                            }}
+                          />
+                        ),
+                      })
+                    }
+                    className="bg-third text-textColor px-6 py-2 rounded-lg hover:bg-opacity-80 transition-all flex-1 border border-tableBorder focus-visible:ring-2 focus-visible:ring-btnPrimary"
+                  >
+                    {t('thumbnail_from_gallery', 'From gallery')}
                   </button>
                   {(thumbnail || newThumbnail) && (
                     <button
@@ -424,6 +456,7 @@ export const MediaComponentInner: FC<{
                       onClick={() => {
                         setNewThumbnail(null);
                         setThumbnail(null);
+                        setThumbnailTimestamp(null);
                       }}
                       className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-opacity-80 transition-all flex-1 border border-red-700"
                     >

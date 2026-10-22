@@ -698,6 +698,7 @@ export class IntegrationService {
       String(getIntegrationInformation.id)
     );
     await this._integrationRepository.updateIntegration(id, {
+      profileId: getIntegration.profileId,
       picture: getIntegrationInformation.picture,
       internalId: String(getIntegrationInformation.id),
       organizationId: org,

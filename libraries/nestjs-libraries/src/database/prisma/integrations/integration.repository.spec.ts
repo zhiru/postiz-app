@@ -137,6 +137,21 @@ describe('IntegrationRepository (B1 Etapa 2 - criptografia na escrita)', () => {
   });
 
   describe('updateIntegration', () => {
+    it('keeps the existing channel id and copies the fresh scoped login without double encryption', async () => {
+      const posts = createPrismaRepositoryMock('post');
+      (posts.model.post as any).updateMany = jest.fn().mockResolvedValue({ count: 0 });
+      repo = new IntegrationRepository(prismaMock as any, posts as any, {} as any, {} as any, {} as any, {} as any, encryption);
+      prismaMock.model.integration.findUnique.mockResolvedValue({id: 'existing-channel', profileId: 'prof-1'} as any);
+      prismaMock.model.integration.findFirst.mockResolvedValue({rootInternalId: 'fresh-login', refreshToken: `${TOKEN_ENC_PREFIX}FRESH`, tokenExpiration: new Date('2027-01-01')} as any);
+      await repo.updateIntegration('temporary-login', {organizationId: 'org-1', profileId: 'prof-1', internalId: 'page-1', token: 'NEWACCESS'});
+      expect(prismaMock.model.integration.findFirst).toHaveBeenCalledWith(expect.objectContaining({where: {id: 'temporary-login', organizationId: 'org-1', profileId: 'prof-1'}}));
+      const last = prismaMock.model.integration.update.mock.calls.slice(-1)[0][0] as any;
+      expect(last.where).toEqual({id: 'existing-channel', organizationId: 'org-1'});
+      expect(last.select).toEqual({id: true});
+      expect(last.data).toMatchObject({rootInternalId: 'fresh-login', refreshToken: `${TOKEN_ENC_PREFIX}FRESH`, token: `${TOKEN_ENC_PREFIX}CIPHER(NEWACCESS)`, refreshNeeded: false, profileId: 'prof-1'});
+      expect(encryption.encrypt).not.toHaveBeenCalledWith(`${TOKEN_ENC_PREFIX}FRESH`);
+    });
+
     it('cifra params.token e seta tokenEncrypted=true por padrao', async () => {
       prismaMock.model.integration.findUnique.mockResolvedValue(null as any);
       prismaMock.model.integration.update.mockResolvedValue({ id: 'int-1',

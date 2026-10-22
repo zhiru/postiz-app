@@ -100,8 +100,8 @@ function LayoutContextInner(params: { children: ReactNode }) {
       if (response.status === 406) {
         if (
           await deleteDialog(
-            i18next.t('currently_on_trial', 'You are currently on trial, in order to use the feature you must finish the trial'),
-            i18next.t('finish_trial_charge_me', 'Finish the trial, charge me now'),
+            i18next.t('currently_on_trial', "This feature is not available during the trial. You can end the trial now: your plan's first payment is charged today instead of at the end of the trial."),
+            i18next.t('finish_trial_charge_me', 'End trial and pay now'),
             i18next.t('trial', 'Trial'),
           )
         ) {

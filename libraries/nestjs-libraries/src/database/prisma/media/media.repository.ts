@@ -280,7 +280,9 @@ export class MediaRepository {
       })),
     };
     const typeFilter =
-      options.type === 'video'
+      options.type === 'image-static'
+        ? [{ OR: ['jpg', 'jpeg', 'png'].map(extension => ({ name: { endsWith: `.${extension}`, mode: 'insensitive' as const } })) }]
+        : options.type === 'video'
         ? [videos]
         : options.type === 'image'
         ? [{ NOT: videos }]

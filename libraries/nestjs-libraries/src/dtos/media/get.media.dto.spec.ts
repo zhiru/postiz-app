@@ -15,6 +15,17 @@ describe('GetMediaLibraryDto', () => {
     expect(query.limit).toBe(24);
   });
 
+  it('accepts the JPEG/PNG thumbnail gallery filter', async () => {
+    expect(
+      await validate(
+        plainToInstance(GetMediaLibraryDto, {
+          type: 'image-static',
+          limit: '12',
+        })
+      )
+    ).toHaveLength(0);
+  });
+
   it.each([
     { limit: '1000' },
     { limit: '-1' },
