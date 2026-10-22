@@ -1,3 +1,4 @@
+import { getPostFormat } from '@gitroom/helpers/utils/posts.list.minify';
 import {
   PrismaRepository,
   PrismaTransaction,
@@ -163,7 +164,8 @@ export class PostsRepository {
     orgId: string,
     query: GetPostsDto,
     includeAttachments = false,
-    profileId?: string
+    profileId?: string,
+    includeFormat = false
   ) {
     // Use the provided start and end dates directly
     const startDate = dayjs.utc(query.startDate).toDate();
@@ -219,7 +221,7 @@ export class PostsRepository {
         importedFromPlatform: true,
         platformHistoryCovered: true,
         settings: true,
-        ...(includeAttachments ? { image: true } : {}),
+        ...(includeAttachments || includeFormat ? { image: true } : {}),
         tags: {
           where: {
             tag: {
@@ -260,7 +262,12 @@ export class PostsRepository {
       )
     );
     return list
-      .map((post) => ({ ...post, error: this.curatedError(post.error) }))
+      .map(({ image, ...post }) => ({
+        ...post,
+        ...(includeAttachments ? { image } : {}),
+        ...(includeFormat ? { format: getPostFormat({ ...post, image }) } : {}),
+        error: this.curatedError(post.error),
+      }))
       .reduce((all, post) => {
         const { platformHistoryCovered, ...visible } = post;
         if (!post.intervalInDays) {
@@ -313,8 +320,10 @@ export class PostsRepository {
         ? {
             state: State.QUEUE,
           }
-        : stateFilter === 'draft'
+        : stateFilter === 'draft' || stateFilter === 'overdue'
         ? { state: State.DRAFT }
+        : stateFilter === 'error'
+        ? { state: State.ERROR }
         : stateFilter === 'published'
         ? { state: State.PUBLISHED }
         : {
@@ -324,9 +333,9 @@ export class PostsRepository {
           };
 
     const orderDirection: 'asc' | 'desc' =
-      stateFilter === 'published' ? 'desc' : 'asc';
+      stateFilter === 'scheduled' || stateFilter === 'draft' ? 'asc' : 'desc';
 
-    const where = {
+    const where: Prisma.PostWhereInput = {
       AND: [
         {
           OR: [
@@ -338,11 +347,14 @@ export class PostsRepository {
         },
       ],
       ...stateAndDate,
-      // Published posts were already posted (publishDate in the past), so fetch
-      // all of them; everything else stays upcoming. Ordering handles the rest.
-      ...(stateFilter === 'published'
-        ? {}
-        : { publishDate: { gte: dayjs.utc().toDate() } }),
+      ...(stateFilter === 'scheduled'
+        ? { publishDate: { gte: dayjs.utc().toDate() } }
+        : stateFilter === 'overdue'
+        ? { publishDate: { lt: dayjs.utc().toDate() } }
+        : {}),
+      ...(query.search?.trim()
+        ? { content: { contains: query.search.trim(), mode: 'insensitive' } }
+        : {}),
       deletedAt: null as Date | null,
       parentPostId: null as string | null,
       intervalInDays: null as number | null,
@@ -364,16 +376,31 @@ export class PostsRepository {
       },
     };
 
+    if (query.format && query.format !== 'all') {
+      // shortcut: classify scoped metadata before paging; index a normalized format if histories make this slow.
+      const candidates = await this._post.model.post.findMany({
+        where,
+        select: { id: true, settings: true, image: true, releaseURL: true },
+      });
+      (where.AND as Prisma.PostWhereInput[]).push({
+        id: {
+          in: candidates
+            .filter((post) => getPostFormat(post) === query.format)
+            .map((post) => post.id),
+        },
+      });
+    }
+
     const [posts, total] = await Promise.all([
       this._post.model.post.findMany({
         where,
         skip,
         take: limit,
-        orderBy: {
-          publishDate: orderDirection,
-        },
+        orderBy: [{ publishDate: orderDirection }, { id: orderDirection }],
         select: {
           id: true,
+          settings: true,
+          image: true,
           content: true,
           publishDate: true,
           releaseURL: true,
@@ -407,7 +434,10 @@ export class PostsRepository {
     ]);
 
     return {
-      posts,
+      posts: posts.map(({ settings, image, ...post }) => ({
+        ...post,
+        format: getPostFormat({ ...post, settings, image }),
+      })),
       total,
       page,
       limit,

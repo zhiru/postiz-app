@@ -1,3 +1,4 @@
+import { GetMediaLibraryDto } from '@gitroom/nestjs-libraries/dtos/media/get.media.dto';
 import {
   BadRequestException,
   Body,
@@ -267,10 +268,15 @@ export class MediaController {
   getMedia(
     @GetOrgFromRequest() org: Organization,
     @GetProfileFromRequest() profile: Profile | null,
-    @Query('page') page: number,
-    @Query('search') search?: string
+    @Query() query: GetMediaLibraryDto
   ) {
-    return this._mediaService.getMedia(org.id, page, search, profile?.id);
+    return this._mediaService.getMedia(
+      org.id,
+      query.page,
+      query.search,
+      profile?.id,
+      query
+    );
   }
 
   @Get('/video-options')

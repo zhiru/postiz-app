@@ -13,16 +13,24 @@ export const DropFiles: FC<{
   const toaster = useToaster();
 
   const { getRootProps, isDragActive } = useDropzone({
+    noClick: true,
+    noKeyboard: true,
     onDrop: (files) => {
       if (props.disabled) {
-        toaster.show(t('upload_in_progress', 'Upload current in progress, please wait and then try again.'), 'warning');
-        return ;
+        toaster.show(
+          t(
+            'upload_in_progress',
+            'Upload current in progress, please wait and then try again.'
+          ),
+          'warning'
+        );
+        return;
       }
       props.onDrop(files);
     },
   });
   return (
-    <div {...getRootProps()} className={clsx("relative", props.className)}>
+    <div {...getRootProps()} className={clsx('relative', props.className)}>
       {isDragActive && (
         <div className="absolute start-0 top-0 w-full h-full bg-black/90 flex items-center justify-center z-[200] animate-normalFadeIn">
           {t('drag_n_drop_some_files_here', 'Drag n drop some files here')}

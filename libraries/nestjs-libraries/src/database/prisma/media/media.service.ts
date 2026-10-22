@@ -1,3 +1,4 @@
+import { MediaLibraryOptions } from '@gitroom/nestjs-libraries/dtos/media/get.media.dto';
 import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
 import {
   MediaRepository,
@@ -755,8 +756,20 @@ export class MediaService {
    * ANTES do usuário selecionar em massa, senão ele seleciona 20 itens e
    * descobre no final que metade está travada.
    */
-  async getMedia(org: string, page: number, search?: string, profileId?: string) {
-    const media = await this._mediaRepository.getMedia(org, page, search, profileId);
+  async getMedia(
+    org: string,
+    page: number,
+    search?: string,
+    profileId?: string,
+    options: MediaLibraryOptions = {}
+  ) {
+    const media = await this._mediaRepository.getMedia(
+      org,
+      page,
+      search,
+      profileId,
+      options
+    );
     const ids = media.results.map((item) => item.id);
     const pendingPosts = await this._mediaRepository.findPendingPostsUsingMedia(
       org,

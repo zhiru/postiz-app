@@ -558,7 +558,8 @@ export class PostsService {
         orgId,
         query,
         false,
-        profileId
+        profileId,
+        true
       ),
     });
   }

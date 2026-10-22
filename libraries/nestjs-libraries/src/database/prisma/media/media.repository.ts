@@ -1,3 +1,5 @@
+import { VIDEO_EXTENSIONS } from '@gitroom/helpers/utils/has.extension';
+import { MediaLibraryOptions } from '@gitroom/nestjs-libraries/dtos/media/get.media.dto';
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
 import { Prisma, State } from '@prisma/client';
@@ -27,7 +29,13 @@ export class MediaRepository {
     private _post: PrismaRepository<'post'>
   ) {}
 
-  saveFile(org: string, fileName: string, filePath: string, originalName?: string, profileId?: string) {
+  saveFile(
+    org: string,
+    fileName: string,
+    filePath: string,
+    originalName?: string,
+    profileId?: string
+  ) {
     return this._media.model.media.create({
       data: {
         organization: {
@@ -229,7 +237,11 @@ export class MediaRepository {
     });
   }
 
-  saveMediaInformation(org: string, data: SaveMediaInformationDto, profileId?: string) {
+  saveMediaInformation(
+    org: string,
+    data: SaveMediaInformationDto,
+    profileId?: string
+  ) {
     return this._media.model.media.update({
       where: {
         id: data.id,
@@ -253,8 +265,28 @@ export class MediaRepository {
     });
   }
 
-  async getMedia(org: string, page: number, search?: string, profileId?: string) {
-    const pageNum = (page || 1) - 1;
+  async getMedia(
+    org: string,
+    page: number,
+    search?: string,
+    profileId?: string,
+    options: MediaLibraryOptions = {}
+  ) {
+    const pageNum = Math.max(0, (page || 1) - 1);
+    const limit = options.limit ?? 18;
+    const videos = {
+      OR: VIDEO_EXTENSIONS.map((extension) => ({
+        name: { endsWith: `.${extension}`, mode: 'insensitive' as const },
+      })),
+    };
+    const typeFilter =
+      options.type === 'video'
+        ? [videos]
+        : options.type === 'image'
+        ? [{ NOT: videos }]
+        : [];
+    const direction =
+      options.sort === 'oldest' ? ('asc' as const) : ('desc' as const);
     const trimmedSearch = search?.trim();
     const searchFilter = trimmedSearch
       ? {
@@ -274,9 +306,11 @@ export class MediaRepository {
         status: { not: 'processing' },
         ...searchFilter,
         ...profileFilter,
+        ...(typeFilter.length ? { AND: typeFilter } : {}),
       },
     };
-    const pages = Math.ceil((await this._media.model.media.count(query)) / 18);
+    const total = await this._media.model.media.count(query);
+    const pages = Math.ceil(total / limit);
     const results = await this._media.model.media.findMany({
       where: {
         organizationId: org,
@@ -285,10 +319,12 @@ export class MediaRepository {
         status: { not: 'processing' },
         ...searchFilter,
         ...profileFilter,
+        ...(typeFilter.length ? { AND: typeFilter } : {}),
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      orderBy:
+        options.sort === 'name'
+          ? [{ originalName: 'asc' }, { id: 'asc' }]
+          : [{ createdAt: direction }, { id: direction }],
       select: {
         id: true,
         name: true,
@@ -308,12 +344,13 @@ export class MediaRepository {
         },
         createdAt: true,
       },
-      skip: pageNum * 18,
-      take: 18,
+      skip: pageNum * limit,
+      take: limit,
     });
 
     return {
       pages,
+      total,
       results: results.map(({ _count, ...media }) => ({
         ...media,
         usedAsAvatar:

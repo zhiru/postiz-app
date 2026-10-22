@@ -91,13 +91,53 @@ describe('MediaRepository', () => {
       ]);
 
       expect(result).toEqual([
-        { id: 'm-1', name: 'a.png', path: 'p1', thumbnail: null, usedAsAvatar: false },
-        { id: 'm-2', name: 'b.png', path: 'p2', thumbnail: null, usedAsAvatar: true },
+        {
+          id: 'm-1',
+          name: 'a.png',
+          path: 'p1',
+          thumbnail: null,
+          usedAsAvatar: false,
+        },
+        {
+          id: 'm-2',
+          name: 'b.png',
+          path: 'p2',
+          thumbnail: null,
+          usedAsAvatar: true,
+        },
       ]);
     });
   });
 
   describe('getMedia', () => {
+    it('filters and counts before pagination while preserving profile visibility', async () => {
+      const { repository, mediaMock } = buildRepository();
+      (mediaMock.model.media as any).count.mockResolvedValue(73);
+      (mediaMock.model.media as any).findMany.mockResolvedValue([]);
+      const result = await repository.getMedia(
+        'org-1',
+        2,
+        ' summit ',
+        'prof-1',
+        { limit: 24, type: 'video', sort: 'oldest' }
+      );
+      const list = (mediaMock.model.media as any).findMany.mock.calls[0][0];
+      const count = (mediaMock.model.media as any).count.mock.calls[0][0];
+      expect(list.take).toBe(24);
+      expect(list.skip).toBe(24);
+      expect(list.where.AND).toEqual(count.where.AND);
+      expect(list.where.OR).toEqual([
+        { profileId: 'prof-1' },
+        { profileId: null },
+      ]);
+      expect(list.where.originalName).toEqual({
+        contains: 'summit',
+        mode: 'insensitive',
+      });
+      expect(list.orderBy).toEqual([{ createdAt: 'asc' }, { id: 'asc' }]);
+      expect(result).toMatchObject({ total: 73, pages: 4 });
+    });
+
     it('conta apenas midia viva para nao gerar paginas vazias apos exclusao', async () => {
       const { repository, mediaMock } = buildRepository();
       (mediaMock.model.media as any).count.mockResolvedValue(0);

@@ -129,7 +129,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                     )}
                     <div
                       className={clsx(
-                        'flex flex-col bg-newBgColorInner w-[112px] rounded-[12px] mobile:fixed mobile:top-0 mobile:bottom-0 mobile:start-0 mobile:z-[491] mobile:rounded-none mobile:overflow-y-auto mobile:overflow-x-hidden',
+                        'flex flex-col bg-newBgColorInner w-[112px] shrink-0 rounded-[12px] mobile:fixed mobile:top-0 mobile:bottom-0 mobile:start-0 mobile:z-[491] mobile:rounded-none mobile:overflow-y-auto mobile:overflow-x-hidden',
                         !menuOpen && 'mobile:hidden'
                       )}
                       onClick={() => setMenuOpen(false)}

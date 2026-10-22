@@ -1,3 +1,5 @@
+import { isVideo } from './has.extension';
+
 // Key mappings for minifying post list/calendar responses to reduce payload size.
 // Both backend (minify) and frontend (expand) import from here.
 
@@ -155,4 +157,37 @@ export function expandPosts(data: any) {
   const expanded = mapKeys(data, topReversed);
   expanded.posts = (expanded.posts || []).map(expandPostItem);
   return expanded;
+}
+
+export type PostFormat = 'post' | 'story' | 'video' | 'carousel';
+
+// Shared display classification; it never changes publishing settings.
+export function getPostFormat(post: {
+  settings?: string | null;
+  image?: string | null;
+  releaseURL?: string | null;
+}): PostFormat {
+  let settings: Record<string, unknown> = {};
+  let media: { path?: string }[] = [];
+  try {
+    settings = JSON.parse(post.settings || '{}') || {};
+  } catch {}
+  try {
+    const parsed = JSON.parse(post.image || '[]');
+    if (Array.isArray(parsed)) media = parsed;
+  } catch {}
+  const kind = String(
+    settings.post_type || settings.media_type || ''
+  ).toLowerCase();
+  let path = '';
+  try {
+    path = new URL(post.releaseURL || '').pathname;
+  } catch {}
+  if (['story', 'stories'].includes(kind) || /^\/stories\//i.test(path))
+    return 'story';
+  if (['reel', 'reels', 'video'].includes(kind) || /^\/reels?\//i.test(path))
+    return 'video';
+  if (media.length > 1) return 'carousel';
+  if (media.length === 1 && isVideo(media[0]?.path)) return 'video';
+  return 'post';
 }

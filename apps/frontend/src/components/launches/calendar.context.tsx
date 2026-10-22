@@ -25,11 +25,21 @@ import {
   newDayjs,
 } from '@gitroom/frontend/components/layout/set.timezone';
 import { timer } from '@gitroom/helpers/utils/timer';
-import { expandPostsList, expandPosts } from '@gitroom/helpers/utils/posts.list.minify';
+import {
+  PostFormat,
+  expandPostsList,
+  expandPosts,
+} from '@gitroom/helpers/utils/posts.list.minify';
 extend(isoWeek);
 extend(weekOfYear);
 
-export type ListStateFilter = 'all' | 'scheduled' | 'draft' | 'published';
+export type ListStateFilter =
+  | 'all'
+  | 'scheduled'
+  | 'draft'
+  | 'published'
+  | 'overdue'
+  | 'error';
 
 export const CalendarContext = createContext({
   startDate: newDayjs().startOf('isoWeek').format('YYYY-MM-DD'),
@@ -82,6 +92,15 @@ export const CalendarContext = createContext({
     }
   >,
   listPage: 0,
+  listTotal: 0,
+  listPageSize: 20,
+  setListPageSize: (size: number) => {},
+  postFormat: 'all' as PostFormat | 'all',
+  setPostFormat: (format: PostFormat | 'all') => {},
+  postSearch: '',
+  setPostSearch: (search: string) => {},
+  focusRequest: 0,
+  focusCurrentTime: () => {},
   listTotalPages: 0,
   setListPage: (page: number) => {
     /** empty **/
@@ -187,6 +206,35 @@ export const CalendarWeekProvider: FC<{
 
   // List view state
   const [listPage, setListPage] = useState(0);
+  const [listPageSizeSaved, saveListPageSize] = useCookie(
+    'posts-page-size',
+    '20'
+  );
+  const listPageSize = [10, 20, 50, 100].includes(Number(listPageSizeSaved))
+    ? Number(listPageSizeSaved)
+    : 20;
+  const setListPageSize = useCallback(
+    (size: number) => {
+      saveListPageSize(String(size));
+      setListPage(0);
+    },
+    [saveListPageSize]
+  );
+  const [postFormat, setPostFormatRaw] = useState<PostFormat | 'all'>('all');
+  const setPostFormat = useCallback((format: PostFormat | 'all') => {
+    setPostFormatRaw(format);
+    setListPage(0);
+  }, []);
+  const [postSearch, setPostSearchRaw] = useState('');
+  const setPostSearch = useCallback((search: string) => {
+    setPostSearchRaw(search);
+    setListPage(0);
+  }, []);
+  const [focusRequest, setFocusRequest] = useState(0);
+  const focusCurrentTime = useCallback(
+    () => setFocusRequest((request) => request + 1),
+    []
+  );
   const [listState, setListStateRaw] = useState<ListStateFilter>('all');
   const setListState = useCallback((next: ListStateFilter) => {
     setListStateRaw(next);
@@ -203,9 +251,9 @@ export const CalendarWeekProvider: FC<{
       ? { startDate: initStartDate, endDate: initEndDate }
       : getDateRange(display);
 
-  const [selectedChannels, setSelectedChannelsRaw] = useState<
-    string[] | null
-  >(null);
+  const [selectedChannels, setSelectedChannelsRaw] = useState<string[] | null>(
+    null
+  );
   const setSelectedChannels = useCallback((next: string[] | null) => {
     setSelectedChannelsRaw(next);
     setListPage(0);
@@ -248,12 +296,22 @@ export const CalendarWeekProvider: FC<{
   const listParams = useMemo(() => {
     return new URLSearchParams({
       page: listPage.toString(),
-      limit: '100',
+      limit: String(listPageSize),
+      format: postFormat,
+      search: postSearch,
       customer: filters?.customer?.toString() || '',
       state: listState,
       ...(selectedChannels ? { integrations: selectedChannels.join(',') } : {}),
     }).toString();
-  }, [listPage, filters.customer, listState, selectedChannels]);
+  }, [
+    listPage,
+    listPageSize,
+    filters.customer,
+    listState,
+    selectedChannels,
+    postFormat,
+    postSearch,
+  ]);
 
   const loadListData = useCallback(async () => {
     const response = await fetch(`/posts/list?${listParams}`);
@@ -265,16 +323,12 @@ export const CalendarWeekProvider: FC<{
     data: calendarData,
     isLoading: calendarIsLoading,
     mutate: mutateCalendar,
-  } = useSWR(
-    filters.display !== 'list' ? `/posts-${params}` : null,
-    loadData,
-    {
-      refreshInterval: 60000,
-      refreshWhenOffline: false,
-      refreshWhenHidden: false,
-      revalidateOnFocus: false,
-    }
-  );
+  } = useSWR(filters.display !== 'list' ? `/posts-${params}` : null, loadData, {
+    refreshInterval: 60000,
+    refreshWhenOffline: false,
+    refreshWhenHidden: false,
+    revalidateOnFocus: false,
+  });
 
   // SWR for list view
   const {
@@ -346,19 +400,41 @@ export const CalendarWeekProvider: FC<{
 
   const filterByChannels = useCallback(
     (list: any[]) =>
-      selectedChannels
-        ? list.filter((p) => selectedChannels.includes(p.integration.id))
-        : list,
-    [selectedChannels]
+      list.filter(
+        (post) =>
+          (!selectedChannels ||
+            selectedChannels.includes(post.integration.id)) &&
+          (postFormat === 'all' || post.format === postFormat) &&
+          (!postSearch.trim() ||
+            post.content
+              ?.toLocaleLowerCase()
+              .includes(postSearch.trim().toLocaleLowerCase())) &&
+          (listState === 'all' ||
+            (listState === 'scheduled' && post.state === 'QUEUE') ||
+            (listState === 'draft' && post.state === 'DRAFT') ||
+            (listState === 'published' && post.state === 'PUBLISHED') ||
+            (listState === 'error' && post.state === 'ERROR') ||
+            (listState === 'overdue' &&
+              post.state === 'DRAFT' &&
+              fromUtc(post.publishDate).isBefore(newDayjs())))
+      ),
+    [selectedChannels, postFormat, postSearch, listState]
   );
 
   const posts = useMemo(() => calendarData?.posts || [], [calendarData?.posts]);
-  const comments = useMemo(() => calendarData?.comments || [], [calendarData?.comments]);
+  const comments = useMemo(
+    () => calendarData?.comments || [],
+    [calendarData?.comments]
+  );
 
   // List view data
   const listPosts = useMemo(() => listData?.posts || [], [listData?.posts]);
   const listTotal = listData?.total || 0;
-  const listTotalPages = Math.ceil(listTotal / 100);
+  const listTotalPages = Math.ceil(listTotal / listPageSize);
+  useEffect(() => {
+    if (listData && listPage >= Math.max(1, listTotalPages))
+      setListPage(Math.max(0, listTotalPages - 1));
+  }, [listData, listPage, listTotalPages]);
 
   const changeDate = useCallback(
     (id: string, date: dayjs.Dayjs) => {
@@ -390,7 +466,8 @@ export const CalendarWeekProvider: FC<{
   }, [mutateCalendar, mutateList]);
 
   // Determine loading state based on current view
-  const loading = filters.display === 'list' ? listIsLoading : calendarIsLoading;
+  const loading =
+    filters.display === 'list' ? listIsLoading : calendarIsLoading;
 
   // one clock for every calendar cell, instead of a timer per cell
   const currentHour = useNow('hour');
@@ -423,6 +500,15 @@ export const CalendarWeekProvider: FC<{
         // List view specific
         listPosts,
         listPage,
+        listTotal,
+        listPageSize,
+        setListPageSize,
+        postFormat,
+        setPostFormat,
+        postSearch,
+        setPostSearch,
+        focusRequest,
+        focusCurrentTime,
         listTotalPages,
         setListPage,
         listState,

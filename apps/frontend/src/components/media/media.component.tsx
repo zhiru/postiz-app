@@ -14,7 +14,7 @@ import React, {
 import { Button } from '@gitroom/react/form/button';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
-import { hasExtension } from '@gitroom/helpers/utils/has.extension';
+import { hasExtension, isVideo } from '@gitroom/helpers/utils/has.extension';
 import { Media } from '@prisma/client';
 import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
 import { useSettings } from '@gitroom/frontend/components/launches/helpers/use.values';
@@ -39,8 +39,6 @@ import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { ThirdPartyMediaLibrary } from '@gitroom/frontend/components/third-parties/third-party.media-library';
 import { Dashboard } from '@uppy/react';
 import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
   PlusIcon,
   DeleteCircleIcon,
   CloseCircleIcon,
@@ -58,6 +56,9 @@ import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { useShallow } from 'zustand/react/shallow';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 import { useDebounce } from 'use-debounce';
+import useCookie from 'react-use-cookie';
+import { Pagination } from '@gitroom/frontend/components/ui/pagination';
+export { Pagination } from '@gitroom/frontend/components/ui/pagination';
 const Polonto = dynamic(
   () => import('@gitroom/frontend/components/launches/polonto')
 );
@@ -67,122 +68,6 @@ export const mediaLibrarySize = () =>
   window.matchMedia('(max-width: 1025px)').matches
     ? '100%'
     : 'calc(100% - 80px)';
-export const Pagination: FC<{
-  current: number;
-  totalPages: number;
-  setPage: (num: number) => void;
-}> = (props) => {
-  const t = useT();
-
-  const { current, totalPages, setPage } = props;
-
-  const paginationItems = useMemo(() => {
-    // Convert to 1-based for algorithm (current is 0-based)
-    const c = current + 1;
-    const m = totalPages;
-
-    // If total pages <= 10, show all pages
-    if (m <= 10) {
-      return Array.from({ length: m }, (_, i) => i + 1);
-    }
-
-    const delta = 3;
-    const left = c - delta;
-    const right = c + delta + 1;
-    const range: number[] = [];
-    const rangeWithDots: (number | '...')[] = [];
-    let l: number | undefined;
-
-    // Build the range of pages to show
-    for (let i = 1; i <= m; i++) {
-      if (i === 1 || i === m || (i >= left && i < right)) {
-        range.push(i);
-      }
-    }
-
-    // Add dots where there are gaps
-    for (const i of range) {
-      if (l !== undefined) {
-        if (i - l === 2) {
-          rangeWithDots.push(l + 1);
-        } else if (i - l !== 1) {
-          rangeWithDots.push('...');
-        }
-      }
-      rangeWithDots.push(i);
-      l = i;
-    }
-
-    // Limit to maximum 10 items by trimming pages near edges if needed
-    while (rangeWithDots.length > 10) {
-      const currentIndex = rangeWithDots.findIndex((item) => item === c);
-      if (currentIndex !== -1 && currentIndex > rangeWithDots.length / 2) {
-        // Current is in second half, remove one item from start side
-        rangeWithDots.splice(2, 1);
-      } else {
-        // Current is in first half, remove one item from end side
-        rangeWithDots.splice(-3, 1);
-      }
-    }
-
-    return rangeWithDots;
-  }, [current, totalPages]);
-
-  return (
-    <ul className="flex flex-row flex-wrap items-center gap-1 justify-center mt-[15px]">
-      <li className={clsx(current === 0 && 'opacity-20 pointer-events-none')}>
-        <div
-          className="cursor-pointer inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 h-10 px-4 py-2 gap-1 ps-2.5 text-gray-400 hover:text-white border-[#1F1F1F] hover:bg-forth"
-          aria-label="Go to previous page"
-          onClick={() => setPage(current - 1)}
-        >
-          <ChevronLeftIcon className="lucide lucide-chevron-left h-4 w-4" />
-          <span className="mobile:hidden">{t('previous', 'Previous')}</span>
-        </div>
-      </li>
-      {paginationItems.map((item, index) => (
-        // phones show "2 / 6" instead of the page numbers
-        <li key={index} className="mobile:hidden">
-          {item === '...' ? (
-            <span className="inline-flex items-center justify-center h-10 w-10 text-textColor select-none">
-              ...
-            </span>
-          ) : (
-            <div
-              aria-current="page"
-              onClick={() => setPage(item - 1)}
-              className={clsx(
-                'cursor-pointer inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border hover:bg-forth h-10 w-10 hover:text-white border-newBorder',
-                current === item - 1
-                  ? 'bg-forth !text-white'
-                  : 'text-textColor hover:text-white'
-              )}
-            >
-              {item}
-            </div>
-          )}
-        </li>
-      ))}
-      <li className="hidden mobile:flex h-10 items-center px-[8px] text-[14px] text-textColor">
-        {current + 1} / {totalPages}
-      </li>
-      <li
-        className={clsx(
-          current + 1 === totalPages && 'opacity-20 pointer-events-none'
-        )}
-      >
-        <a
-          className="text-textColor hover:text-white group cursor-pointer inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 h-10 px-4 py-2 gap-1 pe-2.5 text-gray-400 border-[#1F1F1F] hover:bg-forth"
-          aria-label="Go to next page"
-          onClick={() => setPage(current + 1)}
-        >
-          <span className="mobile:hidden">{t('next', 'Next')}</span>
-          <ChevronRightIcon className="lucide lucide-chevron-right h-4 w-4" />
-        </a>
-      </li>
-    </ul>
-  );
-};
 export const ShowMediaBoxModal: FC = () => {
   const modals = useModals();
   const t = useT();
@@ -223,6 +108,22 @@ export const MediaBox: FC<{
   closeModal: () => void;
 }> = ({ type, standalone, setMedia }) => {
   const [page, setPage] = useState(0);
+  const [pageSizeSaved, savePageSize] = useCookie('media-page-size', '24');
+  const pageSize = [12, 24, 48, 96].includes(Number(pageSizeSaved))
+    ? Number(pageSizeSaved)
+    : 24;
+  const [mediaType, setMediaType] = useState<'all' | 'image' | 'video'>(
+    type || 'all'
+  );
+  const [sort, setSort] = useState('newest');
+  const gridRef = useRef<HTMLDivElement>(null);
+  const changePageSize = (size: number) => {
+    savePageSize(String(size));
+    setPage(0);
+  };
+  useEffect(() => {
+    gridRef.current?.scrollTo({ top: 0 });
+  }, [page]);
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebounce(search, 300);
   const fetch = useFetch();
@@ -230,18 +131,36 @@ export const MediaBox: FC<{
   const toaster = useToaster();
   useEffect(() => {
     setPage(0);
-  }, [debouncedSearch]);
+  }, [debouncedSearch, mediaType, sort, pageSize]);
   const loadMedia = useCallback(async () => {
-    const params = new URLSearchParams({ page: String(page + 1) });
+    const params = new URLSearchParams({
+      page: String(page + 1),
+      limit: String(pageSize),
+      type: type || mediaType,
+      sort,
+    });
     if (debouncedSearch.trim()) {
       params.set('search', debouncedSearch.trim());
     }
-    return (await fetch(`/media?${params.toString()}`)).json();
-  }, [page, debouncedSearch]);
-  const { data, mutate, isLoading } = useSWR(
-    `get-media-${page}-${debouncedSearch}`,
+    const response = await fetch(`/media?${params.toString()}`);
+    if (!response.ok) throw new Error('Media request failed');
+    return response.json();
+  }, [page, pageSize, debouncedSearch, type, mediaType, sort, fetch]);
+  const {
+    data,
+    mutate,
+    isLoading,
+    error: mediaError,
+  } = useSWR(
+    `get-media-${page}-${pageSize}-${
+      type || mediaType
+    }-${sort}-${debouncedSearch}`,
     loadMedia
   );
+  useEffect(() => {
+    if (data)
+      setPage((current) => Math.min(current, Math.max(0, data.pages - 1)));
+  }, [data]);
   const [selected, setSelected] = useState([]);
   // Selecao de exclusao em massa — independente de `selected`, que serve para
   // inserir midia no post.
@@ -385,7 +304,7 @@ export const MediaBox: FC<{
         top: 10,
         children: (
           <div className="w-full h-full p-[50px]">
-            {hasExtension(media.path, 'mp4') ? (
+            {isVideo(media.path) ? (
               <VideoFrame
                 autoplay={true}
                 url={mediaDirectory.set(media.path)}
@@ -408,21 +327,8 @@ export const MediaBox: FC<{
 
   // A lista visivel ja filtrada pelo tipo — a barra de selecao em massa
   // precisa dela para "selecionar todos desta pagina".
-  const mediaList = useMemo(
-    () =>
-      (data?.results || []).filter((f: any) => {
-        if (type === 'video') {
-          return f.path.indexOf('mp4') > -1;
-        } else if (type === 'image') {
-          return f.path.indexOf('mp4') === -1;
-        }
-        return true;
-      }),
-    [data, type]
-  );
+  const mediaList = useMemo(() => data?.results || [], [data?.results]);
 
-  // `inUse` vem do backend: midia usada em post que ainda vai publicar (ou
-  // como avatar/logo) nao entra na selecao de exclusao.
   const deletableMedia = useMemo(
     () => mediaList.filter((media: any) => !media.inUse),
     [mediaList]
@@ -585,31 +491,66 @@ export const MediaBox: FC<{
   return (
     <DropFiles
       disabled={loading}
-      className="flex flex-col flex-1"
+      className="flex flex-col flex-1 min-h-0"
       onDrop={dragAndDrop}
     >
-      <div className="flex flex-col flex-1">
-        <div
-          className={clsx(
-            'flex items-center gap-[12px] mobile:flex-wrap',
-            !isLoading && !data?.results?.length && !debouncedSearch && 'hidden'
-          )}
-        >
+      <div className="flex flex-col flex-1 min-h-0">
+        <div className={clsx('flex items-center gap-[12px] mobile:flex-wrap')}>
           <div className="flex-1 mobile:basis-full">
             <input
-              type="text"
+              type="search"
+              maxLength={200}
+              aria-label={t('search_media_by_name', 'Search by file name')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t('search_media_by_name', 'Search by file name')}
               className="w-full h-[44px] px-[14px] rounded-[8px] bg-newBgColorInner border border-newColColor text-[14px] outline-none focus:border-[#612BD3]"
             />
           </div>
+          {!type && (
+            <label className="flex items-center gap-2 text-[13px] text-textItemBlur">
+              <span className="sr-only">{t('media_type', 'Media type')}</span>
+              <select
+                aria-label={t('media_type', 'Media type')}
+                value={mediaType}
+                onChange={(e) => {
+                  setPage(0);
+                  setMediaType(e.target.value as typeof mediaType);
+                }}
+                className="h-[44px] px-3 rounded-[8px] border border-newTableBorder bg-newBgColorInner text-textColor focus-visible:ring-2 focus-visible:ring-btnPrimary"
+              >
+                <option value="all">{t('all_media', 'All media')}</option>
+                <option value="image">{t('images', 'Images')}</option>
+                <option value="video">{t('videos', 'Videos')}</option>
+              </select>
+            </label>
+          )}
+          <select
+            aria-label={t('sort_media', 'Sort media')}
+            value={sort}
+            onChange={(e) => {
+              setPage(0);
+              setSort(e.target.value);
+            }}
+            className="h-[44px] px-3 rounded-[8px] border border-newTableBorder bg-newBgColorInner text-textColor focus-visible:ring-2 focus-visible:ring-btnPrimary"
+          >
+            <option value="newest">{t('newest_first', 'Newest first')}</option>
+            <option value="oldest">{t('oldest_first', 'Oldest first')}</option>
+            <option value="name">{t('file_name', 'File name')}</option>
+          </select>
           <input
             type="file"
             ref={uploaderRef}
             onChange={addToUpload}
             className="hidden"
             multiple={true}
+            accept={
+              type === 'image'
+                ? 'image/*'
+                : type === 'video'
+                ? 'video/mp4'
+                : 'image/*,video/mp4'
+            }
           />
           <div
             className={clsx('flex gap-[8px]', !standalone && 'mobile:hidden')}
@@ -635,6 +576,23 @@ export const MediaBox: FC<{
             </div>
           )}
         </div>
+        <p className="mt-3 text-[12px] text-textItemBlur">
+          {t(
+            'media_drop_auto_upload',
+            'Drag images or videos here to upload automatically. Maximum 1 GB per upload.'
+          )}
+        </p>
+        <Pagination
+          current={page}
+          totalPages={data?.pages || 1}
+          total={data?.total || 0}
+          pageSize={pageSize}
+          setPageSize={changePageSize}
+          pageSizes={[12, 24, 48, 96]}
+          setPage={setPage}
+          loading={isLoading}
+          position="top"
+        />
         {standalone && !isLoading && !!mediaList.length && (
           <div className="flex flex-wrap items-center gap-[12px] mt-[10px]">
             <button
@@ -682,17 +640,20 @@ export const MediaBox: FC<{
               hideProgressAfterFinish={true}
             />
           </div>
-          <div className="w-full h-[46px] uppyChange" />
+          {(loading || uploadInfo) && (
+            <div className="w-full h-[46px] uppyChange" />
+          )}
         </div>
         <div
           className={clsx(
-            'flex-1 relative',
+            'flex-1 min-h-[180px] relative',
             !isLoading &&
               !data?.results?.length &&
               'bg-newTextColor/[0.02] rounded-[12px]'
           )}
         >
           <div
+            ref={gridRef}
             className={clsx(
               'absolute -left-[3px] -top-[3px] withp3 h-full overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner mobile:-left-[6px] mobile:-top-[6px] mobile:!w-[calc(100%+12px)] mobile:!h-[calc(100%+12px)]',
               !isLoading &&
@@ -700,7 +661,22 @@ export const MediaBox: FC<{
                 'flex justify-center items-center gap-[20px] flex-col'
             )}
           >
-            {!isLoading && !data?.results?.length && (
+            {mediaError && (
+              <div role="alert" className="p-4 text-red-400 text-center">
+                {t(
+                  'media_load_failed',
+                  'Could not load media. Please try again.'
+                )}
+                <button
+                  type="button"
+                  className="block mx-auto mt-3 underline focus-visible:ring-2 focus-visible:ring-btnPrimary"
+                  onClick={() => mutate()}
+                >
+                  {t('try_again', 'Try again')}
+                </button>
+              </div>
+            )}
+            {!isLoading && !mediaError && !data?.results?.length && (
               <>
                 <NoMediaIcon />
                 <div className="text-[20px] font-[600]">
@@ -745,14 +721,14 @@ export const MediaBox: FC<{
             {mediaList.map((media: any) => (
               <div
                 className={clsx(
-                  'group px-[3px] py-[3px] float-left rounded-[6px] w8-max aspect-square',
+                  'group p-[5px] float-left rounded-[10px] w-1/6 max-[1500px]:w-1/5 max-[1200px]:w-1/4 tablet:w-1/3 mobile:!w-1/2 aspect-square',
                   (!standalone || !media.inUse) && 'cursor-pointer'
                 )}
                 key={media.id}
               >
                 <div
                   className={clsx(
-                    'w-full h-full rounded-[6px] border-[4px] relative',
+                    'w-full h-full rounded-[10px] border-[2px] relative focus-visible:ring-2 focus-visible:ring-btnPrimary',
                     !!selected.find((p) => p.id === media.id)
                       ? 'border-[#612BD3]'
                       : standalone && selectedToDelete.includes(media.id)
@@ -760,6 +736,23 @@ export const MediaBox: FC<{
                       : 'border-transparent',
                     standalone && media.inUse && 'opacity-60'
                   )}
+                  role="button"
+                  tabIndex={standalone && media.inUse ? -1 : 0}
+                  aria-label={media.originalName || media.name}
+                  aria-pressed={
+                    standalone
+                      ? selectedToDelete.includes(media.id)
+                      : selected.some((item: any) => item.id === media.id)
+                  }
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      standalone
+                        ? toggleDeleteSelection(media)
+                        : addRemoveSelected(media)();
+                    }
+                  }}
                   onClick={
                     standalone
                       ? () => toggleDeleteSelection(media)
@@ -805,11 +798,10 @@ export const MediaBox: FC<{
                   )}
                   <div
                     className={clsx(
-                      'absolute bottom-[10px] start-[10px] end-[10px] z-[100] truncate text-end mobile:text-[12px]',
-                      !standalone && 'mobile:hidden'
+                      'absolute bottom-0 inset-x-0 z-[100] truncate bg-black/75 px-2 py-1.5 text-start text-[11px] text-white'
                     )}
                   >
-                    {media.originalName}
+                    {media.originalName || media.name}
                   </div>
                   <div className="w-full h-full rounded-[6px] overflow-hidden relative">
                     <div className="absolute z-[20] left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
@@ -834,7 +826,7 @@ export const MediaBox: FC<{
                         </svg>
                       </div>
                     </div>
-                    {hasExtension(media.path, 'mp4') ? (
+                    {isVideo(media.path) ? (
                       <VideoFrame url={mediaDirectory.set(media.path)} />
                     ) : (
                       <img
@@ -842,7 +834,7 @@ export const MediaBox: FC<{
                         height="100%"
                         className="w-full h-full object-cover"
                         src={mediaDirectory.set(media.path)}
-                        alt="media"
+                        alt={media.originalName || media.name}
                       />
                     )}
                   </div>
@@ -851,13 +843,16 @@ export const MediaBox: FC<{
             ))}
           </div>
         </div>
-        {(data?.pages || 0) > 1 && (
-          <Pagination
-            current={page}
-            totalPages={data?.pages}
-            setPage={setPage}
-          />
-        )}
+        <Pagination
+          current={page}
+          totalPages={data?.pages || 1}
+          total={data?.total || 0}
+          pageSize={pageSize}
+          setPageSize={changePageSize}
+          pageSizes={[12, 24, 48, 96]}
+          setPage={setPage}
+          loading={isLoading}
+        />
         {!standalone && (
           <div className="flex justify-end mt-[32px] gap-[8px] mobile:flex-col mobile:mt-[16px] mobile:gap-[12px]">
             {!isLoading && !!data?.results?.length && (
