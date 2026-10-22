@@ -19,6 +19,8 @@ const config: Config = {
     ],
   },
   moduleNameMapper: {
+    '^@gitroom/react/(.*)$':
+      '<rootDir>/../../libraries/react-shared-libraries/src/$1',
     '^@gitroom/frontend/(.*)$': '<rootDir>/src/$1',
     '^@gitroom/helpers/(.*)$': '<rootDir>/../../libraries/helpers/src/$1',
   },

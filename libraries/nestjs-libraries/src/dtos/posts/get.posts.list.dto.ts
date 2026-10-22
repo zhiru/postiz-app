@@ -8,8 +8,15 @@ import {
   IsArray,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
+import type { PostFormat } from '@gitroom/helpers/utils/posts.list.minify';
 
-export type PostListStateFilter = 'all' | 'scheduled' | 'draft' | 'published';
+export type PostListStateFilter =
+  | 'all'
+  | 'scheduled'
+  | 'draft'
+  | 'published'
+  | 'overdue'
+  | 'error';
 
 export class GetPostsListDto {
   @IsOptional()
@@ -36,6 +43,14 @@ export class GetPostsListDto {
   integrations?: string[];
 
   @IsOptional()
-  @IsIn(['all', 'scheduled', 'draft', 'published'])
+  @IsIn(['all', 'scheduled', 'draft', 'published', 'overdue', 'error'])
   state?: PostListStateFilter = 'all';
+
+  @IsOptional()
+  @IsIn(['all', 'post', 'story', 'video', 'carousel'])
+  format?: PostFormat | 'all' = 'all';
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }

@@ -5,6 +5,9 @@ import React, {
   Fragment,
   memo,
   useCallback,
+  useEffect,
+  useRef,
+  RefObject,
   useMemo,
   useState,
 } from 'react';
@@ -68,6 +71,7 @@ import {
   newDayjs,
 } from '@gitroom/frontend/components/layout/set.timezone';
 import { Button } from '@gitroom/react/form/button';
+import { Pagination } from '@gitroom/frontend/components/ui/pagination';
 import { ChevronUpIcon } from '@gitroom/frontend/components/ui/icons';
 
 // Extend dayjs with necessary plugins
@@ -139,6 +143,7 @@ const WeekNowLine: FC<{ days: dayjs.Dayjs[] }> = ({ days }) => {
       {days.map((day, index) => (
         <div
           key={day.format('YYYY-MM-DD')}
+          data-current-time={index === todayIndex ? 'true' : undefined}
           className="absolute start-0 end-0 h-0 flex items-center z-[15] pointer-events-none"
           style={{ gridColumn: `${index + 2} / ${index + 3}`, gridRow, top }}
         >
@@ -162,6 +167,7 @@ const DayNowLine: FC<{ now: dayjs.Dayjs; className?: string }> = ({
   className,
 }) => (
   <div
+    data-current-time="true"
     className={clsx(
       'flex items-center h-[20px] shrink-0 pointer-events-none',
       className
@@ -172,6 +178,41 @@ const DayNowLine: FC<{ now: dayjs.Dayjs; className?: string }> = ({
     <div className="flex-1 h-[3px] bg-newTableTextFocused" />
   </div>
 );
+
+// Focus once per view/date or explicit Today click, never on a clock tick/refetch.
+const useFocusCurrentTime = (
+  ref: RefObject<HTMLDivElement | null>,
+  date: string,
+  loading: boolean,
+  request: number,
+  ready: number
+) => {
+  const focused = useRef('');
+  useEffect(() => {
+    focused.current = '';
+  }, [date]);
+  useEffect(() => {
+    const key = `${date}:${request}`;
+    if (loading || focused.current === key) return;
+    const frame = requestAnimationFrame(() => {
+      const container = ref.current;
+      const marker = container?.querySelector<HTMLElement>(
+        '[data-current-time="true"]'
+      );
+      if (!container || !marker) return;
+      const top =
+        marker.getBoundingClientRect().top -
+        container.getBoundingClientRect().top +
+        container.scrollTop;
+      container.scrollTo({
+        top: Math.max(0, top - Math.max(90, container.clientHeight * 0.35)),
+        behavior: 'instant',
+      });
+      focused.current = key;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [date, loading, request, ready, ref]);
+};
 
 // Shared hook for post actions (edit, delete, statistics)
 const usePostActions = (onMutate?: () => void) => {
@@ -465,7 +506,9 @@ const DaySlotColumn: FC<{ option: any[]; startDate: string }> = memo(
 
 export const DayView = () => {
   const calendar = useCalendar();
-  const { integrations, posts, postDates, startDate } = calendar;
+  const { integrations, posts, postDates, startDate, loading, focusRequest } =
+    calendar;
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Set dayjs locale based on current language
   const currentLanguage = i18next.resolvedLanguage || 'en';
@@ -529,10 +572,20 @@ export const DayView = () => {
     );
     return upcoming === -1 ? options.length : upcoming;
   }, [options, startDate, now]);
+  useFocusCurrentTime(
+    scrollRef,
+    startDate,
+    loading,
+    focusRequest,
+    options.length
+  );
 
   return (
     <div className="flex flex-col gap-[10px] flex-1 relative">
-      <div className="absolute start-0 top-0 w-full h-full flex flex-col overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
+      <div
+        ref={scrollRef}
+        className="absolute start-0 top-0 w-full h-full flex flex-col overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor"
+      >
         {options.map((option, index) => (
           <Fragment key={option[0].time}>
             {/* sits in the 20px gap under the previous slot */}
@@ -563,7 +616,15 @@ export const DayView = () => {
   );
 };
 export const WeekView = () => {
-  const { startDate, endDate } = useCalendar();
+  const { startDate, endDate, loading, focusRequest, posts } = useCalendar();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useFocusCurrentTime(
+    scrollRef,
+    startDate,
+    loading,
+    focusRequest,
+    posts.length
+  );
   const t = useT();
 
   // Use dayjs to get localized day names
@@ -587,7 +648,10 @@ export const WeekView = () => {
   return (
     <div className="flex flex-col text-textColor flex-1">
       <div className="flex-1 relative">
-        <div className="grid [grid-template-columns:136px_repeat(7,_minmax(0,_1fr))] tablet:[grid-template-columns:72px_repeat(7,_minmax(100px,_1fr))] gap-[4px] rounded-[10px] absolute h-full start-0 top-0 w-full overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
+        <div
+          ref={scrollRef}
+          className="grid [grid-template-columns:90px_repeat(7,_minmax(0,_1fr))] tablet:[grid-template-columns:72px_repeat(7,_minmax(100px,_1fr))] gap-[4px] rounded-[10px] absolute h-full start-0 top-0 w-full overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor"
+        >
           <div className="z-10 bg-newTableHeader flex justify-center items-center flex-col h-[62px] rounded-[8px] sticky top-0"></div>
           {localizedDays.map((day, index) => (
             <div
@@ -719,7 +783,22 @@ export const MonthView = () => {
 export const ListView = () => {
   const t = useT();
   const user = useUser();
-  const { integrations, loading, listPosts, listState } = useCalendar();
+  const {
+    integrations,
+    loading,
+    listPosts,
+    listState,
+    listPage,
+    listPageSize,
+    listTotal,
+    listTotalPages,
+    setListPage,
+    setListPageSize,
+  } = useCalendar();
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: 0 });
+  }, [listPage, listPageSize, listState]);
   const emptyMessage =
     listState === 'scheduled'
       ? t('no_upcoming_posts', 'No upcoming posts scheduled')
@@ -749,7 +828,7 @@ export const ListView = () => {
       }
       groups[dateKey].push(post);
     });
-    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+    return Object.entries(groups);
   }, [listPosts]);
 
   if (loading) {
@@ -769,41 +848,55 @@ export const ListView = () => {
   }
 
   return (
-    <div className="flex flex-col gap-[10px] flex-1 relative">
-      <div className="absolute start-0 top-0 w-full h-full flex flex-col overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
-        {groupedPosts.map(([dateKey, datePosts]) => (
-          <Fragment key={dateKey}>
-            <div className="text-center text-[14px] min-h-[21px] text-textColor font-[500] mt-[10px]">
-              {newDayjs(dateKey).format(
-                isUSCitizen() ? 'dddd, MMMM D, YYYY' : 'dddd, D MMMM YYYY'
-              )}
-            </div>
-            <div className="flex flex-col gap-[10px] mb-[20px] px-[10px]">
-              {datePosts.map((post) => (
-                <CalendarItem
-                  key={post.id}
-                  display="day"
-                  isBeforeNow={false}
-                  date={fromUtc(post.publishDate)}
-                  state={post.state}
-                  statistics={openStatistics(post.id)}
-                  missingRelease={openMissingRelease(post.id)}
-                  openPost={openPost(post)}
-                  editPost={editPost(post, false)}
-                  duplicatePost={editPost(post, true)}
-                  copyDebugJson={
-                    user?.isSuperAdmin ? copyDebugJson(post) : undefined
-                  }
-                  post={post}
-                  integrations={integrations}
-                  deletePost={deletePost(post)}
-                  showTime={true}
-                />
-              ))}
-            </div>
-          </Fragment>
-        ))}
+    <div className="flex flex-col flex-1 min-h-0">
+      <div className="flex-1 relative">
+        <div
+          ref={listRef}
+          className="absolute start-0 top-0 w-full h-full flex flex-col overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor"
+        >
+          {groupedPosts.map(([dateKey, datePosts]) => (
+            <Fragment key={dateKey}>
+              <div className="text-center text-[14px] min-h-[21px] text-textColor font-[500] mt-[10px]">
+                {newDayjs(dateKey).format(
+                  isUSCitizen() ? 'dddd, MMMM D, YYYY' : 'dddd, D MMMM YYYY'
+                )}
+              </div>
+              <div className="flex flex-col gap-[10px] mb-[20px] px-[10px]">
+                {datePosts.map((post) => (
+                  <CalendarItem
+                    key={post.id}
+                    display="day"
+                    isBeforeNow={fromUtc(post.publishDate).isBefore(newDayjs())}
+                    date={fromUtc(post.publishDate)}
+                    state={post.state}
+                    statistics={openStatistics(post.id)}
+                    missingRelease={openMissingRelease(post.id)}
+                    openPost={openPost(post)}
+                    editPost={editPost(post, false)}
+                    duplicatePost={editPost(post, true)}
+                    copyDebugJson={
+                      user?.isSuperAdmin ? copyDebugJson(post) : undefined
+                    }
+                    post={post}
+                    integrations={integrations}
+                    deletePost={deletePost(post)}
+                    showTime={true}
+                  />
+                ))}
+              </div>
+            </Fragment>
+          ))}
+        </div>
       </div>
+      <Pagination
+        current={listPage}
+        totalPages={listTotalPages}
+        total={listTotal}
+        pageSize={listPageSize}
+        setPageSize={setListPageSize}
+        setPage={setListPage}
+        loading={loading}
+      />
     </div>
   );
 };
@@ -1305,6 +1398,8 @@ const CalendarItem: FC<{
     missingRelease,
     openPost,
   } = props;
+  const overdueDraft =
+    state === 'DRAFT' && fromUtc(post.publishDate).isBefore(newDayjs());
   const { disableXAnalytics } = useVariables();
   const modals = useModals();
   // Revisao unificada na pagina /p/:id (post na integra + aprovar/comentar). O
@@ -1350,13 +1445,27 @@ const CalendarItem: FC<{
       className={clsx(
         'w-full flex h-full flex-1 flex-col group',
         'relative',
-        state === 'ERROR' && 'rounded-[10px] ring-2 ring-red-500',
+        (state === 'ERROR' || overdueDraft) &&
+          'rounded-[10px] ring-2 ring-red-500',
         state === 'PUBLISHED' && 'rounded-[10px] ring-2 ring-green-500'
       )}
       style={{
         opacity,
       }}
     >
+      {overdueDraft && (
+        <span
+          role="img"
+          aria-label={t('overdue_draft', 'Not published')}
+          title={t(
+            'overdue_draft_help',
+            'This draft is past its date. Edit and reschedule it to publish.'
+          )}
+          className="absolute -top-[6px] -start-[6px] z-20 w-[20px] h-[20px] rounded-full bg-red-500 flex items-center justify-center text-white text-[14px] font-bold"
+        >
+          ×
+        </span>
+      )}
       {state === 'ERROR' && (
         <div
           className={clsx(
@@ -1548,7 +1657,7 @@ const CalendarItem: FC<{
           'relative',
           display === 'month' &&
             'mobile:p-[4px] mobile:rounded-[10px] mobile:justify-center',
-          isBeforeNow && '!grayscale'
+          isBeforeNow && state === 'PUBLISHED' && '!grayscale'
         )}
       >
         <div className={clsx('relative min-w-[20px]')}>
@@ -1585,7 +1694,18 @@ const CalendarItem: FC<{
                 {t('posts_sync_imported_short', 'Imported')}
               </span>
             )}
-            {state === 'DRAFT' ? t('draft', 'Draft') + ': ' : ''}
+            {state === 'DRAFT' && (
+              <span
+                className={clsx(
+                  'block text-[11px] font-semibold',
+                  overdueDraft ? 'text-red-500' : 'text-textItemBlur'
+                )}
+              >
+                {overdueDraft
+                  ? t('overdue_draft', 'Not published')
+                  : t('draft', 'Draft')}
+              </span>
+            )}
           </div>
           <div className="w-full min-w-0">
             <div className="truncate text-start">

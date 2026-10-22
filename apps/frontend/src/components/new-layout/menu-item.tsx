@@ -14,13 +14,15 @@ export const MenuItem: FC<{
   const isActive = currentPath.indexOf(path) === 0;
 
   const className = clsx(
-    'group w-full minCustom:h-[54px] custom:h-[44px] py-[8px] px-[6px] minCustom:gap-[4px] custom:gap-[2px] flex flex-col font-[600] items-center justify-center rounded-[12px] hover:text-textItemFocused hover:bg-boxFocused transition-colors',
+    'group w-full shrink-0 focus-visible:ring-2 focus-visible:ring-btnPrimary minCustom:h-[54px] custom:h-[44px] py-[8px] px-[6px] minCustom:gap-[4px] custom:gap-[2px] flex flex-col font-[600] items-center justify-center rounded-[12px] hover:text-textItemFocused hover:bg-boxFocused transition-colors',
     isActive ? 'text-textItemFocused bg-boxFocused' : 'text-textItemBlur'
   );
 
   const inner = (
     <>
-      <div className="custom:scale-90 transition-transform">{icon}</div>
+      <div className="w-[24px] h-[24px] shrink-0 flex items-center justify-center [&_svg]:max-w-full [&_svg]:max-h-full">
+        {icon}
+      </div>
       <div className="custom:text-[9px] minCustom:text-[10px] leading-[1.1] text-center w-full truncate">
         {label}
       </div>
@@ -40,6 +42,8 @@ export const MenuItem: FC<{
       prefetch={true}
       href={path}
       title={label}
+      aria-label={label}
+      aria-current={isActive ? 'page' : undefined}
       {...(path.indexOf('http') === 0 && { target: '_blank' })}
       className={className}
     >

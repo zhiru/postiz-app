@@ -370,7 +370,8 @@ export const MenuComponent: FC<
           }
         : {})}
       className={clsx(
-        'flex gap-[12px] items-center bg-newBgColorInner hover:bg-boxHover group/profile transition-all rounded-e-[8px]',
+        'flex min-h-[48px] gap-[12px] items-center bg-newBgColorInner hover:bg-boxHover group/profile transition-all rounded-[8px]',
+        collapsed && 'relative w-[52px] mx-auto justify-center !gap-0',
         integration.refreshNeeded && 'cursor-pointer'
       )}
     >
@@ -401,15 +402,15 @@ export const MenuComponent: FC<
         <ImageWithFallback
           fallbackSrc={'/no-picture.jpg'}
           src={integration.picture || '/no-picture.jpg'}
-          className="rounded-[8px] min-w-[36px] min-h-[36px]"
+          className="rounded-[10px] w-[36px] h-[36px] min-w-[36px] shrink-0 object-cover"
           alt={integration.identifier}
           width={36}
           height={36}
         />
         <PlatformIconBadge
           identifier={integration.identifier}
-          size={18}
-          className="rounded-[8px] absolute z-10 bottom-[5px] -end-[5px] border border-fifth"
+          size={14}
+          className="rounded-full absolute z-10 -bottom-[3px] -end-[4px] border-2 border-newBgColorInner bg-newBgColorInner"
         />
       </div>
       <div
@@ -433,19 +434,21 @@ export const MenuComponent: FC<
       >
         {integration.name}
       </div>
-      <Menu
-        canChangeProfilePicture={integration.changeProfilePicture}
-        canChangeNickName={integration.changeNickName}
-        refreshChannel={refreshChannel}
-        mutate={mutate}
-        onChange={update}
-        id={integration.id}
-        canEnable={
-          user?.totalChannels! > totalNonDisabledChannels &&
-          integration.disabled
-        }
-        canDisable={!integration.disabled}
-      />
+      <div className={clsx(collapsed && 'absolute -end-[9px] top-[10px]')}>
+        <Menu
+          canChangeProfilePicture={integration.changeProfilePicture}
+          canChangeNickName={integration.changeNickName}
+          refreshChannel={refreshChannel}
+          mutate={mutate}
+          onChange={update}
+          id={integration.id}
+          canEnable={
+            user?.totalChannels! > totalNonDisabledChannels &&
+            integration.disabled
+          }
+          canDisable={!integration.disabled}
+        />
+      </div>
     </div>
   );
 };
@@ -634,7 +637,7 @@ export const LaunchesComponent = () => {
           className={clsx(
             'flex relative flex-col',
             collapseMenu === '1' && !channelsOpen
-              ? 'group sidebar w-[100px]'
+              ? 'group sidebar w-[88px] shrink-0'
               : 'w-[260px]',
             channelsOpen
               ? 'mobile:fixed mobile:inset-x-0 mobile:bottom-0 mobile:z-[150] mobile:w-full mobile:max-h-[80vh] mobile:rounded-t-[16px] mobile:overflow-hidden'
@@ -643,7 +646,7 @@ export const LaunchesComponent = () => {
         >
           <div
             className={clsx(
-              'bg-newBgColorInner p-[20px] flex flex-col gap-[15px] transition-all absolute start-0 top-0 w-full h-full mobile:static mobile:h-auto mobile:max-h-[80vh] mobile:pb-[80px] overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor'
+              'bg-newBgColorInner p-[20px] group-[.sidebar]:px-[12px] flex flex-col gap-[15px] transition-all absolute start-0 top-0 w-full h-full mobile:static mobile:h-auto mobile:max-h-[80vh] mobile:pb-[80px] overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor'
             )}
           >
             <div className="flex items-center">
@@ -669,11 +672,23 @@ export const LaunchesComponent = () => {
                   />
                 </svg>
               </div>
-              <div
+              <button
+                type="button"
+                aria-label={
+                  collapseMenu === '1'
+                    ? t('expand_channels', 'Expand channels')
+                    : t('collapse_channels', 'Collapse channels')
+                }
+                title={
+                  collapseMenu === '1'
+                    ? t('expand_channels', 'Expand channels')
+                    : t('collapse_channels', 'Collapse channels')
+                }
+                aria-expanded={collapseMenu !== '1'}
                 onClick={() =>
                   setCollapseMenu(collapseMenu === '1' ? '0' : '1')
                 }
-                className="group-[.sidebar]:rotate-[180deg] group-[.sidebar]:mx-auto mobile:hidden text-btnText bg-btnSimple rounded-[6px] w-[24px] h-[24px] flex items-center justify-center cursor-pointer select-none"
+                className="group-[.sidebar]:rotate-[180deg] group-[.sidebar]:mx-auto mobile:hidden text-btnText bg-btnSimple rounded-[8px] w-[32px] h-[32px] shrink-0 focus-visible:ring-2 focus-visible:ring-btnPrimary flex items-center justify-center cursor-pointer select-none"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -690,7 +705,7 @@ export const LaunchesComponent = () => {
                     strokeLinejoin="round"
                   />
                 </svg>
-              </div>
+              </button>
             </div>
             <div className="flex flex-col gap-[8px] group-[.sidebar]:mx-auto group-[.sidebar]:w-[44px]">
               {canWrite && <AddProviderButton update={() => update(true)} />}

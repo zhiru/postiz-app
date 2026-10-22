@@ -224,6 +224,14 @@ describe('MediaService.deleteMediaBulk', () => {
 });
 
 describe('MediaService.getMedia', () => {
+  it('forwards private library options with the permitted profile', async () => {
+    const { service, repository } = buildService();
+    repository.getMedia.mockResolvedValue({ pages: 0, total: 0, results: [] });
+    const options = { limit: 24, type: 'video', sort: 'oldest' } as const;
+    await service.getMedia('org-1', 2, 'clip', 'prof-1', options);
+    expect(repository.getMedia).toHaveBeenCalledWith('org-1', 2, 'clip', 'prof-1', options);
+  });
+
   it('marca inUse para midia de post pendente e para avatar', async () => {
     const { service, repository } = buildService();
     repository.getMedia.mockResolvedValue({

@@ -228,3 +228,122 @@ describe('PostsRepository.getPost for publishing', () => {
     ]);
   });
 });
+
+describe('PostsRepository.getPostsList filters', () => {
+  const setup = () => {
+    const prisma = createPrismaRepositoryMock('post');
+    prisma.model.post.findMany.mockResolvedValue([] as any);
+    prisma.model.post.count.mockResolvedValue(0);
+    const repo = new PostsRepository(
+      prisma as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any
+    );
+    return { repo, prisma };
+  };
+
+  it('keeps historical drafts visible and offers an overdue-only view', async () => {
+    const { repo, prisma } = setup();
+    await repo.getPostsList('org-1', { state: 'draft' }, 'profile-1');
+    expect(
+      prisma.model.post.findMany.mock.calls[0][0].where.publishDate
+    ).toBeUndefined();
+    await repo.getPostsList('org-1', { state: 'overdue' } as any, 'profile-1');
+    const query = prisma.model.post.findMany.mock.calls[1][0];
+    expect(query.where.state).toBe('DRAFT');
+    expect(query.orderBy).toEqual([{ publishDate: 'desc' }, { id: 'desc' }]);
+    expect(query.where.publishDate.lt).toBeInstanceOf(Date);
+    expect(query.where.integration.organizationId).toBe('org-1');
+    expect(query.where.integration.profileId).toBe('profile-1');
+  });
+
+  it('filters formats before counting and paging and never returns raw media/settings', async () => {
+    const { repo, prisma } = setup();
+    prisma.model.post.findMany
+      .mockResolvedValueOnce([
+        { id: 'story', settings: '{"post_type":"story"}', image: '[]' },
+        {
+          id: 'reel',
+          settings: '{"post_type":"post"}',
+          image: '[{"path":"clip.mp4"}]',
+        },
+      ] as any)
+      .mockResolvedValueOnce([
+        { id: 'story', settings: '{"post_type":"story"}', image: '[]' },
+      ] as any);
+    prisma.model.post.count.mockResolvedValue(1);
+    const result = await repo.getPostsList(
+      'org-1',
+      { format: 'story', search: 'Summit', limit: 20, page: 0 } as any,
+      'profile-1'
+    );
+    const query = prisma.model.post.findMany.mock.calls[1][0];
+    expect(query.where.AND).toContainEqual({ id: { in: ['story'] } });
+    expect(query.where.content).toEqual({
+      contains: 'Summit',
+      mode: 'insensitive',
+    });
+    expect(query.where.integration.profileId).toBe('profile-1');
+    expect(prisma.model.post.count.mock.calls[0][0].where).toEqual(query.where);
+    expect(result.posts[0]).toMatchObject({ id: 'story', format: 'story' });
+    expect(result.posts[0]).not.toHaveProperty('settings');
+    expect(result.posts[0]).not.toHaveProperty('image');
+  });
+});
+
+describe('PostsRepository calendar format compatibility', () => {
+  const query = { startDate: '2026-10-19', endDate: '2026-10-25' };
+  it('classifies only private calendar requests without changing public attachments', async () => {
+    const prisma = createPrismaRepositoryMock('post');
+    const row = {
+      id: 'post-1',
+      publishDate: new Date('2026-10-21T15:00:00Z'),
+      state: 'DRAFT',
+      settings: '{}',
+      image: '[{"path":"a.jpg"},{"path":"b.jpg"}]',
+      error: null,
+    };
+    prisma.model.post.findMany.mockResolvedValue([row] as any);
+    const repo = new PostsRepository(
+      prisma as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any
+    );
+    const publicPosts = await repo.getPosts(
+      'org-1',
+      query as any,
+      false,
+      'profile-1'
+    );
+    expect(publicPosts[0]).not.toHaveProperty('format');
+    expect(publicPosts[0]).not.toHaveProperty('image');
+    expect(
+      (prisma.model.post.findMany.mock.calls[0][0] as any).select.image
+    ).toBeUndefined();
+    const privatePosts = await repo.getPosts(
+      'org-1',
+      query as any,
+      false,
+      'profile-1',
+      true
+    );
+    expect(privatePosts[0].format).toBe('carousel');
+    expect(privatePosts[0]).not.toHaveProperty('image');
+    const attached = await repo.getPosts(
+      'org-1',
+      query as any,
+      true,
+      'profile-1'
+    );
+    expect(attached[0].image).toBe(row.image);
+    expect(attached[0]).not.toHaveProperty('format');
+  });
+});

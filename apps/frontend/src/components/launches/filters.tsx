@@ -1,6 +1,9 @@
 'use client';
 
-import { useCalendar, ListStateFilter } from '@gitroom/frontend/components/launches/calendar.context';
+import {
+  useCalendar,
+  ListStateFilter,
+} from '@gitroom/frontend/components/launches/calendar.context';
 import clsx from 'clsx';
 import dayjs from 'dayjs';
 import { useCallback, useState } from 'react';
@@ -10,6 +13,9 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import i18next from 'i18next';
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
 import { BottomSheet } from '@gitroom/frontend/components/ui/bottom.sheet.component';
+import { Pagination } from '@gitroom/frontend/components/ui/pagination';
+import { useDebounce } from 'use-debounce';
+import { useEffect } from 'react';
 import { FilterIcon } from '@gitroom/frontend/components/ui/icons';
 
 // Helper function to get start and end dates based on display type
@@ -47,6 +53,11 @@ export const Filters = () => {
   const calendar = useCalendar();
   const t = useT();
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [search, setSearch] = useState(calendar.postSearch);
+  const [debouncedSearch] = useDebounce(search, 300);
+  useEffect(() => {
+    calendar.setPostSearch(debouncedSearch);
+  }, [debouncedSearch, calendar.setPostSearch]);
 
   // Set dayjs locale based on current language
   const currentLanguage = i18next.resolvedLanguage || 'en';
@@ -70,6 +81,7 @@ export const Filters = () => {
   };
 
   const setToday = useCallback(() => {
+    calendar.focusCurrentTime();
     const today = newDayjs();
     const currentRange = getDateRange(
       calendar.display as 'day' | 'week' | 'month'
@@ -263,32 +275,14 @@ export const Filters = () => {
 
   const isListView = calendar.display === 'list';
 
-  const setListStateFilter = useCallback(
-    (next: ListStateFilter) => () => {
-      if (calendar.listState === next) return;
-      calendar.setListState(next);
-    },
-    [calendar]
-  );
-
   const listStateOptions: { value: ListStateFilter; label: string }[] = [
     { value: 'all', label: t('all', 'All') },
     { value: 'scheduled', label: t('scheduled', 'Scheduled') },
     { value: 'draft', label: t('draft', 'Draft') },
     { value: 'published', label: t('published', 'Published') },
+    { value: 'overdue', label: t('overdue_drafts', 'Overdue drafts') },
+    { value: 'error', label: t('failed', 'Failed') },
   ];
-
-  const previousPage = useCallback(() => {
-    if (calendar.listPage > 0) {
-      calendar.setListPage(calendar.listPage - 1);
-    }
-  }, [calendar]);
-
-  const nextPage = useCallback(() => {
-    if (calendar.listPage < calendar.listTotalPages - 1) {
-      calendar.setListPage(calendar.listPage + 1);
-    }
-  }, [calendar]);
 
   return (
     <div className="text-textColor flex flex-row flex-wrap gap-[8px] items-center select-none">
@@ -296,9 +290,11 @@ export const Filters = () => {
       {!isListView && (
         <div className="flex flex-grow flex-row items-center gap-[10px] mobile:order-3 mobile:basis-full mobile:min-w-0 mobile:gap-[8px]">
           <div className="border h-[42px] border-newTableBorder bg-newTableBorder gap-[1px] flex items-center rounded-[8px] overflow-hidden mobile:flex-1 mobile:min-w-0">
-            <div
+            <button
+              type="button"
+              aria-label={t('previous_period', 'Previous period')}
               onClick={previous}
-              className="cursor-pointer text-textColor rtl:rotate-180 px-[9px] mobile:px-0 mobile:w-[36px] bg-newBgColorInner h-full flex items-center justify-center hover:text-textItemFocused hover:bg-boxFocused"
+              className="focus-visible:ring-2 focus-visible:ring-btnPrimary cursor-pointer text-textColor rtl:rotate-180 px-[9px] mobile:px-0 mobile:w-[36px] bg-newBgColorInner h-full flex items-center justify-center hover:text-textItemFocused hover:bg-boxFocused"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -315,7 +311,7 @@ export const Filters = () => {
                   strokeLinejoin="round"
                 />
               </svg>
-            </div>
+            </button>
             <div className="min-w-[200px] mobile:min-w-0 mobile:flex-1 text-center bg-newBgColorInner h-full flex items-center justify-center">
               <div className="py-[3px] px-[9px] mobile:px-[4px] rounded-[5px] transition-all text-[14px] mobile:truncate">
                 <span className="mobile:hidden">{getDisplayText()}</span>
@@ -324,9 +320,11 @@ export const Filters = () => {
                 </span>
               </div>
             </div>
-            <div
+            <button
+              type="button"
+              aria-label={t('next_period', 'Next period')}
               onClick={next}
-              className="cursor-pointer text-textColor rtl:rotate-180 px-[9px] mobile:px-0 mobile:w-[36px] bg-newBgColorInner h-full flex items-center justify-center hover:text-textItemFocused hover:bg-boxFocused"
+              className="focus-visible:ring-2 focus-visible:ring-btnPrimary cursor-pointer text-textColor rtl:rotate-180 px-[9px] mobile:px-0 mobile:w-[36px] bg-newBgColorInner h-full flex items-center justify-center hover:text-textItemFocused hover:bg-boxFocused"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -343,100 +341,33 @@ export const Filters = () => {
                   strokeLinejoin="round"
                 />
               </svg>
-            </div>
+            </button>
           </div>
           <div className="flex-1 mobile:flex-none text-[14px] font-[500]">
             <div className="text-center flex h-[42px]">
-              <div
+              <button
+                type="button"
                 onClick={setToday}
-                className="hover:text-textItemFocused hover:bg-boxFocused py-[3px] px-[9px] flex justify-center items-center rounded-[8px] transition-all cursor-pointer text-[14px] bg-newBgColorInner border border-newTableBorder"
+                className="focus-visible:ring-2 focus-visible:ring-btnPrimary hover:text-textItemFocused hover:bg-boxFocused py-[3px] px-[9px] flex justify-center items-center rounded-[8px] transition-all cursor-pointer text-[14px] bg-newBgColorInner border border-newTableBorder"
               >
                 {t('today', 'Today')}
-              </div>
+              </button>
             </div>
           </div>
         </div>
       )}
       {isListView && (
-        <div className="flex flex-grow flex-row items-center gap-[10px] mobile:flex-wrap mobile:order-3 mobile:basis-full mobile:min-w-0 mobile:gap-[8px]">
-          <div
-            className={clsx(
-              'border h-[42px] border-newTableBorder bg-newTableBorder gap-[1px] flex items-center rounded-[8px] overflow-hidden mobile:order-2 mobile:w-full',
-              calendar.listTotalPages <= 1 && 'mobile:hidden'
-            )}
-          >
-            <div
-              onClick={previousPage}
-              className={clsx(
-                'text-textColor rtl:rotate-180 px-[9px] mobile:px-0 mobile:w-[36px] bg-newBgColorInner h-full flex items-center justify-center',
-                calendar.listPage > 0
-                  ? 'cursor-pointer hover:text-textItemFocused hover:bg-boxFocused'
-                  : 'opacity-50 cursor-not-allowed'
-              )}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="8"
-                height="12"
-                viewBox="0 0 8 12"
-                fill="none"
-              >
-                <path
-                  d="M6.5 11L1.5 6L6.5 1"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
-            <div className="min-w-[200px] mobile:min-w-0 mobile:flex-1 text-center bg-newBgColorInner h-full flex items-center justify-center">
-              <div className="py-[3px] px-[9px] rounded-[5px] transition-all text-[14px]">
-                {t('page', 'Page')} {calendar.listPage + 1} {t('of', 'of')} {Math.max(1, calendar.listTotalPages)}
-              </div>
-            </div>
-            <div
-              onClick={nextPage}
-              className={clsx(
-                'text-textColor rtl:rotate-180 px-[9px] mobile:px-0 mobile:w-[36px] bg-newBgColorInner h-full flex items-center justify-center',
-                calendar.listPage < calendar.listTotalPages - 1
-                  ? 'cursor-pointer hover:text-textItemFocused hover:bg-boxFocused'
-                  : 'opacity-50 cursor-not-allowed'
-              )}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="8"
-                height="12"
-                viewBox="0 0 8 12"
-                fill="none"
-              >
-                <path
-                  d="M1.5 11L6.5 6L1.5 1"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
-          </div>
-          <div className="flex flex-row p-[4px] border border-newTableBorder rounded-[8px] text-[14px] font-[500] mobile:order-1 mobile:w-full mobile:overflow-x-auto">
-            {listStateOptions.map((option) => (
-              <div
-                key={option.value}
-                onClick={setListStateFilter(option.value)}
-                className={clsx(
-                  'pt-[6px] pb-[5px] cursor-pointer min-w-[80px] px-[12px] text-center rounded-[6px] mobile:flex-1 mobile:min-w-fit mobile:px-[8px] mobile:whitespace-nowrap',
-                  calendar.listState === option.value &&
-                    'text-textItemFocused bg-boxFocused'
-                )}
-              >
-                {option.label}
-              </div>
-            ))}
-          </div>
-          <div className="flex-1 mobile:hidden" />
+        <div className="w-full mobile:order-4">
+          <Pagination
+            current={calendar.listPage}
+            totalPages={calendar.listTotalPages}
+            total={calendar.listTotal}
+            pageSize={calendar.listPageSize}
+            setPageSize={calendar.setListPageSize}
+            setPage={calendar.setListPage}
+            loading={calendar.loading}
+            position="top"
+          />
         </div>
       )}
       {/* phones get a single filter button that opens the filters sheet */}
@@ -470,48 +401,65 @@ export const Filters = () => {
           isListView && 'hidden mobile:flex'
         )}
       >
-        <div
+        <button
+          type="button"
+          aria-pressed={calendar.display === 'day'}
           className={clsx(
+            'focus-visible:ring-2 focus-visible:ring-btnPrimary',
             'pt-[6px] pb-[5px] cursor-pointer w-[74px] mobile:w-auto mobile:flex-1 mobile:min-w-fit mobile:px-[6px] mobile:whitespace-nowrap text-center rounded-[6px]',
             calendar.display === 'day' && 'text-textItemFocused bg-boxFocused'
           )}
           onClick={setDay}
         >
           {t('day', 'Day')}
-        </div>
-        <div
+        </button>
+        <button
+          type="button"
+          aria-pressed={calendar.display === 'week'}
           className={clsx(
+            'focus-visible:ring-2 focus-visible:ring-btnPrimary',
             'pt-[6px] pb-[5px] cursor-pointer w-[74px] mobile:w-auto mobile:flex-1 mobile:min-w-fit mobile:px-[6px] mobile:whitespace-nowrap text-center rounded-[6px]',
             calendar.display === 'week' && 'text-textItemFocused bg-boxFocused'
           )}
           onClick={setWeek}
         >
           {t('week', 'Week')}
-        </div>
-        <div
+        </button>
+        <button
+          type="button"
+          aria-pressed={calendar.display === 'month'}
           className={clsx(
+            'focus-visible:ring-2 focus-visible:ring-btnPrimary',
             'pt-[6px] pb-[5px] cursor-pointer w-[74px] mobile:w-auto mobile:flex-1 mobile:min-w-fit mobile:px-[6px] mobile:whitespace-nowrap text-center rounded-[6px]',
             calendar.display === 'month' && 'text-textItemFocused bg-boxFocused'
           )}
           onClick={setMonth}
         >
           {t('month', 'Month')}
-        </div>
+        </button>
         {/* the list toggle joins the view switcher on phones */}
-        <div
+        <button
+          type="button"
+          aria-label={t('list', 'List')}
+          aria-pressed={isListView}
           className={clsx(
+            'focus-visible:ring-2 focus-visible:ring-btnPrimary',
             'hidden mobile:block pt-[6px] pb-[5px] cursor-pointer mobile:flex-1 mobile:min-w-fit mobile:px-[6px] mobile:whitespace-nowrap text-center rounded-[6px]',
             isListView && 'text-textItemFocused bg-boxFocused'
           )}
           onClick={setList}
         >
           {t('list', 'List')}
-        </div>
+        </button>
       </div>
       <div className="flex flex-row p-[4px] border border-newTableBorder rounded-[8px] text-[14px] font-[500] mobile:hidden">
-        <div
+        <button
+          type="button"
+          aria-label={t('calendar', 'Calendar')}
+          aria-pressed={!isListView}
           onClick={setCalendarView}
           className={clsx(
+            'focus-visible:ring-2 focus-visible:ring-btnPrimary',
             'pt-[6px] pb-[5px] cursor-pointer flex justify-center items-center w-[34px] text-center rounded-[6px]',
             !isListView && 'text-textItemFocused bg-boxFocused'
           )}
@@ -532,10 +480,14 @@ export const Filters = () => {
               strokeLinejoin="round"
             />
           </svg>
-        </div>
-        <div
+        </button>
+        <button
+          type="button"
+          aria-label={t('list', 'List')}
+          aria-pressed={isListView}
           onClick={setList}
           className={clsx(
+            'focus-visible:ring-2 focus-visible:ring-btnPrimary',
             'pt-[6px] pb-[5px] flex justify-center items-center cursor-pointer w-[34px] text-center rounded-[6px]',
             isListView && 'text-textItemFocused bg-boxFocused'
           )}
@@ -556,7 +508,64 @@ export const Filters = () => {
               strokeLinejoin="round"
             />
           </svg>
-        </div>
+        </button>
+      </div>
+      <div className="flex w-full flex-wrap items-center gap-2 border-t border-newTableBorder pt-3 mobile:order-5">
+        <input
+          type="search"
+          maxLength={200}
+          aria-label={t('search_posts', 'Search posts')}
+          placeholder={t('search_posts', 'Search posts')}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          className="h-[40px] min-w-[180px] flex-1 px-3 rounded-[8px] border border-newTableBorder bg-newBgColorInner focus-visible:ring-2 focus-visible:ring-btnPrimary"
+        />
+        <select
+          aria-label={t('publication_format', 'Publication format')}
+          value={calendar.postFormat}
+          onChange={(event) =>
+            calendar.setPostFormat(
+              event.target.value as typeof calendar.postFormat
+            )
+          }
+          className="h-[40px] px-3 rounded-[8px] border border-newTableBorder bg-newBgColorInner text-textColor focus-visible:ring-2 focus-visible:ring-btnPrimary"
+        >
+          <option value="all">{t('all_formats', 'All formats')}</option>
+          <option value="post">{t('feed_posts', 'Feed / images')}</option>
+          <option value="story">{t('stories', 'Stories')}</option>
+          <option value="video">{t('reels_videos', 'Reels / videos')}</option>
+          <option value="carousel">{t('carousels', 'Carousels')}</option>
+        </select>
+        <select
+          aria-label={t('publication_status', 'Publication status')}
+          value={calendar.listState}
+          onChange={(event) =>
+            calendar.setListState(event.target.value as ListStateFilter)
+          }
+          className="h-[40px] px-3 rounded-[8px] border border-newTableBorder bg-newBgColorInner text-textColor focus-visible:ring-2 focus-visible:ring-btnPrimary"
+        >
+          {listStateOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        {(search ||
+          calendar.postFormat !== 'all' ||
+          calendar.listState !== 'all') && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              calendar.setPostSearch('');
+              calendar.setPostFormat('all');
+              calendar.setListState('all');
+            }}
+            className="h-[40px] px-3 rounded-[8px] border border-newTableBorder text-textItemBlur hover:text-textColor focus-visible:ring-2 focus-visible:ring-btnPrimary"
+          >
+            {t('clear_filters', 'Clear filters')}
+          </button>
+        )}
       </div>
       {filtersOpen && (
         <BottomSheet

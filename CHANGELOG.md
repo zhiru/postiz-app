@@ -7,6 +7,9 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Biblioteca de mídia: busca, filtro de imagem/vídeo, ordenação, quantidade por página (12/24/48/96), contagem e paginação no topo e rodapé; aviso de upload automático ao arrastar arquivos.
+- Calendário/listagem: busca, filtros de formato e estado, paginação configurável (10/20/50/100), rascunhos passados visíveis com X vermelho e “Não publicado”, foco no horário atual ao abrir Dia/Semana ou clicar em Hoje, e barra de canais compacta com ícones proporcionais.
+
 - Instagram: mantém a autorização salva ao selecionar apenas contas já conectadas, permitindo reutilizá-la para outras conexões e reconexões.
 
 - Configure custom HTTPS endpoints and discover models for text, images, Omni video and web search, preserving scoped encrypted credentials.
