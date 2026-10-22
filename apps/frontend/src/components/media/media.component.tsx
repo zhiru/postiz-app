@@ -104,7 +104,7 @@ const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 export const MediaBox: FC<{
   setMedia: (params: { id: string; path: string }[]) => void;
   standalone?: boolean;
-  type?: 'image' | 'video';
+  type?: 'image' | 'image-static' | 'video';
   closeModal: () => void;
 }> = ({ type, standalone, setMedia }) => {
   const [page, setPage] = useState(0);
@@ -113,7 +113,7 @@ export const MediaBox: FC<{
     ? Number(pageSizeSaved)
     : 24;
   const [mediaType, setMediaType] = useState<'all' | 'image' | 'video'>(
-    type || 'all'
+    type === 'image-static' ? 'image' : type || 'all'
   );
   const [sort, setSort] = useState('newest');
   const gridRef = useRef<HTMLDivElement>(null);
@@ -173,7 +173,9 @@ export const MediaBox: FC<{
 
   const uppy = useUppyUploader({
     allowedFileTypes:
-      type == 'image'
+      type == 'image-static'
+        ? 'image/jpeg,image/png'
+        : type == 'image'
         ? 'image/*'
         : type == 'video'
         ? 'video/mp4'
@@ -545,7 +547,9 @@ export const MediaBox: FC<{
             className="hidden"
             multiple={true}
             accept={
-              type === 'image'
+              type === 'image-static'
+                ? 'image/jpeg,image/png'
+                : type === 'image'
                 ? 'image/*'
                 : type === 'video'
                 ? 'video/mp4'
@@ -1056,6 +1060,7 @@ export const MultiMediaComponent: FC<{
                       onClick={async () => {
                         modals.openModal({
                           title: t('media_settings', 'Media Settings'),
+                          size: '720px',
                           children: (close) => (
                             <MediaComponentInner
                               media={media as any}

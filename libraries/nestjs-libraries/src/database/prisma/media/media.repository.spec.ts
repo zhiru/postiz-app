@@ -156,3 +156,19 @@ describe('MediaRepository', () => {
     });
   });
 });
+
+
+describe('thumbnail gallery filtering', () => {
+  it('counts only JPEG and PNG before applying page size', async () => {
+    const media = createPrismaRepositoryMock('media');
+    media.model.media.count.mockResolvedValue(25);
+    media.model.media.findMany.mockResolvedValue([]);
+    const repo = new MediaRepository(media as any, {} as any);
+    await repo.getMedia('org-1', 2, '', 'prof-1', { limit: 12, type: 'image-static' } as any);
+    const args = media.model.media.findMany.mock.calls[0][0] as any;
+    expect(args.skip).toBe(12);
+    expect(args.take).toBe(12);
+    expect(args.where.AND).toEqual([{OR: ['jpg','jpeg','png'].map(ext=>({name:{endsWith:'.'+ext,mode:'insensitive'}}))}]);
+    expect((media.model.media.count.mock.calls[0][0] as any).where.AND).toEqual(args.where.AND);
+  });
+});

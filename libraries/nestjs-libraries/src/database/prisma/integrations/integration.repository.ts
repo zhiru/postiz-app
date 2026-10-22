@@ -308,10 +308,24 @@ export class IntegrationRepository {
       },
     });
 
+    const fresh = existing
+      ? await this._integration.model.integration.findFirst({
+          where: { id, organizationId: params.organizationId, profileId: params.profileId },
+          select: { rootInternalId: true, refreshToken: true, tokenExpiration: true },
+        })
+      : null;
+    params = {
+      ...params,
+      ...(fresh?.rootInternalId ? { rootInternalId: fresh.rootInternalId } : {}),
+      ...(fresh?.refreshToken ? { refreshToken: fresh.refreshToken } : {}),
+      ...(fresh?.tokenExpiration ? { tokenExpiration: fresh.tokenExpiration } : {}),
+    };
+
     if (existing) {
       await this._posts.model.post.updateMany({
         where: {
           integrationId: id,
+          organizationId: params.organizationId,
         },
         data: {
           deletedAt: new Date(),
@@ -321,7 +335,9 @@ export class IntegrationRepository {
       await this._integration.model.integration.update({
         where: {
           id,
+          organizationId: params.organizationId,
         },
+        select: { id: true },
         data: {
           internalId: `deleted_${params.internalId}_${makeId(10)}`,
           deletedAt: new Date(),
@@ -354,10 +370,15 @@ export class IntegrationRepository {
     return this._integration.model.integration.update({
       where: {
         ...(existing ? { id: existing.id } : { id }),
+        organizationId: params.organizationId,
       },
+      select: { id: true },
       data: {
         ...params,
         ...encryptedTokenFields,
+        refreshNeeded: false,
+        refreshError: null,
+        refreshErrorAt: null,
         disabled: false,
         deletedAt: null,
       },
