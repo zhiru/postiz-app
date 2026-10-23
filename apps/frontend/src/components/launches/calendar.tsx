@@ -1532,7 +1532,7 @@ export const CalendarItem: FC<{
       children: (close) => (
         <div
           className="flex max-h-[70vh] flex-col overflow-y-auto"
-          onClickCapture={close}
+          onClick={close}
         >
           {editable && (
             <button

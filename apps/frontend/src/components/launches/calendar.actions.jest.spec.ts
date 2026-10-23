@@ -126,15 +126,31 @@ it('opens drafts for editing through click and keyboard, with one actions button
     1
   );
 });
-it('opens actions in the existing modal layer, keeping the card narrow', () => {
-  render(React.createElement(CalendarItem, props()));
+it('runs the selected command before unmounting the actions modal', () => {
+  const value = props();
+  const order: string[] = [];
+  value.duplicatePost.mockImplementation(() => order.push('command'));
+  const Harness = () => {
+    const [options, setOptions] = React.useState(null);
+    mockModal.mockImplementation(setOptions);
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement(CalendarItem, value),
+      options &&
+        options.children(() => {
+          order.push('close');
+          setOptions(null);
+        })
+    );
+  };
+  render(React.createElement(Harness));
   fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
-  const options = mockModal.mock.calls[0][0];
-  expect(options.title).toBe('Post actions');
-  const close = jest.fn();
-  render(options.children(close));
   fireEvent.click(screen.getByRole('button', { name: 'Duplicate post' }));
-  expect(close).toHaveBeenCalled();
+  expect(value.duplicatePost).toHaveBeenCalledTimes(1);
+  expect(order).toEqual(['command', 'close']);
+  expect(screen.queryByRole('button', { name: 'Duplicate post' })).toBeNull();
+  mockModal.mockReset();
 });
 it('keeps published posts in a fullscreen preview without opening another tab', () => {
   const value: any = props();
