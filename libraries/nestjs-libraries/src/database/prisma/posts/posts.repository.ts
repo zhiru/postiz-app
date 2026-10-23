@@ -151,6 +151,53 @@ export class PostsRepository {
     return true;
   }
 
+  async remoteDeletedPostIds(
+    org: string,
+    profile: string | undefined,
+    posts: { id: string; releaseId?: string | null }[]
+  ) {
+    const candidates = posts.filter((post) => post.releaseId);
+    if (!candidates.length) return new Set<string>();
+    const receipts = await this._transaction.model.$transaction((tx) =>
+      tx.postOperation.findMany({
+        where: {
+          organizationId: org,
+          ...(profile ? { profileId: profile } : {}),
+          AND: [
+            { id: { startsWith: `remote-delete:${org}:` } },
+            {
+              OR: candidates.map((post) => ({
+                id: { endsWith: `:${post.id}:${post.releaseId}` },
+              })),
+            },
+          ],
+        },
+        select: { id: true, result: true },
+      })
+    );
+    return new Set(
+      receipts
+        .filter(
+          (receipt) =>
+            receipt.result && JSON.parse(receipt.result).status === 'deleted'
+        )
+        .map((receipt) => receipt.id.split(':').slice(-2)[0])
+    );
+  }
+
+  getRemoteDeletionReceipt(
+    id: string,
+    organizationId: string,
+    profileId?: string
+  ) {
+    return this._transaction.model.$transaction((tx) =>
+      tx.postOperation.findFirst({
+        where: { id, organizationId, profileId: profileId ?? null },
+        select: { result: true },
+      })
+    );
+  }
+
   async reservePostOperation(
     id: string,
     organizationId: string,

@@ -237,6 +237,15 @@ export interface SocialProvider
   extends IAuthenticator,
     ISocialMediaIntegration {
   identifier: string;
+  checkRemoteDeletion?(
+    accountId: string,
+    accessToken: string,
+    mediaId: string
+  ): Promise<void>;
+  deletePublishedPost?(
+    accessToken: string,
+    mediaId: string
+  ): Promise<{ success: true; deletedId: string }>;
   canImportPublishedPost?: (settings: Record<string, unknown>) => boolean;
   listPublishedPosts?(
     id: string,

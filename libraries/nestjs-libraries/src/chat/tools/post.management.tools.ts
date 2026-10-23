@@ -7,6 +7,7 @@ import { readRequestContext } from './tool.context.helper';
 import { PostManagementService } from '@gitroom/nestjs-libraries/database/prisma/posts/post.management.service';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import {
+  remoteDeletePostSchema,
   postStatusSchema,
   postDateSchema,
 } from '@gitroom/nestjs-libraries/dtos/posts/manage.post.dto';
@@ -251,6 +252,40 @@ export class UploadFileTool implements AgentToolInterface {
           { ...i.fileReference, adjust: i.adjust },
           p
         )
+    );
+  }
+}
+
+@Injectable()
+export class DeleteRemotePostTool implements AgentToolInterface {
+  constructor(private service: PostManagementService) {}
+  name = 'deleteRemotePostTool';
+  run() {
+    return tool(
+      this.name,
+      'Permanently delete published media from Instagram via Facebook Login with instagram_manage_contents. First read the post and show the exact account/media to the user; call only after explicit confirmation. Requires current version and exact remote ID. Non-ad posts, stories, reels and WHOLE carousels only; cannot delete one carousel slide. Keeps local history. status deleted means provider confirmed; unknown means inspect Instagram, do not retry or claim deletion. Other providers/login types unsupported. Does not publish or delete the local record.',
+      remoteDeletePostSchema.extend({ id: z.string().min(1) }),
+      false,
+      (org, profile, input) => {
+        const { id, ...body } = input;
+        return this.service.deleteRemote(org, profile, id, body);
+      }
+    );
+  }
+}
+
+@Injectable()
+export class GetRemoteDeletionTool implements AgentToolInterface {
+  constructor(private service: PostManagementService) {}
+  name = 'getRemoteDeletionTool';
+  run() {
+    return tool(
+      this.name,
+      'Read remote deletion capability and durable result (not_requested, deleted, unknown) by Postiz post ID. Capability does not prove token permission. Never performs deletion.',
+      z.object({ id: z.string().min(1) }),
+      true,
+      (org, profile, input) =>
+        this.service.remoteDeletionInfo(org, profile, input.id)
     );
   }
 }

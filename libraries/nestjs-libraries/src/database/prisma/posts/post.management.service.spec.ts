@@ -290,3 +290,17 @@ it('stores only the canonical owned media id even when input pairs an unrelated 
     JSON.parse(repo.patchManagedPost.mock.calls[0][4].image as string)[0]
   ).toMatchObject({ id: 'owned-id', path: 'https://media.test/own.jpg' });
 });
+
+it('reports confirmed remote deletion instead of claiming a live publication', async () => {
+  const { service, repo, posts } = setup();
+  repo.getManagedPost.mockResolvedValue([
+    { ...row(), state: 'PUBLISHED', releaseId: '123' },
+  ] as any);
+  posts.getRemoteDeletionInfo.mockResolvedValue({
+    status: 'deleted',
+    supported: true,
+  } as any);
+  const result = await service.get('o1', 'profile1', 'p1');
+  expect(result.executionState).toBe('REMOTE_DELETED');
+  expect(result.remoteDeletion.status).toBe('deleted');
+});

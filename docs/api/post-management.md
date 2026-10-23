@@ -121,3 +121,21 @@ Aplicar somente migração aditiva, gerar Prisma e publicar backend/orchestrator
 Aceite concluído em produção em 23/10/2026, release da PR #52 (`1db84642f`): `cmvk9cw9i000mmoftkord2u7z` e `cmvk9cwa1000nmoftyvz7ak2c`. Executado GET → PATCH dryRun → revisão → PATCH com versão/hash → GET. Somente conteúdo/updatedAt mudaram; ambos continuam DRAFT_SAVED, queueActive:false. Mídias, ordem, configurações, canal e horário preservados. Nenhum post foi criado ou publicado. Evidência: https://github.com/zhiru/postiz-app/pull/52#issuecomment-6364865952.
 
 A paridade do painel ainda é parcial: os caminhos legados de salvamento/data não recebem a versão lida pelo cliente. O painel aceita rascunhos incompletos; a edição nova da API/MCP exige validação completa. Esses limites não devem ser anunciados como paridade integral.
+
+
+## Exclusão remota do Instagram
+
+A exclusão local continua independente e não remove conteúdo da rede. No menu de três pontos do card publicado, “Excluir da rede social” lê a versão/ID remoto e pede confirmação explícita com a conta e o conteúdo. O histórico local é mantido após a remoção remota.
+
+- `GET /public/v1/posts/:id/remote-deletion` / `getRemoteDeletionTool({id})`: `{id,version,remoteId,supported,status}`. `supported` é capacidade do provedor, não garantia da permissão da conta.
+- `POST /public/v1/posts/:id/delete-remote` / `deleteRemotePostTool({id,version,confirmRemoteId})`: operação destrutiva; use o ID remoto exato da leitura após confirmar com o usuário. Retorna `{status:"deleted"|"unknown",remoteId,localDeleted:false}`.
+- Painel autenticado usa `GET /posts/:id/remote-deletion` e `POST /posts/:id/delete-remote`, com o mesmo serviço e escopo.
+- `409 REMOTE_DELETE_CONFIRMATION_REQUIRED`: versão desatualizada, ID remoto divergente ou registro não publicado. `412`: conexão/token/permissão ausente. `422 REMOTE_DELETE_UNSUPPORTED`: provedor incompatível.
+
+A [documentação da Meta](https://developers.facebook.com/documentation/instagram-platform/reference/instagram-media) exige Facebook Login, token de usuário e `instagram_manage_contents`. A autorização OAuth passa a solicitar essa permissão; conexões existentes continuam funcionando para publicação e precisam de reconexão com consentimento aprovado para exclusão. Nenhuma aprovação da Meta é presumida ou submetida automaticamente por este código. Instagram Login direto não oferece esta capacidade documentada.
+
+Aceita posts sem anúncio, Stories, Reels e carrosséis inteiros. Não exclui uma imagem isolada do carrossel. A propriedade da mídia é conferida antes de chamar DELETE; a rede aplica as restrições restantes. Sucesso exige `success:true` e `deleted_id` igual ao solicitado.
+
+Um recibo durável por organização/perfil/post/mídia reserva a operação antes do DELETE. Repetição devolve o resultado anterior sem reenviar. Timeout, resposta inesperada ou queda após a reserva deixam `unknown`; consultar Instagram e reconciliar manualmente. Nunca afirmar que foi excluído nem contornar a reserva com outro ID. Os testes automatizados não excluem publicações reais.
+
+Após confirmação, `getPostTool`/GET por ID retornam `executionState:REMOTE_DELETED` e `remoteDeletion.status:deleted`; `state:PUBLISHED` permanece o estado histórico do envio original. Calendário e lista exibem “Excluído da rede social”, sem o sinal verde de publicação ativa. Lotes de Stories com várias mídias retornam `422 MULTIPLE_STORY_IDS_UNAVAILABLE`, pois o fluxo legado não guarda todos os IDs remotos. Excluir os Stories individualmente no Instagram até existir esse histórico completo.

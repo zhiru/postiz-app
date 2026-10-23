@@ -107,6 +107,97 @@ export class InstagramProvider
     'instagram_manage_messages',
   ];
 
+  async checkRemoteDeletion(
+    accountId: string,
+    accessToken: string,
+    mediaId: string
+  ) {
+    const userToken = accessToken.split('___')[1];
+    if (!userToken)
+      throw new HttpException(
+        {
+          code: 'FACEBOOK_USER_TOKEN_REQUIRED',
+          message: 'Reconnect Instagram using Facebook Login to delete media.',
+        },
+        412
+      );
+    const read = async (path: string) => {
+      const response = await ssrfSafeFetch(
+        `${META_FACEBOOK_GRAPH_URL}/${path}`,
+        {
+          headers: { Authorization: `Bearer ${userToken}` },
+          signal: AbortSignal.timeout(25000),
+          redirect: 'error',
+        }
+      );
+      if (!response.ok)
+        throw new HttpException(
+          {
+            code: 'INSTAGRAM_DELETE_ACCESS_REQUIRED',
+            message:
+              'Verify Facebook Login and instagram_manage_contents permission before deleting.',
+          },
+          412
+        );
+      return response.json();
+    };
+    const permissions = await read('me/permissions');
+    if (
+      !permissions.data?.some(
+        (entry: any) =>
+          entry.permission === 'instagram_manage_contents' &&
+          entry.status === 'granted'
+      )
+    )
+      throw new HttpException(
+        {
+          code: 'INSTAGRAM_DELETE_PERMISSION_REQUIRED',
+          message:
+            'Grant instagram_manage_contents and reconnect Instagram using Facebook Login.',
+        },
+        412
+      );
+    const media = await read(`${encodeURIComponent(mediaId)}?fields=id,owner`);
+    if (
+      media.id !== mediaId ||
+      String(media.owner?.id ?? media.owner) !== accountId
+    )
+      throw new HttpException(
+        {
+          code: 'INSTAGRAM_MEDIA_OWNER_MISMATCH',
+          message:
+            'This media does not belong to the connected Instagram account.',
+        },
+        409
+      );
+  }
+
+  async deletePublishedPost(
+    accessToken: string,
+    mediaId: string
+  ): Promise<{ success: true; deletedId: string }> {
+    const userToken = accessToken.split('___')[1];
+    if (!userToken) throw new Error('Facebook user token required');
+    // Never retry a destructive request after a timeout or uncertain response.
+    const response = await ssrfSafeFetch(
+      `${META_FACEBOOK_GRAPH_URL}/${encodeURIComponent(mediaId)}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${userToken}` },
+        signal: AbortSignal.timeout(25000),
+        redirect: 'error',
+      }
+    );
+    const result = await response.json();
+    if (
+      !response.ok ||
+      result.success !== true ||
+      String(result.deleted_id) !== mediaId
+    )
+      throw new Error('Remote deletion was not confirmed');
+    return { success: true, deletedId: mediaId };
+  }
+
   override maxConcurrentJob = 400;
 
   editor = 'normal' as const;
@@ -450,7 +541,9 @@ export class InstagramProvider
           `${process.env.FRONTEND_URL}/integrations/social/instagram`
         )}` +
         `&state=${state}` +
-        `&scope=${encodeURIComponent(this.scopes.join(','))}`,
+        `&scope=${encodeURIComponent(
+          [...this.scopes, 'instagram_manage_contents'].join(',')
+        )}`,
       codeVerifier: makeSecureId(10),
       state,
     };

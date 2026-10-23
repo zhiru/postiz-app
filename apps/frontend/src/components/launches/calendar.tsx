@@ -1360,7 +1360,7 @@ export const CalendarColumn: FC<{
     </div>
   );
 });
-const CalendarItem: FC<{
+export const CalendarItem: FC<{
   date: dayjs.Dayjs;
   isBeforeNow: boolean;
   editPost: () => void;
@@ -1398,6 +1398,7 @@ const CalendarItem: FC<{
     missingRelease,
     openPost,
   } = props;
+  const remoteDeleted = Boolean((post as any).remoteDeleted);
   const overdueDraft =
     state === 'DRAFT' && fromUtc(post.publishDate).isBefore(newDayjs());
   const { disableXAnalytics } = useVariables();
@@ -1411,8 +1412,222 @@ const CalendarItem: FC<{
     post.creationMethod &&
     post.creationMethod !== 'UNKNOWN';
   const preview = useCallback(() => {
-    window.open(`/p/${post.id}${canWrite ? '?share=true' : ''}`, '_blank');
-  }, [post.id, canWrite]);
+    modals.openModal({
+      id: `post-preview-${post.id}`,
+      title: t('preview_post', 'Preview post'),
+      fullScreen: true,
+      withCloseButton: true,
+      children: (
+        <iframe
+          className="h-full min-h-[80vh] w-full border-0"
+          title={t('preview_post', 'Preview post')}
+          src={`/p/${post.id}${canWrite ? '?share=true' : ''}`}
+        />
+      ),
+    });
+  }, [post.id, canWrite, modals, t]);
+  const fetchRemote = useFetch();
+  const toastRemote = useToaster();
+  const [deletingRemote, setDeletingRemote] = useState(false);
+  const deleteRemote = async () => {
+    if (deletingRemote) return;
+    setDeletingRemote(true);
+    try {
+      const read = await fetchRemote(`/posts/${post.id}/remote-deletion`);
+      if (!read.ok) throw new Error();
+      const info = await read.json();
+      if (!info.supported) {
+        toastRemote.show(
+          t(
+            'remote_delete_unsupported',
+            'This connection does not support deletion from the network.'
+          ),
+          'warning'
+        );
+        return;
+      }
+      if (info.status !== 'not_requested') {
+        toastRemote.show(
+          info.status === 'deleted'
+            ? t(
+                'remote_delete_done',
+                'Deleted from the network. Local history retained.'
+              )
+            : t(
+                'remote_delete_unknown',
+                'Deletion is unconfirmed. Check the network; do not resend.'
+              ),
+          'warning'
+        );
+        return;
+      }
+      if (
+        !(await deleteDialog(
+          t(
+            'remote_delete_confirm',
+            'Permanently delete this publication from the network? The entire carousel will be deleted. This cannot be undone.'
+          ) +
+            `\n${post.integration.name}\n${
+              info.remoteId
+            }\n${postContentPlainText(post.content).slice(0, 200)}`
+        ))
+      )
+        return;
+      const response = await fetchRemote(`/posts/${post.id}/delete-remote`, {
+        method: 'POST',
+        body: JSON.stringify({
+          version: info.version,
+          confirmRemoteId: info.remoteId,
+        }),
+      });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => ({}));
+        toastRemote.show(
+          failure?.code === 'INSTAGRAM_DELETE_PERMISSION_REQUIRED' ||
+            failure?.code === 'FACEBOOK_USER_TOKEN_REQUIRED' ||
+            failure?.code === 'INSTAGRAM_DELETE_ACCESS_REQUIRED'
+            ? t(
+                'remote_delete_permission',
+                'Reconnect through Facebook Login with instagram_manage_contents approved. No deletion was confirmed.'
+              )
+            : t(
+                'remote_delete_failed',
+                'Could not confirm deletion. Read the current status before retrying.'
+              ),
+          'warning'
+        );
+        return;
+      }
+      const result = await response.json();
+      toastRemote.show(
+        result.status === 'deleted'
+          ? t(
+              'remote_delete_done',
+              'Deleted from the network. Local history retained.'
+            )
+          : t(
+              'remote_delete_unknown',
+              'Deletion is unconfirmed. Check the network; do not resend.'
+            ),
+        'warning'
+      );
+    } catch {
+      toastRemote.show(
+        t(
+          'remote_delete_failed',
+          'Could not confirm deletion. Read the current status before retrying.'
+        ),
+        'warning'
+      );
+    } finally {
+      setDeletingRemote(false);
+    }
+  };
+  const openActions = () =>
+    modals.openModal({
+      id: `post-actions-${post.id}`,
+      title: t('post_actions', 'Post actions'),
+      size: 320,
+      withCloseButton: true,
+      children: (close) => (
+        <div
+          className="flex max-h-[70vh] flex-col overflow-y-auto"
+          onClickCapture={close}
+        >
+          {editable && (
+            <button
+              type="button"
+              className="p-2 text-start hover:bg-newColColor"
+              onClick={editPost}
+            >
+              {t('edit_post', 'Edit post')}
+            </button>
+          )}
+          {canWrite && !post.importedFromPlatform && (
+            <button
+              type="button"
+              className="p-2 text-start hover:bg-newColColor"
+              onClick={duplicatePost}
+            >
+              {t('duplicate_post', 'Duplicate post')}
+            </button>
+          )}
+          <button
+            type="button"
+            className="p-2 text-start hover:bg-newColColor"
+            onClick={preview}
+          >
+            {t('preview_post', 'Preview post')}
+          </button>
+          {canWrite && (
+            <button
+              type="button"
+              className="p-2 text-start hover:bg-newColColor"
+              onClick={openReviewLinks}
+            >
+              {t('client_review_links', 'Client review links')}
+            </button>
+          )}
+          {post.releaseURL?.startsWith('http') && (
+            <button
+              type="button"
+              className="p-2 text-start hover:bg-newColColor"
+              onClick={openPost}
+            >
+              {t('posts_sync_view_original', 'View original publication')}
+            </button>
+          )}
+          {post.releaseId &&
+            !(
+              post.integration.providerIdentifier === 'x' && disableXAnalytics
+            ) && (
+              <button
+                type="button"
+                className="p-2 text-start hover:bg-newColColor"
+                onClick={
+                  post.releaseId === 'missing' ? missingRelease : statistics
+                }
+              >
+                {t('statistics', 'Statistics')}
+              </button>
+            )}
+          {copyDebugJson && (
+            <button
+              type="button"
+              className="p-2 text-start hover:bg-newColColor"
+              onClick={copyDebugJson}
+            >
+              {t('copy_debug_json', 'Copy Debug JSON')}
+            </button>
+          )}
+          {canWrite && state === 'PUBLISHED' && post.releaseId && (
+            <button
+              type="button"
+              disabled={deletingRemote}
+              className="p-2 text-start text-red-500 hover:bg-newColColor disabled:opacity-50"
+              onClick={deleteRemote}
+            >
+              {t('delete_from_network', 'Delete from network')}
+            </button>
+          )}
+          {canWrite && (
+            <button
+              type="button"
+              className="p-2 text-start text-red-500 hover:bg-newColColor"
+              onClick={deletePost}
+            >
+              {t('remove_from_postiz', 'Remove from Mali Posts')}
+            </button>
+          )}
+        </div>
+      ),
+    });
+  const editable =
+    canWrite &&
+    !post.importedFromPlatform &&
+    state !== 'PUBLISHED' &&
+    !post.releaseId;
+  const activate = editable ? editPost : preview;
   const openReviewLinks = useCallback(() => {
     modals.openModal({
       id: `review-links-${post.id}`,
@@ -1447,12 +1662,19 @@ const CalendarItem: FC<{
         'relative',
         (state === 'ERROR' || overdueDraft) &&
           'rounded-[10px] ring-2 ring-red-500',
-        state === 'PUBLISHED' && 'rounded-[10px] ring-2 ring-green-500'
+        state === 'PUBLISHED' &&
+          !remoteDeleted &&
+          'rounded-[10px] ring-2 ring-green-500'
       )}
       style={{
         opacity,
       }}
     >
+      {remoteDeleted && (
+        <span className="absolute -top-3 start-1 z-20 rounded bg-newBgColorInner px-1 text-xs">
+          {t('remote_deleted_label', 'Deleted from network')}
+        </span>
+      )}
       {overdueDraft && (
         <span
           role="img"
@@ -1481,7 +1703,7 @@ const CalendarItem: FC<{
           !
         </div>
       )}
-      {state === 'PUBLISHED' && (
+      {state === 'PUBLISHED' && !remoteDeleted && (
         <div
           className={clsx(
             'absolute -top-[6px] -start-[6px] z-20 w-[18px] h-[18px] rounded-full bg-green-500 flex items-center justify-center text-white text-[11px] font-bold',
@@ -1516,109 +1738,18 @@ const CalendarItem: FC<{
         >
           {post.tags.map((p) => p.tag.name).join(', ')}
         </div>
-        {copyDebugJson && (
-          <div
-            className={clsx(
-              'hidden group-hover:block hover:underline cursor-pointer',
-              post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
-            )}
-            onClick={copyDebugJson}
-          >
-            <CopyDebug />
-          </div>
-        )}
-        {canWrite && !post.importedFromPlatform && (
-          <button
-            type="button"
-            onClick={editPost}
-            aria-label={t('edit_post', 'Edit post')}
-            title={t('edit_post', 'Edit post')}
-            className="hidden group-hover:block cursor-pointer"
-          >
-            ✎
-          </button>
-        )}
-        {canWrite && !post.importedFromPlatform && (
-          <div
-            className={clsx(
-              'hidden group-hover:block hover:underline cursor-pointer',
-              post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
-            )}
-            onClick={duplicatePost}
-          >
-            <Duplicate />
-          </div>
-        )}
-        <div
-          className={clsx(
-            'hidden group-hover:block hover:underline cursor-pointer',
-            post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
-          )}
-          onClick={preview}
+        <button
+          type="button"
+          aria-label={t('post_actions', 'Post actions')}
+          aria-haspopup="dialog"
+          onClick={(event) => {
+            event.stopPropagation();
+            openActions();
+          }}
+          className="ms-auto shrink-0 rounded px-2 text-xl leading-6 focus-visible:ring-2 focus-visible:ring-white"
         >
-          <Preview />
-        </div>{' '}
-        {canWrite && (
-          <div
-            className={clsx(
-              'hidden group-hover:block hover:underline cursor-pointer',
-              post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
-            )}
-            onClick={openReviewLinks}
-          >
-            <ReviewShare />
-          </div>
-        )}{' '}
-        {(state === 'PUBLISHED' || state === 'ERROR') &&
-          !post.intervalInDays &&
-          post.releaseURL?.startsWith('http') && (
-            <div
-              className={clsx(
-                'hidden group-hover:block hover:underline cursor-pointer',
-                post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
-              )}
-              onClick={openPost}
-            >
-              <OpenPost />
-            </div>
-          )}{' '}
-        {(post.integration.providerIdentifier === 'x' && disableXAnalytics) ||
-        !post.releaseId ? (
-          <></>
-        ) : post.releaseId === 'missing' && missingRelease ? (
-          <div
-            className={clsx(
-              'hidden group-hover:block hover:underline cursor-pointer',
-              post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
-            )}
-            onClick={missingRelease}
-          >
-            <Statistics />
-          </div>
-        ) : post.releaseId !== 'missing' ? (
-          <div
-            className={clsx(
-              'hidden group-hover:block hover:underline cursor-pointer',
-              post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
-            )}
-            onClick={statistics}
-          >
-            <Statistics />
-          </div>
-        ) : (
-          <></>
-        )}{' '}
-        {canWrite && (
-          <div
-            className={clsx(
-              'hidden group-hover:block hover:underline cursor-pointer',
-              post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
-            )}
-            onClick={deletePost}
-          >
-            <DeletePost />
-          </div>
-        )}
+          ⋯
+        </button>
       </div>
       {reviewStatus && (
         <div
@@ -1644,12 +1775,16 @@ const CalendarItem: FC<{
       <div
         role="button"
         tabIndex={0}
-        aria-label={t('preview_post', 'Preview post')}
-        onClick={preview}
+        aria-label={
+          editable
+            ? t('edit_post', 'Edit post')
+            : t('preview_post', 'Preview post')
+        }
+        onClick={activate}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            preview();
+            activate();
           }
         }}
         className={clsx(

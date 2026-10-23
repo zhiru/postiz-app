@@ -71,3 +71,10 @@ export const bulkUpdatePostsSchema = z
     (v) => new Set(v.updates.map((u) => u.id)).size === v.updates.length,
     'Each post id must occur once'
   );
+
+export const remoteDeletePostSchema = z
+  .object({
+    version: z.string().datetime({ offset: true }),
+    confirmRemoteId: z.string().regex(/^[0-9]{1,40}$/),
+  })
+  .strict();

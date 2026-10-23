@@ -225,8 +225,11 @@ export class PostManagementService {
           queueActive = false;
       }
     }
+    const deletion = await this.posts.getRemoteDeletionInfo?.(org, profile, id);
     const executionState =
-      root.state === 'DRAFT'
+      deletion?.status === 'deleted'
+        ? 'REMOTE_DELETED'
+        : root.state === 'DRAFT'
         ? queueActive === false
           ? 'DRAFT_SAVED'
           : 'EXECUTION_UNKNOWN'
@@ -271,11 +274,27 @@ export class PostManagementService {
       observedAt: new Date().toISOString(),
       source: 'stored_provider_result',
       remoteDeletion: {
-        supported: false,
+        status: deletion?.status || 'not_requested',
+        supported:
+          this.posts.supportsRemoteDeletion?.(
+            root.integration.providerIdentifier
+          ) ?? false,
         reason:
           'Deleting from Postiz does not necessarily delete the post on the social network.',
       },
     };
+  }
+
+  remoteDeletionInfo(org: string, profile: string | undefined, id: string) {
+    return this.posts.getRemoteDeletionInfo(org, profile, id);
+  }
+  async deleteRemote(
+    org: string,
+    profile: string | undefined,
+    id: string,
+    input: { version: string; confirmRemoteId: string }
+  ) {
+    return this.posts.deleteRemotePost(org, profile, id, input);
   }
 
   async validate(
