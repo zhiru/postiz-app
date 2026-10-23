@@ -170,6 +170,19 @@ export class PostsSyncService implements OnApplicationBootstrap {
     }
     if (page.nextCursor && page.nextCursor === cursor)
       throw new Error('Provider returned a repeated cursor');
+    // A Story permission failure must not block successful feed reconciliation.
+    if (!cursor && provider.listActiveStories)
+      try {
+        const stories = await provider.listActiveStories(
+          integration.internalId,
+          integration.token
+        );
+        page.posts.push(...stories.posts);
+      } catch {
+        this.logger.warn(
+          'Active Stories could not be imported; feed synchronization continues. Check Story permissions.'
+        );
+      }
     let imported = 0;
     for (const item of page.posts) {
       if (

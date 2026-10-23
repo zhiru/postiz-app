@@ -3,6 +3,7 @@
 import { getPlatformIconPath } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
 
 import useSWR from 'swr';
+import { WorkspaceAnalytics } from './workspace.analytics';
 import { useCallback, useMemo, useState } from 'react';
 import { capitalize, orderBy } from 'lodash';
 import clsx from 'clsx';
@@ -32,7 +33,7 @@ const allowedIntegrations = [
   'threads',
   'x',
 ];
-export const PlatformAnalytics = () => {
+const ChannelAnalytics = () => {
   const fetch = useFetch();
   const t = useT();
   const router = useRouter();
@@ -307,5 +308,29 @@ export const PlatformAnalytics = () => {
         )}
       </div>
     </>
+  );
+};
+
+export const PlatformAnalytics = () => {
+  const t = useT();
+  const [mode, setMode] = useState('workspace');
+  return (
+    <div className="flex-1 min-w-0 overflow-auto">
+      <div className="flex gap-3 p-4">
+        <Button
+          onClick={() => setMode('workspace')}
+          aria-pressed={mode === 'workspace'}
+        >
+          {t('insights_title', 'Post insights')}
+        </Button>
+        <Button
+          onClick={() => setMode('channel')}
+          aria-pressed={mode === 'channel'}
+        >
+          {t('insights_channel_analytics', 'Channel analytics')}
+        </Button>
+      </div>
+      {mode === 'workspace' ? <WorkspaceAnalytics /> : <ChannelAnalytics />}
+    </div>
   );
 };

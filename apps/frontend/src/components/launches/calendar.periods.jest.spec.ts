@@ -29,8 +29,9 @@ const mockFetch = jest.fn(async () => ({
 jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
   useFetch: () => mockFetch,
 }));
+let mockDisplay = 'list';
 jest.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams('display=list'),
+  useSearchParams: () => new URLSearchParams(`display=${mockDisplay}`),
 }));
 const { CalendarWeekProvider, useCalendar } = require('./calendar.context');
 const {
@@ -38,6 +39,7 @@ const {
 } = require('@gitroom/frontend/components/layout/set.timezone');
 afterEach(() => {
   cleanup();
+  mockDisplay = 'list';
   jest.useRealTimers();
   setUserTimezone(null);
 });
@@ -95,4 +97,82 @@ it('refreshes relative server date boundaries after local midnight without touch
   expect(next).toBeDefined();
   expect(next.searchParams.get('search')).toBe('Summit');
   expect(next.searchParams.get('integrations')).toBe('channel-1');
+});
+
+it('opens the optional list alongside the calendar only on demand and returns from a day list to its original month', async () => {
+  mockDisplay = 'month';
+  mockFetch.mockClear();
+  function Consumer() {
+    const c = useCalendar();
+    return React.createElement(
+      'div',
+      {},
+      React.createElement('output', {}, `${c.display}:${c.startDate}`),
+      React.createElement(
+        'button',
+        {
+          onClick: () =>
+            c.setFilters({
+              startDate: '2026-09-01',
+              endDate: '2026-09-30',
+              display: 'month',
+              customer: null,
+            }),
+        },
+        'Month'
+      ),
+      React.createElement(
+        'button',
+        { onClick: () => c.setPostsPanelOpen(true) },
+        'Panel'
+      ),
+      React.createElement(
+        'button',
+        {
+          onClick: () => {
+            c.setListRange('day:2026-09-12');
+            c.setFilters({
+              startDate: '2026-09-12',
+              endDate: '2026-09-12',
+              display: 'list',
+              customer: null,
+            });
+          },
+        },
+        'Day list'
+      ),
+      React.createElement('button', { onClick: c.returnToCalendar }, 'Back')
+    );
+  }
+  render(
+    React.createElement(
+      SWRConfig,
+      { value: { provider: () => new Map() } },
+      React.createElement(
+        CalendarWeekProvider,
+        { integrations: [] },
+        React.createElement(Consumer)
+      )
+    )
+  );
+  await act(async () => {
+    fireEvent.click(screen.getByText('Month'));
+  });
+  mockFetch.mockClear();
+  await act(async () => {
+    fireEvent.click(screen.getByText('Panel'));
+  });
+  expect(
+    mockFetch.mock.calls.some((c: any[]) =>
+      String(c[0]).startsWith('/posts/list?')
+    )
+  ).toBe(true);
+  await act(async () => {
+    fireEvent.click(screen.getByText('Day list'));
+  });
+  expect(screen.getByText('list:2026-09-12')).toBeDefined();
+  await act(async () => {
+    fireEvent.click(screen.getByText('Back'));
+  });
+  expect(screen.getByText('month:2026-09-01')).toBeDefined();
 });

@@ -1,3 +1,4 @@
+import { PostMetricsService } from '@gitroom/nestjs-libraries/database/prisma/analytics/post-metrics.service';
 import {
   Controller,
   Get,
@@ -42,7 +43,8 @@ export class IgWebhookController {
   constructor(
     private _flowsService: FlowsService,
     private _integrationService: IntegrationService,
-    private _credentialService: CredentialService
+    private _credentialService: CredentialService,
+    private postMetrics: PostMetricsService
   ) {}
 
   @Get('/')
@@ -143,6 +145,23 @@ export class IgWebhookController {
 
         // Some Meta apps deliver messages via `changes` as well. Route them
         // through the same messaging handler when that happens.
+        if (change.field === 'story_insights') {
+          if (
+            change.value &&
+            this.isEntryAllowed(scope, ownersByEntryId, igAccountId)
+          )
+            try {
+              await this.postMetrics.storyWebhook(
+                igAccountId,
+                change.value,
+                scope.kind === 'orgs' ? [...scope.orgIds] : undefined
+              );
+            } catch {
+              shouldRetry = true;
+              this._logger.warn('Could not store Story insight observation');
+            }
+          continue;
+        }
         if (change.field === 'messages') {
           if (
             change.value &&

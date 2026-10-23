@@ -1,5 +1,6 @@
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'crypto';
 
 // Visibilidade do sininho por perfil: admin ve tudo; demais veem apenas
 // notificacoes org-wide (profileId null) ou dos perfis a que pertencem.
@@ -63,20 +64,46 @@ export class NotificationsRepository {
     organizationId: string,
     content: string,
     opts?: {
+      dedupeKey?: string;
       contentKey?: string;
       contentParams?: Record<string, string | number | undefined>;
       profileId?: string | null;
     }
   ) {
-    await this._notifications.model.notifications.create({
-      data: {
-        organizationId,
-        content,
-        contentKey: opts?.contentKey ?? null,
-        profileId: opts?.profileId ?? null,
-        ...(opts?.contentParams ? { contentParams: opts.contentParams } : {}),
-      },
-    });
+    try {
+      await this._notifications.model.notifications.create({
+        data: {
+          organizationId,
+          ...(opts?.dedupeKey
+            ? {
+                dedupeKey: createHash('sha256')
+                  .update(
+                    JSON.stringify([
+                      organizationId,
+                      opts.profileId || null,
+                      opts.dedupeKey,
+                    ])
+                  )
+                  .digest('hex'),
+              }
+            : {}),
+          content,
+          contentKey: opts?.contentKey ?? null,
+          profileId: opts?.profileId ?? null,
+          ...(opts?.contentParams ? { contentParams: opts.contentParams } : {}),
+        },
+      });
+      return true;
+    } catch (error) {
+      if (
+        opts?.dedupeKey &&
+        error instanceof Object &&
+        'code' in error &&
+        error.code === 'P2002'
+      )
+        return false;
+      throw error;
+    }
   }
 
   async getNotificationsSince(organizationId: string, since: string) {

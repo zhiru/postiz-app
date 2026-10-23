@@ -43,6 +43,9 @@ export interface IAuthenticator {
     date: number,
     integration?: Integration
   ): Promise<AnalyticsData[]>;
+  postAnalyticsLifetime?: boolean;
+  storyInsightsWindowHours?: number;
+  storyAnalytics?: IAuthenticator['postAnalytics'];
   postAnalytics?(
     integrationId: string,
     accessToken: string,
@@ -247,6 +250,10 @@ export interface SocialProvider
     mediaId: string
   ): Promise<{ success: true; deletedId: string }>;
   canImportPublishedPost?: (settings: Record<string, unknown>) => boolean;
+  listActiveStories?(
+    id: string,
+    accessToken: string
+  ): Promise<PublishedPostsPage>;
   listPublishedPosts?(
     id: string,
     accessToken: string,
@@ -340,6 +347,7 @@ export interface SocialProvider
 }
 
 export interface PublishedPlatformPost {
+  settings?: { post_type: 'story' };
   id: string;
   content: string;
   publishedAt: string;

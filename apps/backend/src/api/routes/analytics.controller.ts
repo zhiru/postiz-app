@@ -1,11 +1,6 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Post,
-  Query,
-  Res,
-} from '@nestjs/common';
+import { PostMetricsService } from '@gitroom/nestjs-libraries/database/prisma/analytics/post-metrics.service';
+import { GetAnalyticsPostsDto } from '@gitroom/nestjs-libraries/dtos/analytics/get.analytics.posts.dto';
+import { Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { Organization, Profile } from '@prisma/client';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
@@ -23,8 +18,55 @@ export class AnalyticsController {
   constructor(
     private _integrationService: IntegrationService,
     private _postsService: PostsService,
+    private metrics: PostMetricsService,
     private _analyticsReportService: AnalyticsReportService
   ) {}
+
+  @Get('/posts')
+  posts(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Query() query: GetAnalyticsPostsDto
+  ) {
+    return this.metrics.listPosts(org.id, query, profile?.id);
+  }
+  @Get('/posts/export')
+  async exportPosts(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Query() query: GetAnalyticsPostsDto,
+    @Res({ passthrough: true }) res: Response
+  ) {
+    res.header('Content-Type', 'text/csv; charset=utf-8');
+    res.header(
+      'Content-Disposition',
+      'attachment; filename="post-insights.csv"'
+    );
+    return this.metrics.csv(org.id, query, profile?.id);
+  }
+  @Get('/posts/:id')
+  postData(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string,
+    @Query('cursor') cursor?: string
+  ) {
+    return this.metrics.getPost(org.id, id, profile?.id, cursor);
+  }
+  @Post('/posts/:id/refresh')
+  async refreshPost(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string
+  ) {
+    const { data, ...result } = await this.metrics.refresh(
+      org.id,
+      id,
+      profile?.id,
+      true
+    );
+    return result;
+  }
 
   @Get('/report')
   async getReport(
@@ -43,7 +85,11 @@ export class AnalyticsController {
       `attachment; filename="postiz-report-${query.from}-${query.to}.csv"`
     );
 
-    return this._analyticsReportService.getReportCsv(org.id, query, profile?.id);
+    return this._analyticsReportService.getReportCsv(
+      org.id,
+      query,
+      profile?.id
+    );
   }
 
   @Post('/report/backfill')
@@ -67,7 +113,13 @@ export class AnalyticsController {
     @Param('integration') integration: string,
     @Query('date') date: string
   ) {
-    return this._integrationService.checkAnalytics(org, integration, date, false, profile?.id);
+    return this._integrationService.checkAnalytics(
+      org,
+      integration,
+      date,
+      false,
+      profile?.id
+    );
   }
 
   @Get('/post/:postId')
@@ -77,6 +129,12 @@ export class AnalyticsController {
     @Param('postId') postId: string,
     @Query('date') date: string
   ) {
-    return this._postsService.checkPostAnalytics(org.id, postId, +date, false, profile?.id);
+    return this._postsService.checkPostAnalytics(
+      org.id,
+      postId,
+      +date,
+      false,
+      profile?.id
+    );
   }
 }

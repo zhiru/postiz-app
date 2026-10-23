@@ -588,6 +588,7 @@ model Post {
   socialComments             SocialComments[]
   profileId                  String?
   profile                    Profile?                  @relation("profilePosts", fields: [profileId], references: [id])
+  metricSnapshots            PostMetricSnapshot[]
   reviewLinks                ReviewLink[]
 
   @@unique([integrationId, externalId])
@@ -611,6 +612,30 @@ model Post {
   @@index([profileId])
 }
 
+model PostMetricSnapshot {
+  id             String   @id @default(cuid())
+  organizationId String
+  profileId      String?
+  integrationId  String
+  postId         String?
+  remoteId       String
+  scopeKey       String
+  capturedHour   DateTime
+  capturedAt     DateTime @default(now())
+  source         String
+  status         String
+  period         String   @default("unknown")
+  metrics        Json
+  retryAt        DateTime?
+  failures       Int      @default(0)
+  post           Post?    @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@unique([scopeKey, integrationId, remoteId, capturedHour, source, status])
+  @@index([organizationId, profileId, capturedAt])
+  @@index([postId, capturedAt])
+  @@index([integrationId, remoteId])
+}
+
 model Notifications {
   id             String       @id @default(uuid())
   organizationId String
@@ -620,6 +645,7 @@ model Notifications {
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id])
+  dedupeKey      String? @unique
   contentKey     String?
   contentParams  Json?
   profileId      String?

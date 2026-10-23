@@ -1,4 +1,9 @@
 import {
+  AnalyticsSummaryTool,
+  AnalyticsPostsTool,
+  AnalyticsPostTool,
+} from './analytics.tools';
+import {
   UploadMediaTool,
   PrepareMediaUploadTool,
   CompleteMediaUploadTool,
@@ -47,6 +52,9 @@ import { UploadWidgetStatusTool } from '@gitroom/nestjs-libraries/chat/tools/upl
 import { UploadLinkTool } from './upload.link.tool';
 
 export const toolList = [
+  AnalyticsSummaryTool,
+  AnalyticsPostsTool,
+  AnalyticsPostTool,
   GetRemoteDeletionTool,
   DeleteRemotePostTool,
   GetPostTool,

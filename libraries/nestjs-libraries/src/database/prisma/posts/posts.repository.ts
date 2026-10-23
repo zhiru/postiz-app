@@ -964,7 +964,7 @@ export class PostsRepository {
           state: 'PUBLISHED',
           group: uuidv4(),
           creationMethod: 'UNKNOWN',
-          settings: '{}',
+          settings: JSON.stringify(item.settings || {}),
         },
       });
       return true;
