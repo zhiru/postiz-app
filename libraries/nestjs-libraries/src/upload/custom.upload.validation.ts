@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
 import { detectAllowedUploadMime } from '@gitroom/nestjs-libraries/upload/allowed.upload.mime';
 import { pipeline, Readable, Transform } from 'stream';
@@ -31,15 +32,36 @@ export function getMaxSize(mimeType: string): number {
 
 // Passes bytes through and fails once they exceed maxSize, so a body with a
 // missing or lying Content-Length cannot be streamed into storage unbounded
-export function maxSizeStream(maxSize: number) {
+export type UploadIntegrity = {
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+};
+export function maxSizeStream(maxSize: number, expected?: UploadIntegrity) {
   let total = 0;
+  const hash = expected ? createHash('sha256') : undefined;
   return new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       total += chunk.length;
-      if (total > maxSize) {
+      if (total > maxSize || (expected && total > expected.sizeBytes)) {
         return callback(new BadRequestException('File is too large.'));
       }
+      hash?.update(chunk);
       callback(null, chunk);
+    },
+    flush(callback) {
+      if (
+        expected &&
+        (total !== expected.sizeBytes ||
+          hash!.digest('hex') !== expected.sha256)
+      ) {
+        return callback(
+          new BadRequestException(
+            'File size or SHA-256 does not match the upload manifest.'
+          )
+        );
+      }
+      callback();
     },
   });
 }
@@ -53,7 +75,8 @@ export function maxSizeStream(maxSize: number) {
 export async function uploadStreamToStorage(
   storage: IUploadProvider,
   webStream: ReadableStream,
-  declaredSize = 0
+  declaredSize = 0,
+  expected?: UploadIntegrity
 ) {
   let sniffed: ReadableStream & { fileType?: { mime: string; ext: string } };
   try {
@@ -67,6 +90,13 @@ export async function uploadStreamToStorage(
     throw new BadRequestException('Unsupported file type.');
   }
 
+  if (expected && detected.mime !== expected.mimeType) {
+    await sniffed.cancel();
+    throw new BadRequestException(
+      'Detected MIME type does not match the upload manifest.'
+    );
+  }
+
   const maxSize = getMaxSize(detected.mime);
   if (declaredSize > maxSize) {
     await sniffed.cancel();
@@ -76,7 +106,7 @@ export async function uploadStreamToStorage(
   // pipeline (not pipe) so failing the cap also tears down the source
   const body = pipeline(
     Readable.fromWeb(sniffed as any),
-    maxSizeStream(maxSize),
+    maxSizeStream(maxSize, expected),
     () => {}
   );
 

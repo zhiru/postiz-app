@@ -91,6 +91,8 @@ Criações em `POST /public/v1/posts` passam a exigir `Idempotency-Key` (8–200
 
 ## Validação e upload local
 
+Para transferência idempotente de bytes reais, manifesto SHA-256 e upload de arquivos maiores por sessão temporária, veja [Transferência de mídia pelo MCP](mcp-media-transfer.md). O guia inclui `uploadMediaTool`, `prepareMediaUpload`, `completeMediaUpload` e um cliente executável que preserva a ordem do carrossel e cria somente rascunhos.
+
 `validatePostTool` aceita ID/versão e as mesmas alterações opcionais da edição. Reutiliza DTOs, limite de legenda, configurações e regras de mídia dos provedores. Retorna `valid`, `errors:[{field,code,message}]`, `warnings`. Imagens têm dimensões medidas; vídeos locais usam ffprobe e saídas do processador usam seus metadados. Um vídeo remoto sem metadados verificáveis precisa ser preparado antes. As regras de Reels seguem a [coleção oficial da Meta](https://www.postman.com/meta/instagram/folder/y6xustx/reels-publishing), incluindo codec, largura e duração quando os metadados estiverem disponíveis. O provedor ainda pode rejeitar permissões, convites ou restrições da conta que só conhece no envio. A validação nunca publica.
 
 O cliente MCP pode enviar `fileReference:{name,base64}` com bytes reais até aproximadamente 4,5 MB; isso não é um caminho que o servidor possa ler no computador do usuário. Para arquivos maiores, `uploadLinkTool` retorna `uploadUrl`, `uploadHeaders` e `sessionId`; envie multipart `file=@arquivo` à rota de upload existente, com `X-Postiz-Upload-Ticket`. Não registre ticket, chave ou base64 nos logs. Nenhuma URL pública de origem é necessária. O arquivo armazenado ainda precisa ser acessível ao provedor quando a rede exigir download.

@@ -1,3 +1,5 @@
+import { MediaTransferService } from './media/media.transfer.service';
+import { MediaTransferRepository } from './media/media.transfer.repository';
 import {
   NeuralTalkProvider,
   NEURALTALK_DELIVERY_STORE,
@@ -134,6 +136,8 @@ import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/p
     AutopostService,
     SignatureService,
     MediaService,
+    MediaTransferService,
+    MediaTransferRepository,
     MediaRepository,
     AgenciesService,
     AgenciesRepository,
