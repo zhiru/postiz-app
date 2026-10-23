@@ -981,7 +981,11 @@ export class PostsService {
   }
 
   private async withRemoteDeletion<
-    T extends { id: string; releaseId?: string | null }
+    T extends {
+      id: string;
+      releaseId?: string | null;
+      integration?: { providerIdentifier?: string };
+    }
   >(org: string, profile: string | undefined, posts: T[]) {
     const deleted = await this._postRepository.remoteDeletedPostIds(
       org,
@@ -991,6 +995,10 @@ export class PostsService {
     return posts.map((post) => ({
       ...post,
       remoteDeleted: deleted.has(post.id),
+      remoteDeletionSupported: Boolean(
+        post.integration?.providerIdentifier &&
+          this.supportsRemoteDeletion(post.integration.providerIdentifier)
+      ),
     }));
   }
 

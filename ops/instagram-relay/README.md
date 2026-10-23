@@ -65,3 +65,12 @@ Replace `EVENT_SHA256` with the 64-character hash from the dead-letter log. Use 
 ## Roll back ingress
 
 Restore the saved active HTTPS vhost configuration, run the Apache configuration test, then reload Apache gracefully. The active callback URL will again reach Hermes directly. Keep the Instagram callback on the active hostname; do not restore the suspended legacy hostname. Keep the relay running until accepted pending deliveries have drained, or retain the spool and resolve dead letters later. Do not remove the spool, rotate signing secrets or restore an application database for this rollback.
+
+
+### Story insights routing
+
+App-level `instagram.story_insights` uses the existing callback and relay. Preserve all existing fields, callback URLs and versions when subscribing. Only Story metric changes are withheld from NeuralTalk, whose legacy test-message handler expects sender/recipient; public comments, direct messages, standby and other changes retain the original route. Mixed envelopes are re-signed after removing just the metric changes. Postiz still receives only connected accounts on the explicit allowlist. Story-only samples outside the allowlist are acknowledged with a durable receipt, without queued payload or dispatch.
+
+Before rollout, inspect pending/dead entries: persisted envelopes keep their original destination bodies. Never purge or retry a mixed event automatically. Preserve the spool and signing secret, back up the relay/config, run `python3 -m unittest -q` in this directory and confirm an empty queue before replacing the running relay. Adding an already connected Instagram account to the allowlist also requires the corresponding Page installation for the same Meta app; do not remove existing Page subscription fields.
+
+Acceptance: send a signed Story-only envelope with real connected account IDs but an empty value (no media ID or metrics). Confirm the public callback accepts it, Postiz acknowledges all allowed entries, NeuralTalk is skipped, duplicate input is deduplicated and an invalid signature is rejected. This checks transport/routing/HMAC without creating fake metrics, messages or posts; it is not evidence that Meta has delivered a real expired Story. Meta's dashboard sample and eventual live event remain separate checks. Production notifications also depend on the app's permission access level, asset ownership and Meta review.

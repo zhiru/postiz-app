@@ -37,6 +37,12 @@ const {
 } = require('@testing-library/react');
 const dayjs = require('dayjs');
 const mockModal = jest.fn();
+const mockClipboard = jest.fn().mockResolvedValue(undefined);
+let mockCanWrite = true;
+Object.defineProperty(global.navigator, 'clipboard', {
+  value: { writeText: mockClipboard },
+  configurable: true,
+});
 jest.mock('react-dnd', () => ({
   useDrag: () => [{ opacity: 1 }, () => {}],
   useDrop: () => [{}, () => {}],
@@ -45,7 +51,7 @@ jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({
   useModals: () => ({ openModal: mockModal }),
 }));
 jest.mock('@gitroom/frontend/hooks/use-profile-permissions', () => ({
-  useProfilePermissions: () => ({ canWrite: true }),
+  useProfilePermissions: () => ({ canWrite: mockCanWrite }),
 }));
 jest.mock('@gitroom/frontend/components/layout/user.context', () => ({
   useUser: () => ({}),
@@ -110,6 +116,7 @@ const props = () => ({
 afterEach(() => {
   cleanup();
   jest.clearAllMocks();
+  mockCanWrite = true;
 });
 afterAll(() => dom.window.close());
 it('opens drafts for editing through click and keyboard, with one actions button', () => {
@@ -142,7 +149,7 @@ it('supports menu keyboard navigation, Escape and outside clicks', () => {
   expect(document.activeElement).toBe(edit);
   fireEvent.keyDown(edit, { key: 'ArrowDown' });
   expect(document.activeElement).toBe(
-    screen.getByRole('menuitem', { name: 'Duplicate post' })
+    screen.getByRole('menuitem', { name: 'Change date and time' })
   );
   fireEvent.keyDown(document, { key: 'Escape' });
   expect(screen.queryByRole('menu')).toBeNull();
@@ -317,3 +324,78 @@ it('opens the selected month day in the server-filtered list without creating a 
   });
   expect(mockModal).not.toHaveBeenCalled();
 });
+
+it('copies captions and post links without changing the publication', async () => {
+  const value = props();
+  value.post.content = 'Paragraph one\n\n📅 Date\n📍 Place';
+  render(React.createElement(CalendarItem, value));
+  fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+  await act(async () =>
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy caption' }))
+  );
+  expect(mockClipboard).toHaveBeenLastCalledWith(value.post.content);
+  fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+  await act(async () =>
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy post link' }))
+  );
+  expect(mockClipboard).toHaveBeenLastCalledWith('http://localhost/p/post');
+  expect(value.editPost).not.toHaveBeenCalled();
+  expect(value.deletePost).not.toHaveBeenCalled();
+});
+it('opens the existing editor to change the date without scheduling automatically', () => {
+  const value = props();
+  render(React.createElement(CalendarItem, value));
+  fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+  fireEvent.click(
+    screen.getByRole('menuitem', { name: 'Change date and time' })
+  );
+  expect(value.editPost).toHaveBeenCalledTimes(1);
+  expect(value.deletePost).not.toHaveBeenCalled();
+});
+it.each(['post', 'carousel', 'video', 'story'])(
+  'shows separate local/remote removal for supported published %s, without editing or deleting',
+  (format: string) => {
+    const value: any = props();
+    value.state = value.post.state = 'PUBLISHED';
+    Object.assign(value.post, {
+      releaseId: '123',
+      releaseURL: 'https://www.instagram.com/p/example/',
+      remoteDeletionSupported: true,
+      format,
+    });
+    render(React.createElement(CalendarItem, value));
+    fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+    expect(
+      screen.getByRole('menuitem', { name: 'Delete from network' })
+    ).not.toBeNull();
+    expect(
+      screen.getByRole('menuitem', { name: 'Remove from Mali Posts' })
+    ).not.toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Edit post' })).toBeNull();
+    expect(
+      screen.queryByRole('menuitem', { name: 'Change date and time' })
+    ).toBeNull();
+    expect(
+      screen.getByRole('menuitem', { name: 'Copy network link' })
+    ).not.toBeNull();
+    expect(value.deletePost).not.toHaveBeenCalled();
+  }
+);
+it.each(['unsupported', 'already_deleted', 'viewer'])(
+  'does not offer remote deletion for %s',
+  (kind: string) => {
+    const value: any = props();
+    value.state = value.post.state = 'PUBLISHED';
+    Object.assign(value.post, {
+      releaseId: '123',
+      remoteDeletionSupported: kind !== 'unsupported',
+      remoteDeleted: kind === 'already_deleted',
+    });
+    mockCanWrite = kind !== 'viewer';
+    render(React.createElement(CalendarItem, value));
+    fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+    expect(
+      screen.queryByRole('menuitem', { name: 'Delete from network' })
+    ).toBeNull();
+  }
+);
