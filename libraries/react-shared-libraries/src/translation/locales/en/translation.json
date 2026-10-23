@@ -2413,5 +2413,10 @@
   "neuraltalk_remove_destination": "Remove {{name}}",
   "neuraltalk_inbox_unavailable": "Sending is unavailable in this inbox",
   "post_recurrence_unavailable": "A selected channel does not support recurring posts. Schedule a single delivery or send now.",
-  "post_recurrence_unavailable_channels": "{{channels}} does not support recurring posts. Remove the recurrence to save, schedule a single delivery or send now."
+  "post_recurrence_unavailable_channels": "{{channels}} does not support recurring posts. Remove the recurrence to save, schedule a single delivery or send now.",
+  "neuraltalk_connection_source": "Connection",
+  "neuraltalk_saved_default": "Saved default connection",
+  "neuraltalk_new_connection": "Use another token",
+  "neuraltalk_remove_default": "Remove saved default",
+  "neuraltalk_save_default": "Save as default for this profile"
 }

@@ -2413,5 +2413,10 @@
   "neuraltalk_remove_destination": "Remover {{name}}",
   "neuraltalk_inbox_unavailable": "Envio indisponível nesta caixa de entrada",
   "post_recurrence_unavailable": "Um canal selecionado não permite postagens recorrentes. Agende um envio único ou envie agora.",
-  "post_recurrence_unavailable_channels": "{{channels}} não permite postagens recorrentes. Remova a repetição para salvar, agendar um envio único ou enviar agora."
+  "post_recurrence_unavailable_channels": "{{channels}} não permite postagens recorrentes. Remova a repetição para salvar, agendar um envio único ou enviar agora.",
+  "neuraltalk_connection_source": "Conexão",
+  "neuraltalk_saved_default": "Conexão padrão salva",
+  "neuraltalk_new_connection": "Usar outro token",
+  "neuraltalk_remove_default": "Remover conexão padrão",
+  "neuraltalk_save_default": "Salvar como padrão deste perfil"
 }

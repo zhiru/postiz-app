@@ -4,13 +4,19 @@ O NeuralTalk é um canal de envio no editor existente do Mali Posts. Não é um 
 
 ## Conectar e enviar
 
-1. Em adicionar canal, escolha NeuralTalk. Informe a URL HTTPS da instância (ex.: https://chat.neuraltalk.com.br) e a chave de API do seu usuário NeuralTalk. A chave fica em memória só durante a conexão e é criptografada no servidor; não a envie pelo chat.
+1. Em adicionar canal, escolha NeuralTalk. Informe a URL HTTPS da instância (ex.: https://chat.neuraltalk.com.br) e a chave de API do seu usuário NeuralTalk. Marque “Salvar como padrão deste perfil” para reutilizar a conexão ao adicionar outras caixas. A chave é criptografada no servidor; não a envie pelo chat.
 2. Selecione uma conta/tenant autorizada (ex.: Abrasel) e uma caixa disponível para mensagens de saída. A conexão representa essa conta e caixa dentro do perfil atual do Mali Posts.
 3. Crie um post, selecione o canal NeuralTalk e busque os contatos/grupos. É possível selecionar vários destinos e manter a seleção ao pesquisar ou trocar de página.
 4. Escreva a mensagem no editor, anexe imagens/vídeos e inclua links. Use rascunho, enviar agora ou agendar como nos demais canais. O envio só acontece pela ação explícita de publicar/agendar.
 5. O calendário acompanha o processamento. O post só é concluído após confirmar o identificador remoto ou o status delivered/read de todos os destinos. O link abre a primeira conversa no NeuralTalk.
 
 Para grupos, é necessária uma caixa QuePasa com suporte a grupos. Os contatos/grupos devem já existir no NeuralTalk e estar vinculados à caixa selecionada. O acesso é revalidado na execução. Esta integração não cria grupos nem importa a agenda do WhatsApp.
+
+## Conexão padrão
+
+Ao reabrir o formulário, a conexão padrão do perfil atual permite continuar sem informar o token novamente. Também é possível escolher uma conexão NeuralTalk existente como origem e salvá-la como padrão. Trocar ou remover o padrão afeta as próximas conexões; os canais já conectados conservam suas próprias credenciais. O padrão não é compartilhado automaticamente entre perfis/clientes.
+
+O navegador recebe apenas a URL e os nomes/IDs dos canais disponíveis. O token não é devolvido nem armazenado no navegador. O padrão só é salvo após a consulta de contas validar a credencial.
 
 ## Limites e recuperação
 
@@ -26,9 +32,13 @@ Excluir o post do Mali Posts não apaga mensagens enviadas no NeuralTalk.
 
 Rotas autenticadas do painel, com permissão de gestão do perfil e criação de canal:
 
-- POST /integrations/neuraltalk/accounts `{baseUrl,apiToken}` → `{accounts:[{id,name}]}`.
+- GET /integrations/neuraltalk/default-connection → `{configured,baseUrl?,connections:[{id,name}]}`.
+- DELETE /integrations/neuraltalk/default-connection remove somente o padrão do perfil.
+- POST /integrations/neuraltalk/accounts `{baseUrl,apiToken,saveAsDefault?}` → `{accounts:[{id,name}]}`.
 - POST /integrations/neuraltalk/inboxes `{baseUrl,apiToken,accountId}` → `{inboxes:[{id,name,channelType,supportsGroups,available}]}`.
 - POST /integrations/neuraltalk/connect `{baseUrl,apiToken,accountId,inboxId}` → `{id}` do canal.
+
+As três rotas POST aceitam exatamente uma origem: `{baseUrl,apiToken}`, `{useSavedConnection:true}` ou `{savedIntegrationId}`. Não combine uma origem salva com URL/token. `saveAsDefault:true` é aceito na consulta de contas; conta e caixa continuam sendo selecionadas separadamente.
 
 IDs são strings; accountId pode ser UUID. As respostas não incluem a chave, pubsub_token, hmac_token ou credenciais de caixa. Requisições externas usam HTTPS público e proteção contra SSRF/redirect.
 

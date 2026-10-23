@@ -26,9 +26,14 @@ const {
 const { SWRConfig } = require('swr');
 const { useForm, FormProvider } = require('react-hook-form');
 const mockFetch = jest.fn();
+let mockDefaultConnection: any = { configured: false, connections: [] };
+const mockApi = (url: string, options?: any) =>
+  url.endsWith('/default-connection') && !options
+    ? Promise.resolve({ ok: true, json: async () => mockDefaultConnection })
+    : mockFetch(url, options);
 const mockDestinations = jest.fn();
 jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
-  useFetch: () => mockFetch,
+  useFetch: () => mockApi,
 }));
 jest.mock('@gitroom/react/translation/get.transation.service.client', () => ({
   useT:
@@ -62,6 +67,9 @@ const {
   NeuralTalkDestinations,
 } = require('../new-launch/providers/neuraltalk/neuraltalk.destinations');
 const click = async (element: HTMLElement) => {
+  await waitFor(() =>
+    expect((element as HTMLButtonElement).disabled).not.toBe(true)
+  );
   await act(async () => {
     fireEvent.click(element);
   });
@@ -87,6 +95,7 @@ const withCache = (component: any) => {
 afterAll(() => dom.window.close());
 afterEach(() => {
   cleanup();
+  mockDefaultConnection = { configured: false, connections: [] };
   jest.clearAllMocks();
 });
 
@@ -392,4 +401,54 @@ it('keeps normal channel recurrence enabled and allows one-time NeuralTalk posts
   );
   expect(screen.getByText('Week')).toBeTruthy();
   expect(screen.queryByRole('status')).toBeNull();
+});
+
+it('reopens with a saved default and connects without requesting or caching its token', async () => {
+  mockDefaultConnection = {
+    configured: true,
+    baseUrl: 'https://chat.neuraltalk.com.br',
+    connections: [],
+  };
+  mockFetch
+    .mockResolvedValueOnce(
+      success({ accounts: [{ id: 'tenant', name: 'Abrasel' }] })
+    )
+    .mockResolvedValueOnce(success({ inboxes: [{ id: '8', name: 'Groups' }] }))
+    .mockResolvedValueOnce(success({ id: 'channel' }));
+  const complete = jest.fn();
+  withCache(
+    React.createElement(NeuralTalkAccountModal, {
+      onComplete: complete,
+      onCancel: jest.fn(),
+    })
+  );
+  await screen.findByText('Saved default connection');
+  expect(screen.queryByLabelText('API access token')).toBeNull();
+  await click(screen.getByRole('button', { name: 'Continue' }));
+  await click(await screen.findByRole('button', { name: 'Abrasel' }));
+  await click(await screen.findByRole('button', { name: 'Groups' }));
+  expect(JSON.parse(mockFetch.mock.calls[2][1].body)).toEqual({
+    useSavedConnection: true,
+    accountId: 'tenant',
+    inboxId: '8',
+  });
+  expect(complete).toHaveBeenCalledTimes(1);
+});
+
+it('reuses an existing channel and saves its default without requiring the token again', async () => {
+  mockDefaultConnection = { configured: false, connections: [{ id: 'existing', name: 'Existing inbox' }] };
+  mockFetch.mockResolvedValueOnce(success({ accounts: [{ id: 'tenant', name: 'Abrasel' }] }));
+  withCache(React.createElement(NeuralTalkAccountModal, { onComplete: jest.fn(), onCancel: jest.fn() }));
+  await screen.findByText('Existing inbox');
+  expect(screen.queryByLabelText('API access token')).toBeNull();
+  await click(screen.getByRole('button', { name: 'Continue' }));
+  expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ savedIntegrationId: 'existing', saveAsDefault: true });
+});
+it('removes only the saved default and offers a replacement token', async () => {
+  mockDefaultConnection = { configured: true, connections: [] };
+  mockFetch.mockResolvedValueOnce(success({ configured: false }));
+  withCache(React.createElement(NeuralTalkAccountModal, { onComplete: jest.fn(), onCancel: jest.fn() }));
+  await click(await screen.findByRole('button', { name: 'Remove saved default' }));
+  expect(mockFetch.mock.calls[0]).toEqual(['/integrations/neuraltalk/default-connection', { method: 'DELETE' }]);
+  expect(screen.getByLabelText('API access token')).toBeDefined();
 });
