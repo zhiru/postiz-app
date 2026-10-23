@@ -43,6 +43,7 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { ExistingDataContextProvider } from '@gitroom/frontend/components/launches/helpers/use.existing.data';
 import { useDrag, useDrop } from 'react-dnd';
 import { Integration, Post, State, Tags } from '@prisma/client';
+import type { PostFormat } from '@gitroom/helpers/utils/posts.list.minify';
 import { postContentPlainText } from '@gitroom/helpers/utils/sanitize.post.content';
 import { useAddProvider } from '@gitroom/frontend/components/launches/add.provider.component';
 import { useToaster } from '@gitroom/react/toaster/toaster';
@@ -619,7 +620,19 @@ export const DayView = () => {
   );
 };
 export const WeekView = () => {
-  const { startDate, endDate, loading, focusRequest, posts } = useCalendar();
+  const calendar = useCalendar();
+  const { startDate, endDate, loading, focusRequest, posts } = calendar;
+  const [mobileDay, setMobileDay] = useState(() =>
+    newDayjs().isSameOrAfter(newDayjs(startDate), 'day') &&
+    newDayjs().isSameOrBefore(newDayjs(endDate), 'day')
+      ? newDayjs().format('YYYY-MM-DD')
+      : startDate
+  );
+  useEffect(() => {
+    setMobileDay((selected) =>
+      selected >= startDate && selected <= endDate ? selected : startDate
+    );
+  }, [startDate, endDate]);
   const scrollRef = useRef<HTMLDivElement>(null);
   useFocusCurrentTime(
     scrollRef,
@@ -650,7 +663,41 @@ export const WeekView = () => {
 
   return (
     <div className="flex flex-col text-textColor flex-1">
-      <div className="flex-1 relative">
+      <div
+        className="hidden mobile:flex gap-1 overflow-x-auto pb-2"
+        aria-label={t('week_days', 'Days of the week')}
+      >
+        {localizedDays.map((day) => (
+          <button
+            key={day.day}
+            type="button"
+            aria-pressed={mobileDay === day.date.format('YYYY-MM-DD')}
+            onClick={() => setMobileDay(day.date.format('YYYY-MM-DD'))}
+            className={clsx(
+              'flex-1 min-w-[42px] rounded-lg px-1 py-2 text-xs',
+              mobileDay === day.date.format('YYYY-MM-DD')
+                ? 'bg-boxFocused text-textItemFocused'
+                : 'bg-newTableHeader'
+            )}
+          >
+            <span className="block">{day.date.format('ddd')}</span>
+            <span className="block font-semibold">{day.date.format('D')}</span>
+          </button>
+        ))}
+      </div>
+      <div className="hidden mobile:flex flex-1 min-h-0">
+        <CalendarContext.Provider
+          value={{
+            ...calendar,
+            display: 'day',
+            startDate: mobileDay,
+            endDate: mobileDay,
+          }}
+        >
+          <DayView />
+        </CalendarContext.Provider>
+      </div>
+      <div className="flex-1 relative mobile:hidden">
         <div
           ref={scrollRef}
           className="grid [grid-template-columns:90px_repeat(7,_minmax(0,_1fr))] tablet:[grid-template-columns:72px_repeat(7,_minmax(100px,_1fr))] gap-[4px] rounded-[10px] absolute h-full start-0 top-0 w-full overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor"
@@ -703,7 +750,28 @@ export const WeekView = () => {
   );
 };
 export const MonthView = () => {
-  const { startDate } = useCalendar();
+  const calendar = useCalendar();
+  const { startDate, posts, postDates } = calendar;
+  const [mobileDay, setMobileDay] = useState(() =>
+    newDayjs(startDate).isSame(newDayjs(), 'month')
+      ? newDayjs().format('YYYY-MM-DD')
+      : startDate
+  );
+  useEffect(() => {
+    setMobileDay(
+      newDayjs(startDate).isSame(newDayjs(), 'month')
+        ? newDayjs().format('YYYY-MM-DD')
+        : startDate
+    );
+  }, [startDate]);
+  const dayCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const post of posts) {
+      const day = postDates.get(post)?.format('YYYY-MM-DD');
+      if (day) counts.set(day, (counts.get(day) || 0) + 1);
+    }
+    return counts;
+  }, [posts, postDates]);
   const t = useT();
 
   // Use dayjs to get localized day names
@@ -724,7 +792,6 @@ export const MonthView = () => {
 
   const calendarDays = useMemo(() => {
     const monthStart = newDayjs(startDate);
-    const currentMonth = monthStart.month();
 
     const startOfMonth = monthStart.startOf('month');
 
@@ -740,8 +807,10 @@ export const MonthView = () => {
     let currentDay = calendarStartDate;
     for (let i = 0; i < 42; i++) {
       let label = 'current-month';
-      if (currentDay.month() < currentMonth) label = 'previous-month';
-      if (currentDay.month() > currentMonth) label = 'next-month';
+      if (currentDay.isBefore(monthStart.startOf('month'), 'day'))
+        label = 'previous-month';
+      if (currentDay.isAfter(monthStart.endOf('month'), 'day'))
+        label = 'next-month';
       calendarDays.push({
         day: currentDay,
         label,
@@ -755,7 +824,63 @@ export const MonthView = () => {
 
   return (
     <div className="flex flex-col text-textColor flex-1">
-      <div className="flex-1 flex relative">
+      <div
+        className="hidden mobile:grid grid-cols-7 gap-1 pb-3"
+        aria-label={t('choose_day', 'Choose a day')}
+      >
+        {localizedDays.map((day) => (
+          <span
+            key={day.name}
+            className="text-center text-xs text-textItemBlur"
+          >
+            {day.short}
+          </span>
+        ))}
+        {calendarDays.map(({ day, label }) => {
+          const key = day.format('YYYY-MM-DD');
+          return (
+            <button
+              key={key}
+              type="button"
+              disabled={label !== 'current-month'}
+              aria-pressed={mobileDay === key}
+              aria-label={`${day.format('L')} · ${dayCounts.get(key) || 0} ${t(
+                'posts',
+                'posts'
+              )}`}
+              onClick={() => setMobileDay(key)}
+              className={clsx(
+                'relative min-h-[36px] rounded-md text-sm',
+                mobileDay === key
+                  ? 'bg-boxFocused text-textItemFocused'
+                  : 'bg-newTableHeader',
+                label !== 'current-month' && 'opacity-40'
+              )}
+            >
+              {day.format('D')}
+              {!!dayCounts.get(key) && (
+                <span
+                  aria-hidden
+                  className="absolute bottom-1 start-1/2 h-1 w-1 rounded-full bg-btnPrimary"
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <div className="hidden mobile:flex flex-1 min-h-0">
+        <CalendarContext.Provider
+          value={{
+            ...calendar,
+            display: 'day',
+            startDate: mobileDay,
+            endDate: mobileDay,
+          }}
+        >
+          <DayView />
+        </CalendarContext.Provider>
+      </div>
+      <div className="flex-1 flex relative mobile:hidden">
         {/* on phones the whole month fits the width, posts show as channel avatars */}
         <div className="grid grid-cols-7 tablet:[grid-template-columns:repeat(7,_minmax(100px,_1fr))] mobile:!grid-cols-7 grid-rows-[62px_auto] mobile:grid-rows-[36px_auto] gap-[4px] mobile:gap-[2px] rounded-[10px] absolute start-0 top-0 overflow-auto w-full h-full scrollbar scrollbar-thumb-tableBorder scrollbar-track-secondary">
           {localizedDays.map((day) => (
@@ -797,11 +922,14 @@ export const ListView = () => {
     listTotalPages,
     setListPage,
     setListPageSize,
+    listRange,
+    customer,
+    setFilters,
   } = useCalendar();
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     listRef.current?.scrollTo({ top: 0 });
-  }, [listPage, listPageSize, listState]);
+  }, [listPage, listPageSize, listState, listRange]);
   const emptyMessage =
     listState === 'scheduled'
       ? t('no_upcoming_posts', 'No upcoming posts scheduled')
@@ -859,11 +987,25 @@ export const ListView = () => {
         >
           {groupedPosts.map(([dateKey, datePosts]) => (
             <Fragment key={dateKey}>
-              <div className="text-center text-[14px] min-h-[21px] text-textColor font-[500] mt-[10px]">
+              <button
+                type="button"
+                className="sticky top-0 z-20 bg-newBgColorInner py-2 text-start text-sm font-semibold px-3"
+                onClick={() =>
+                  setFilters({
+                    startDate: dateKey,
+                    endDate: dateKey,
+                    display: 'day',
+                    customer,
+                  })
+                }
+                aria-label={`${t('view_day', 'View day')}: ${newDayjs(
+                  dateKey
+                ).format('L')}`}
+              >
                 {newDayjs(dateKey).format(
                   isUSCitizen() ? 'dddd, MMMM D, YYYY' : 'dddd, D MMMM YYYY'
                 )}
-              </div>
+              </button>
               <div className="flex flex-col gap-[10px] mb-[20px] px-[10px]">
                 {datePosts.map((post) => (
                   <CalendarItem
@@ -940,6 +1082,9 @@ export const CalendarColumn: FC<{
     signature,
     loading,
     currentHour,
+    setFilters,
+    setListRange,
+    customer,
   } = useCalendar();
   const modal = useModals();
   const fetch = useFetch();
@@ -1197,8 +1342,22 @@ export const CalendarColumn: FC<{
             'pt-[3px] text-[14px] mobile:pt-[2px] mobile:text-[12px] flex justify-center'
           )}
         >
-          {/* every day number gets the same box so only today's is filled */}
-          <div
+          <button
+            type="button"
+            aria-label={`${t(
+              'view_day_posts',
+              'View posts for day'
+            )}: ${getDate.format('L')}`}
+            onClick={() => {
+              const key = getDate.format('YYYY-MM-DD');
+              setListRange(`day:${key}`);
+              setFilters({
+                startDate: key,
+                endDate: key,
+                display: 'list',
+                customer,
+              });
+            }}
             className={clsx(
               'h-[24px] min-w-[24px] px-[5px] mobile:h-[20px] mobile:min-w-[20px] mobile:px-[4px] rounded-[6px] flex items-center justify-center',
               getDate.isSame(currentHour, 'day') &&
@@ -1206,7 +1365,7 @@ export const CalendarColumn: FC<{
             )}
           >
             {getDate.date()}
-          </div>
+          </button>
         </div>
       )}
       <div
@@ -1363,6 +1522,126 @@ export const CalendarColumn: FC<{
     </div>
   );
 });
+export const PostPreviewFrame: FC<{ postId: string; share: boolean }> = ({
+  postId,
+  share,
+}) => {
+  const t = useT();
+  const [attempt, setAttempt] = useState(0);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(
+    'loading'
+  );
+  useEffect(() => {
+    if (status !== 'loading') return;
+    const timeout = setTimeout(() => setStatus('error'), 20000);
+    return () => clearTimeout(timeout);
+  }, [attempt, status]);
+  return (
+    <div
+      className="relative flex-1 min-h-0 overflow-hidden"
+      aria-busy={status === 'loading'}
+    >
+      {status !== 'ready' && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-newBgColorInner">
+          <div role={status === 'error' ? 'alert' : 'status'}>
+            {status === 'error'
+              ? t(
+                  'post_preview_load_failed',
+                  'The preview could not be loaded. Try again.'
+                )
+              : t('loading_preview', 'Loading preview…')}
+          </div>
+          {status === 'error' && (
+            <Button
+              onClick={() => {
+                setStatus('loading');
+                setAttempt((n) => n + 1);
+              }}
+            >
+              {t('try_again', 'Try again')}
+            </Button>
+          )}
+        </div>
+      )}
+      <iframe
+        key={attempt}
+        className="h-full w-full border-0"
+        title={t('preview_post', 'Preview post')}
+        src={`/p/${encodeURIComponent(postId)}${share ? '?share=true' : ''}`}
+        onLoad={(event) => {
+          const frame = event.currentTarget;
+          // An iframe fires an initial about:blank load before the actual page.
+          try {
+            if (frame.contentWindow?.location.href === 'about:blank') return;
+            setStatus(
+              frame.contentDocument?.querySelector(
+                '[data-post-preview-content]'
+              )
+                ? 'ready'
+                : 'error'
+            );
+          } catch {
+            setStatus('error');
+          }
+        }}
+        onError={() => setStatus('error')}
+      />
+    </div>
+  );
+};
+
+// Media rendering adapted from PostQueen f8e33f5, retaining our status and action controls.
+const CalendarMediaThumb: FC<{
+  media: { src: string; video: boolean } | null;
+  display: string;
+}> = ({ media, display }) => {
+  if (!media) return null;
+  const videoFile =
+    media.video && /\.(mp4|mov|webm|m4v)(?:[?#]|$)/i.test(media.src);
+  return (
+    <span
+      data-calendar-media={display}
+      className={clsx(
+        'relative shrink-0 overflow-hidden rounded bg-newSettings',
+        display === 'month'
+          ? 'h-5 w-5 mobile:hidden'
+          : display === 'week'
+          ? 'h-8 w-8'
+          : 'h-14 w-14'
+      )}
+    >
+      {videoFile ? (
+        <video
+          className="h-full w-full object-cover"
+          src={`${media.src.split('#')[0]}#t=0.1`}
+          preload="metadata"
+          muted
+          playsInline
+          aria-hidden
+        />
+      ) : (
+        <img
+          className="h-full w-full object-cover"
+          src={media.src}
+          alt=""
+          loading="lazy"
+          decoding="async"
+        />
+      )}
+      {media.video && (
+        <span
+          aria-hidden
+          className="absolute inset-0 grid place-items-center bg-black/20 text-white"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9 6.8v10.4L18 12 9 6.8Z" />
+          </svg>
+        </span>
+      )}
+    </span>
+  );
+};
+
 export const CalendarItem: FC<{
   date: dayjs.Dayjs;
   isBeforeNow: boolean;
@@ -1379,6 +1658,8 @@ export const CalendarItem: FC<{
   showTime?: boolean;
   post: Post & {
     integration: Integration;
+    format?: PostFormat;
+    mediaPreview?: { src: string; video: boolean } | null;
     tags: {
       tag: Tags;
     }[];
@@ -1401,6 +1682,14 @@ export const CalendarItem: FC<{
     missingRelease,
     openPost,
   } = props;
+  const formatLabel =
+    post.format === 'story'
+      ? t('story', 'Story')
+      : post.format === 'video'
+      ? t('video', 'Video')
+      : post.format === 'carousel'
+      ? t('carousel', 'Carousel')
+      : t('feed', 'Feed');
   const remoteDeleted = Boolean((post as any).remoteDeleted);
   const overdueDraft =
     state === 'DRAFT' && fromUtc(post.publishDate).isBefore(newDayjs());
@@ -1419,14 +1708,10 @@ export const CalendarItem: FC<{
       id: `post-preview-${post.id}`,
       title: t('preview_post', 'Preview post'),
       fullScreen: true,
+      size: '80vw',
+      height: '80vh',
       withCloseButton: true,
-      children: (
-        <iframe
-          className="h-full min-h-[80vh] w-full border-0"
-          title={t('preview_post', 'Preview post')}
-          src={`/p/${post.id}${canWrite ? '?share=true' : ''}`}
-        />
-      ),
+      children: <PostPreviewFrame postId={post.id} share={canWrite} />,
     });
   }, [post.id, canWrite, modals, t]);
   const fetchRemote = useFetch();
@@ -1760,8 +2045,10 @@ export const CalendarItem: FC<{
     <div
       // @ts-ignore
       ref={dragRef}
+      data-calendar-card={display}
       className={clsx(
-        'w-full flex h-full flex-1 flex-col group',
+        'w-full min-w-0 flex h-full flex-1 flex-col group',
+        display === 'month' && '!h-[36px] !flex-row items-center',
         'relative',
         (state === 'ERROR' || overdueDraft) &&
           'rounded-[10px] ring-2 ring-red-500',
@@ -1808,6 +2095,8 @@ export const CalendarItem: FC<{
       )}
       {state === 'PUBLISHED' && !remoteDeleted && (
         <div
+          role="img"
+          aria-label={t('published', 'Published')}
           className={clsx(
             'absolute -top-[6px] -start-[6px] z-20 w-[18px] h-[18px] rounded-full bg-green-500 flex items-center justify-center text-white text-[11px] font-bold',
             display === 'month' && 'mobile:hidden'
@@ -1816,7 +2105,7 @@ export const CalendarItem: FC<{
           ✓
         </div>
       )}
-      {showCreationMethodBadge && (
+      {showCreationMethodBadge && display !== 'month' && (
         <div className="absolute -bottom-[4px] -right-[4px] z-10">
           <CreationMethodBadge
             creationMethod={post.creationMethod}
@@ -1827,7 +2116,8 @@ export const CalendarItem: FC<{
       <div
         className={clsx(
           'text-white text-[11px] max-h-[24px] h-[24px] min-h-[24px] w-full rounded-tr-[10px] rounded-tl-[10px] flex items-center justify-center gap-[6px] px-[5px] bg-btnPrimary',
-          display === 'month' && 'mobile:hidden'
+          display === 'month' &&
+            '!w-auto !h-full !min-h-0 order-2 !bg-transparent mobile:!flex'
         )}
         style={{
           backgroundColor: post?.tags?.[0]?.tag?.color,
@@ -1836,7 +2126,8 @@ export const CalendarItem: FC<{
         <div
           className={clsx(
             post?.tags?.[0]?.tag?.color ? 'text-shadow-tags' : '',
-            'group-hover:hidden cursor-pointer'
+            'group-hover:hidden cursor-pointer',
+            display === 'month' && 'hidden'
           )}
         >
           {post.tags.map((p) => p.tag.name).join(', ')}
@@ -1898,8 +2189,7 @@ export const CalendarItem: FC<{
           'gap-[5px] w-full flex h-full flex-1 rounded-br-[10px] rounded-bl-[10px] p-[8px] text-[14px] bg-newColColor',
           'relative',
           display === 'month' &&
-            'mobile:p-[4px] mobile:rounded-[10px] mobile:justify-center',
-          isBeforeNow && state === 'PUBLISHED' && '!grayscale'
+            '!p-1 !rounded-[10px] !text-[11px] mobile:justify-center'
         )}
       >
         <div className={clsx('relative min-w-[20px]')}>
@@ -1914,13 +2204,17 @@ export const CalendarItem: FC<{
             )}
           />
         </div>
+        <CalendarMediaThumb
+          media={post.mediaPreview || null}
+          display={display}
+        />
         <div
           className={clsx(
             'w-full min-w-0 flex-1 flex flex-col min-h-[40px]',
-            display === 'month' && 'mobile:hidden'
+            display === 'month' && '!min-h-0 mobile:hidden'
           )}
         >
-          <div className="text-start">
+          <div className={clsx('text-start', display === 'month' && 'sr-only')}>
             {post.importedFromPlatform && (
               <span
                 className="block truncate text-[10px] leading-[14px]"
@@ -1950,13 +2244,27 @@ export const CalendarItem: FC<{
             )}
           </div>
           <div className="w-full min-w-0">
-            <div className="truncate text-start">
+            <div
+              className={clsx(
+                'truncate text-[10px] text-textItemBlur',
+                display === 'month' && 'sr-only'
+              )}
+            >
+              {formatLabel}
+              {display === 'day' ? ` · ${post.integration.name}` : ''}
+            </div>
+            <div
+              className={clsx(
+                'text-start',
+                display === 'day' ? 'line-clamp-3' : 'truncate'
+              )}
+            >
               {stripHtmlValidation('none', post.content, false, true, false) ||
                 t('no_content', 'no content')}
             </div>
           </div>
         </div>
-        {showTime && (
+        {(showTime || display === 'month') && (
           <div className="text-textColor/50 text-[12px] whitespace-nowrap flex items-center">
             {fromUtc(post.publishDate).format(
               isUSCitizen() ? 'hh:mm A' : 'HH:mm'

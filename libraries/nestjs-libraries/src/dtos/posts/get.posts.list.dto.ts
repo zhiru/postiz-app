@@ -6,6 +6,7 @@ import {
   Max,
   IsIn,
   IsArray,
+  IsISO8601,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import type { PostFormat } from '@gitroom/helpers/utils/posts.list.minify';
@@ -19,6 +20,18 @@ export type PostListStateFilter =
   | 'error';
 
 export class GetPostsListDto {
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  order?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  startDate?: string;
+
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  endDate?: string;
+
   @IsOptional()
   @IsNumber()
   @Min(0)
