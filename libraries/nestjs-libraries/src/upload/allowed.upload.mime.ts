@@ -19,6 +19,7 @@ export const ALLOWED_UPLOAD_MIME_TYPES = new Set<string>([
   'image/bmp',
   'image/tiff',
   'video/mp4',
+  'video/quicktime',
 ]);
 
 /**

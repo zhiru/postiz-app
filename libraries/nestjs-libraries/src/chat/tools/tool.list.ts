@@ -1,3 +1,13 @@
+import {
+  GetPostTool,
+  UpdatePostTool,
+  ValidatePostTool,
+  ChangePostStatusTool,
+  ChangePostDateTool,
+  BulkUpdatePostsTool,
+  GetPostExecutionTool,
+  UploadFileTool,
+} from './post.management.tools';
 import { IntegrationValidationTool } from '@gitroom/nestjs-libraries/chat/tools/integration.validation.tool';
 import { IntegrationTriggerTool } from '@gitroom/nestjs-libraries/chat/tools/integration.trigger.tool';
 import { IntegrationSchedulePostTool } from './integration.schedule.post';
@@ -27,7 +37,17 @@ import { UploadWidgetTool } from '@gitroom/nestjs-libraries/chat/tools/upload.wi
 import { UploadWidgetTicketTool } from '@gitroom/nestjs-libraries/chat/tools/upload.widget.ticket.tool';
 import { UploadWidgetStatusTool } from '@gitroom/nestjs-libraries/chat/tools/upload.widget.status.tool';
 
+import { UploadLinkTool } from './upload.link.tool';
+
 export const toolList = [
+  GetPostTool,
+  UpdatePostTool,
+  ValidatePostTool,
+  ChangePostStatusTool,
+  ChangePostDateTool,
+  BulkUpdatePostsTool,
+  GetPostExecutionTool,
+  UploadFileTool,
   IntegrationListTool,
   GroupListTool,
   IntegrationValidationTool,
@@ -53,6 +73,7 @@ export const toolList = [
   UploadFromUrlTool,
   MediaListTool,
   MediaStatusTool,
+  UploadLinkTool,
   UploadWidgetTool,
   UploadWidgetTicketTool,
   UploadWidgetStatusTool,

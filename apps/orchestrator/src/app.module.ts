@@ -1,3 +1,4 @@
+import { LocalMediaActivity } from './activities/local.media.activity';
 import { AiModule } from '@gitroom/nestjs-libraries/ai/ai.module';
 import { Module } from '@nestjs/common';
 import { PostActivity } from '@gitroom/orchestrator/activities/post.activity';
@@ -19,6 +20,7 @@ import { RepostActivity } from '@gitroom/orchestrator/activities/repost.activity
 const activities = [
   VideoActivity,
   MediaActivity,
+  LocalMediaActivity,
   ClippingActivity,
   CommentsActivity,
   PostsSyncActivity,

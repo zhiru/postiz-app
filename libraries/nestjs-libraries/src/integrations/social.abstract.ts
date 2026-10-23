@@ -7,7 +7,15 @@ const MEDIA_READ_TIMEOUT = 120_000;
 const isReadTimeout = (err: any) =>
   err?.name === 'TimeoutError' || err?.cause?.name === 'TimeoutError';
 export const stripQuery = heartbeatEndpoint;
-export type ValidityMedia = { path: string; thumbnail?: string };
+export type ValidityMedia = {
+  path: string;
+  thumbnail?: string;
+  width?: number;
+  height?: number;
+  duration_seconds?: number;
+  video_codec?: string;
+  content_type?: string;
+};
 
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Integration } from '@prisma/client';

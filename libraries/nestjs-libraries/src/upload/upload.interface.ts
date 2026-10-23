@@ -27,6 +27,8 @@ export interface IUploadProvider {
   // (credencial errada / bucket inacessível / diretório não gravável). Deve
   // validar o acesso SEM escrever um arquivo de verdade.
   healthCheck(): Promise<void>;
+  /** Resolve only an existing owned local upload; never a client filesystem path. */
+  localFilePath?(publicPath: string): string | null;
   // Streams the body straight into storage without buffering it. The caller
   // has already sniffed the real type from the first bytes, so it passes the
   // detected mime/ext instead of the provider re-sniffing a buffer

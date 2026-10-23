@@ -4,7 +4,7 @@ import {
   PrismaTransaction,
 } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { PublishedPlatformPost } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { Injectable } from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { Post as PostBody } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
 import {
   APPROVED_SUBMIT_FOR_ORDER,
@@ -43,6 +43,156 @@ export class PostsRepository {
     private _errors: PrismaRepository<'errors'>,
     private _transaction: PrismaTransaction
   ) {}
+
+  async getManagedPost(
+    orgId: string,
+    profileId: string | undefined,
+    id: string
+  ) {
+    const scope: Prisma.PostWhereInput = {
+      organizationId: orgId,
+      ...(profileId ? { profileId } : {}),
+      deletedAt: null,
+    };
+    const select = {
+      id: true,
+      organizationId: true,
+      profileId: true,
+      integrationId: true,
+      group: true,
+      parentPostId: true,
+      content: true,
+      image: true,
+      settings: true,
+      delay: true,
+      state: true,
+      publishDate: true,
+      updatedAt: true,
+      releaseId: true,
+      releaseURL: true,
+      importedFromPlatform: true,
+      error: true,
+      comments: {
+        where: { deletedAt: null as Date | null, organizationId: orgId },
+        select: {
+          id: true,
+          content: true,
+          parentId: true,
+          createdAt: true,
+          resolvedAt: true,
+        },
+      },
+      integration: {
+        select: { id: true, name: true, providerIdentifier: true },
+      },
+    } as const;
+    const root = await this._post.model.post.findFirst({
+      where: { ...scope, id, parentPostId: null },
+      select,
+    });
+    if (!root) return [];
+    const rows = await this._post.model.post.findMany({
+      where: { ...scope, group: root.group, integrationId: root.integrationId },
+      select,
+    });
+    const ordered = [root];
+    const seen = new Set([root.id]);
+    while (true) {
+      const next = rows.find(
+        (r) =>
+          r.parentPostId === ordered[ordered.length - 1].id && !seen.has(r.id)
+      );
+      if (!next) break;
+      ordered.push(next);
+      seen.add(next.id);
+    }
+    return ordered;
+  }
+
+  async patchManagedPost(
+    orgId: string,
+    profileId: string | undefined,
+    id: string,
+    version: string,
+    data: Pick<
+      Prisma.PostUncheckedUpdateManyInput,
+      'content' | 'image' | 'settings' | 'state' | 'publishDate'
+    >
+  ) {
+    const result = await this._post.model.post.updateMany({
+      where: {
+        id,
+        organizationId: orgId,
+        ...(profileId ? { profileId } : {}),
+        deletedAt: null,
+        updatedAt: new Date(version),
+        state: { in: ['DRAFT', 'QUEUE', 'ERROR'] },
+        OR: [
+          { state: { not: 'QUEUE' } },
+          { publishDate: { gt: new Date(Date.now() + 30000) } },
+        ],
+        importedFromPlatform: false,
+        releaseId: null,
+      },
+      data: {
+        ...data,
+        updatedAt: new Date(
+          Math.max(Date.now(), new Date(version).getTime() + 1)
+        ),
+      },
+    });
+    if (result.count !== 1)
+      throw new ConflictException({
+        code: 'POST_VERSION_CONFLICT',
+        message:
+          'Post changed, is published, or is no longer editable. Read it again.',
+      });
+    return true;
+  }
+
+  async reservePostOperation(
+    id: string,
+    organizationId: string,
+    profileId: string | undefined,
+    requestHash: string
+  ) {
+    try {
+      await this._transaction.model.$transaction((tx) =>
+        tx.postOperation.create({
+          data: { id, organizationId, profileId, requestHash },
+        })
+      );
+      return { claimed: true, requestHash, result: null as string | null };
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'P2002') throw error;
+      const receipt = await this._transaction.model.$transaction((tx) =>
+        tx.postOperation.findUnique({ where: { id } })
+      );
+      return {
+        claimed: false,
+        requestHash: receipt.requestHash,
+        result: receipt.result,
+      };
+    }
+  }
+
+  completePostOperation(id: string, result: unknown) {
+    return this._transaction.model.$transaction((tx) =>
+      tx.postOperation.update({
+        where: { id },
+        data: { result: JSON.stringify(result) },
+        select: { id: true },
+      })
+    );
+  }
+
+  releasePostQueueLock(id: string, owner: string) {
+    return this._transaction.model.$transaction((tx) =>
+      tx.postOperation.deleteMany({
+        where: { id: `queue:${id}`, requestHash: owner },
+      })
+    );
+  }
 
   searchForMissingThreeHoursPosts() {
     return this._post.model.post.findMany({
@@ -858,28 +1008,57 @@ export class PostsRepository {
     date: string,
     isDraft: boolean,
     action: 'schedule' | 'update' = 'schedule',
-    profileId?: string
+    profileId?: string,
+    expectedVersion?: string
   ) {
-    return this._post.model.post.update({
-      where: {
-        organizationId: orgId,
-        ...(profileId ? { profileId } : {}),
-        id,
-      },
-      data: {
-        publishDate: dayjs(date).toDate(),
-        // schedule: set state to QUEUE (or DRAFT if it was a draft)
-        // update: don't change the state
-        ...(action === 'schedule'
-          ? {
-              state: isDraft ? 'DRAFT' : 'QUEUE',
-              releaseId: null,
-              releaseURL: null,
-              error: null,
-            }
-          : {}),
-      },
-    });
+    try {
+      return await this._post.model.post.update({
+        where: {
+          organizationId: orgId,
+          ...(profileId ? { profileId } : {}),
+          id,
+          ...(expectedVersion
+            ? {
+                updatedAt: new Date(expectedVersion),
+                state: { in: ['DRAFT', 'QUEUE', 'ERROR'] as State[] },
+                OR: [
+                  { state: { not: 'QUEUE' as State } },
+                  { publishDate: { gt: new Date(Date.now() + 30000) } },
+                ],
+                releaseId: null,
+                importedFromPlatform: false,
+              }
+            : {}),
+        },
+        data: {
+          publishDate: dayjs(date).toDate(),
+          ...(expectedVersion
+            ? {
+                updatedAt: new Date(
+                  Math.max(Date.now(), new Date(expectedVersion).getTime() + 1)
+                ),
+              }
+            : {}),
+          // schedule: set state to QUEUE (or DRAFT if it was a draft)
+          // update: don't change the state
+          ...(action === 'schedule'
+            ? {
+                state: isDraft ? 'DRAFT' : 'QUEUE',
+                releaseId: null,
+                releaseURL: null,
+                error: null,
+              }
+            : {}),
+        },
+      });
+    } catch (error) {
+      if (expectedVersion && (error as { code?: string }).code === 'P2025')
+        throw new ConflictException({
+          code: 'POST_VERSION_CONFLICT',
+          message: 'Read the latest post before changing its date.',
+        });
+      throw error;
+    }
   }
 
   countPostsFromDay(orgId: string, date: Date) {

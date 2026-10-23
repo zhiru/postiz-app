@@ -242,6 +242,8 @@ model Media {
   id                 String              @id @default(uuid())
   name               String
   originalName       String?
+  originalPath       String?
+  metadata           Json?
   path               String
   organizationId     String
   createdAt          DateTime            @default(now())
@@ -2612,4 +2614,15 @@ model AutomationDelivery {
   providerId  String?
   createdAt   DateTime  @default(now())
   completedAt DateTime?
+}
+
+// Durable request receipts: an unfinished receipt is an unknown result, never retried blindly.
+model PostOperation {
+  id             String   @id
+  organizationId String
+  profileId      String?
+  requestHash    String
+  result         String?
+  createdAt      DateTime @default(now())
+  @@index([organizationId, profileId])
 }

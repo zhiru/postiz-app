@@ -32,9 +32,13 @@ This relies on the integrationSchema tool [input:settings] to know which keys ex
 If validation fails, the result contains output.errors describing what to fix; the call can be retried with corrected parameters.
 `,
       inputSchema: z.object({
-        id: z
+        version: z
           .string()
-          .describe('The "id" of the post to update its settings'),
+          .datetime({ offset: true })
+          .describe(
+            'Current version from getPostTool. Omitted settings stay unchanged.'
+          ),
+        id: z.string().describe('The "id" of the post to update its settings'),
         settings: z
           .array(
             z.object({
@@ -60,7 +64,9 @@ If validation fails, the result contains output.errors describing what to fix; t
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
-        const profileId = readRequestContext(context).get('profileId') as string | undefined;
+        const profileId = readRequestContext(context).get('profileId') as
+          | string
+          | undefined;
         const organizationId = JSON.parse(
           readRequestContext(context).get('organization') as string
         ).id;
@@ -68,7 +74,13 @@ If validation fails, the result contains output.errors describing what to fix; t
         const settings = (inputData.settings || []).reduce(
           (acc: Record<string, any>, s: { key: string; value: any }) => ({
             ...acc,
-            [s.key]: (() => { try { return JSON.parse(s.value); } catch { return s.value; } })(),
+            [s.key]: (() => {
+              try {
+                return JSON.parse(s.value);
+              } catch {
+                return s.value;
+              }
+            })(),
           }),
           {} as Record<string, any>
         );
@@ -79,7 +91,8 @@ If validation fails, the result contains output.errors describing what to fix; t
             inputData.id,
             settings,
             'MCP',
-            profileId
+            profileId,
+            inputData.version
           );
 
           return { output };

@@ -40,12 +40,16 @@ If it fails, the result contains output.errors.
         output: z
           .object({
             id: z.string(),
+            localDeleted: z.boolean().optional(),
+            remoteDeleted: z.boolean().optional(),
           })
           .or(z.object({ errors: z.string() })),
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
-        const profileId = readRequestContext(context).get('profileId') as string | undefined;
+        const profileId = readRequestContext(context).get('profileId') as
+          | string
+          | undefined;
         const organizationId = JSON.parse(
           readRequestContext(context).get('organization') as string
         ).id;
@@ -61,12 +65,30 @@ If it fails, the result contains output.errors.
           }
 
           if (post.parentPostId) {
-            return { output: { errors: 'This id belongs to a comment, pass the id of the main post' } };
+            return {
+              output: {
+                errors:
+                  'This id belongs to a comment, pass the id of the main post',
+              },
+            };
           }
 
-          await this._postsService.deletePost(organizationId, post.group, profileId);
-
-          return { output: { id: inputData.id } };
+          const deleted = await this._postsService.deletePost(
+            organizationId,
+            post.group,
+            profileId
+          );
+          if (!deleted?.id)
+            return {
+              output: { errors: 'Local deletion could not be confirmed' },
+            };
+          return {
+            output: {
+              id: inputData.id,
+              localDeleted: true,
+              remoteDeleted: false,
+            },
+          };
         } catch (err: any) {
           return {
             output: {

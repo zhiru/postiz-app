@@ -565,29 +565,36 @@ export class InstagramProvider
     const seenPageIds = new Set<string>();
     const allFacebookPages: any[] = [];
     // Request account metadata with its Page instead of one extra read per Instagram.
-    const fields = 'id,instagram_business_account{id,name,username,profile_picture_url}';
+    const fields =
+      'id,instagram_business_account{id,name,username,profile_picture_url}';
     const overallDeadline = Date.now() + 90000;
     const budgetExceeded = () => Date.now() >= overallDeadline;
-    const hasRequiredAccount = () => !!requiredId && allFacebookPages.some(
-      (page) => page.instagram_business_account?.id === requiredId
-    );
-    const shouldStop = () => throttled ||
+    const hasRequiredAccount = () =>
+      !!requiredId &&
+      allFacebookPages.some(
+        (page) => page.instagram_business_account?.id === requiredId
+      );
+    const shouldStop = () =>
+      throttled ||
       authorizationExpired ||
-      budgetExceeded() || hasRequiredAccount();
+      budgetExceeded() ||
+      hasRequiredAccount();
 
     const rateLimitError = () => {
       throttled = true;
       return new HttpException(
         {
           code: 'PROVIDER_RATE_LIMIT',
-        message: 'The provider is temporarily limiting requests. Wait a few minutes and reconnect the channel.',
-      },
+          message:
+            'The provider is temporarily limiting requests. Wait a few minutes and reconnect the channel.',
+        },
         429
       );
     };
     const read = async (url: string) => {
       const remaining = overallDeadline - Date.now();
-      if (remaining <= 0) throw new Error('Instagram discovery time budget exceeded');
+      if (remaining <= 0)
+        throw new Error('Instagram discovery time budget exceeded');
       const response = await ssrfSafeFetch(url, {
         signal: AbortSignal.timeout(Math.min(15000, remaining)),
         redirect: 'error',
@@ -634,7 +641,8 @@ export class InstagramProvider
     if (!shouldStop()) {
       try {
         let bizUrl:
-          | string | undefined = `${META_FACEBOOK_GRAPH_URL}/me/businesses?limit=100&access_token=${accessToken}`;
+          | string
+          | undefined = `${META_FACEBOOK_GRAPH_URL}/me/businesses?limit=100&access_token=${accessToken}`;
         const seenBusinessUrls = new Set<string>();
         while (bizUrl && !seenBusinessUrls.has(bizUrl) && !shouldStop()) {
           seenBusinessUrls.add(bizUrl);
@@ -653,12 +661,12 @@ export class InstagramProvider
           ) {
             await Promise.all(
               pageUrls.slice(offset, offset + 4).map(async (url: string) => {
-              try {
-                await fetchPaginated(url);
-              } catch (error) {
-                if (throttled || authorizationExpired) throw error;
-                // An inaccessible business must not hide accounts from other businesses.
-              }
+                try {
+                  await fetchPaginated(url);
+                } catch (error) {
+                  if (throttled || authorizationExpired) throw error;
+                  // An inaccessible business must not hide accounts from other businesses.
+                }
               })
             );
           }
@@ -678,7 +686,8 @@ export class InstagramProvider
 
     const linkedPages = allFacebookPages.filter(
       (page) =>
-      page.instagram_business_account && (!requiredId || page.instagram_business_account.id === requiredId)
+        page.instagram_business_account &&
+        (!requiredId || page.instagram_business_account.id === requiredId)
     );
     const accounts: any[] = [];
     for (
@@ -688,29 +697,29 @@ export class InstagramProvider
     ) {
       const batch = await Promise.all(
         linkedPages.slice(offset, offset + 4).map(async (page: any) => {
-        let account = page.instagram_business_account;
-        // Older/partial responses still need the metadata read. Reconnect only needs the Page ID.
-        if (
+          let account = page.instagram_business_account;
+          // Older/partial responses still need the metadata read. Reconnect only needs the Page ID.
+          if (
             !requiredId &&
             (typeof account.name !== 'string' ||
               typeof account.username !== 'string')
           ) {
-          try {
-            account = await read(
-              `${META_FACEBOOK_GRAPH_URL}/${account.id}?fields=name,username,profile_picture_url&access_token=${accessToken}`
-            );
-          } catch (error) {
-            if (throttled || authorizationExpired) throw error;
-            return null;
+            try {
+              account = await read(
+                `${META_FACEBOOK_GRAPH_URL}/${account.id}?fields=name,username,profile_picture_url&access_token=${accessToken}`
+              );
+            } catch (error) {
+              if (throttled || authorizationExpired) throw error;
+              return null;
+            }
           }
-        }
-        return {
-          pageId: page.id,
-          id: page.instagram_business_account.id,
-          name: account.name,
-          username: account.username || '',
-          picture: { data: { url: account.profile_picture_url } },
-        };
+          return {
+            pageId: page.id,
+            id: page.instagram_business_account.id,
+            name: account.name,
+            username: account.username || '',
+            picture: { data: { url: account.profile_picture_url } },
+          };
         })
       );
       accounts.push(...batch.filter((account) => account !== null));
@@ -990,7 +999,9 @@ export class InstagramProvider
           `${metaGraphUrl(
             type
           )}/${postId}/insights?metric=views,reach,saved,likes,comments,shares`,
-          { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15000),
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            signal: AbortSignal.timeout(15000),
           }
         )
       ).json();
@@ -1602,6 +1613,44 @@ export class InstagramProvider
     }
     if (firstPost.length > 10) {
       return 'Instagram carousel only supports up to 10 media attachments';
+    }
+    if (settings?.post_type === 'story' && firstPost.length !== 1)
+      return 'Instagram Stories support only one media per post';
+    if (settings?.post_type === 'story' && settings?.collaborators?.length)
+      return 'Collaborators are not supported for Stories';
+    for (const [index, media] of firstPost.entries()) {
+      if (
+        media.content_type &&
+        !['image/jpeg', 'image/png', 'video/mp4'].includes(media.content_type)
+      )
+        return `Media ${
+          index + 1
+        }: use a JPEG/PNG image or a prepared MP4 video`;
+      if (media.content_type === 'video/mp4') {
+        if (media.width > 1920)
+          return `Video ${index + 1}: maximum width is 1920 pixels`;
+        if (media.video_codec && !['h264', 'hevc'].includes(media.video_codec))
+          return `Video ${index + 1}: use H.264 or HEVC`;
+        if (
+          firstPost.length === 1 &&
+          settings?.post_type !== 'story' &&
+          media.duration_seconds !== undefined &&
+          (media.duration_seconds < 3 || media.duration_seconds > 900)
+        )
+          return 'Reels duration must be between 3 seconds and 15 minutes';
+      }
+      if (
+        media.content_type?.startsWith('image/') &&
+        media.width &&
+        media.height &&
+        settings?.post_type !== 'story'
+      ) {
+        const ratio = media.width / media.height;
+        if (ratio < 0.8 || ratio > 1.91)
+          return `Image ${
+            index + 1
+          }: feed aspect ratio must be between 4:5 and 1.91:1`;
+      }
     }
     if (this.assetBoolean(settings?.is_trial_reel)) {
       if ((firstPost?.length ?? 0) > 1) {

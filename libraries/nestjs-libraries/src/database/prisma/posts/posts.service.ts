@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import {
   BadRequestException,
   Injectable,
@@ -575,33 +576,40 @@ export class PostsService {
   }
 
   async updateMedia(id: string, imagesList: any[], convertToJPEG = false) {
+    const post = await this._postRepository.getPostById(id);
+    if (!post) throw new NotFoundException('Post not found');
+    const settings = JSON.parse(post.settings || '{}');
+    const readiness = await this._mediaService.assertReadyForPosts(
+      post.organizationId,
+      [
+        ...(imagesList || []),
+        ...(settings.cover?.path ? [settings.cover] : []),
+      ],
+      post.profileId || undefined
+    );
+    if (readiness.length)
+      throw new BadRequestException({
+        code: 'MEDIA_NOT_READY',
+        errors: readiness,
+      });
+    const resolved = await Promise.all(
+      (imagesList || []).map(async (p) => {
+        const fresh = await this._mediaService.resolvePostMedia(
+          post.organizationId,
+          p,
+          post.profileId || undefined
+        );
+        return fresh.id === p.id && fresh.path === p.path
+          ? p
+          : { ...p, id: fresh.id, name: fresh.name, path: fresh.path };
+      })
+    );
     try {
-      let imageUpdateNeeded = false;
+      let imageUpdateNeeded = resolved.some(
+        (m, i) => m.id !== imagesList[i].id || m.path !== imagesList[i].path
+      );
       const getImageList = await Promise.all(
-        (
-          await Promise.all(
-            (imagesList || []).map(async (p: any) => {
-              if (!p.id) {
-                return p;
-              }
-
-              if (!p.path) {
-                imageUpdateNeeded = true;
-                return this._mediaService.getMediaById(p.id);
-              }
-
-              // the normalizer may have replaced the file after the post was
-              // composed; a record still processing publishes the original
-              const fresh = await this._mediaService.getMediaById(p.id);
-              if (fresh?.status === 'ready' && fresh.path !== p.path) {
-                imageUpdateNeeded = true;
-                return { ...p, name: fresh.name, path: fresh.path };
-              }
-
-              return p;
-            })
-          )
-        )
+        resolved
           .filter((m) => this.isAllowedMediaPath(m?.path))
           .map((m) => {
             return {
@@ -682,9 +690,7 @@ export class PostsService {
 
       return getImageList;
     } catch (err: any) {
-      return (imagesList || []).filter((m) =>
-        this.isAllowedMediaPath(m?.path)
-      );
+      return resolved.filter((m) => this.isAllowedMediaPath(m?.path));
     }
   }
 
@@ -1034,8 +1040,10 @@ export class PostsService {
     postId: string,
     orgId: string,
     state: State,
-    integration?: Pick<Integration, 'id' | 'providerIdentifier'>
+    integration?: Pick<Integration, 'id' | 'providerIdentifier'>,
+    strict = false
   ) {
+    if (strict) await this.stopPendingPost(postId);
     try {
       const workflows = this._temporalService.client
         .getRawClient()
@@ -1071,7 +1079,7 @@ export class PostsService {
         integrationId: target.id,
         providerIdentifier: target.providerIdentifier,
       });
-      await this._temporalService.client
+      const started = await this._temporalService.client
         .getRawClient()
         ?.workflow.start(workflowName, {
           workflowId: `post_${postId}`,
@@ -1097,7 +1105,19 @@ export class PostsService {
             },
           ]),
         });
-    } catch (err) {}
+      if (strict && !started) throw new Error('Queue unavailable');
+      return;
+    } catch (err) {
+      if (strict)
+        throw new HttpException(
+          {
+            code: 'SCHEDULE_UNCONFIRMED',
+            message:
+              'The pending execution could not be started. Read the post state before retrying.',
+          },
+          503
+        );
+    }
   }
 
   async validatePosts(
@@ -1138,11 +1158,37 @@ export class PostsService {
         }
 
         const settings = post.settings || {};
-        const media = (post.value || []).map((p) => p.image || []);
+        const metadataErrors: string[] = [];
+        const media = await Promise.all(
+          (post.value || []).map((p) =>
+            Promise.all(
+              (p.image || []).map(async (image) => {
+                if (!this._mediaService?.getPostMediaMetadata) return image;
+                try {
+                  return {
+                    ...image,
+                    ...(await this._mediaService.getPostMediaMetadata(
+                      orgId,
+                      image,
+                      integration.profileId || undefined
+                    )),
+                  };
+                } catch {
+                  metadataErrors.push(
+                    'Media dimensions/format could not be verified. Upload or prepare the file and wait until ready.'
+                  );
+                  return image;
+                }
+              })
+            )
+          )
+        );
 
         // Settings DTO validation — mirrors the client `form.trigger()`.
         let valid = true;
         let settingsError = '';
+        let fieldErrors: { field: string; code: string; message: string }[] =
+          [];
         if (provider?.dto) {
           const instance = plainToInstance(provider.dto, settings, {
             enableImplicitConversion: false,
@@ -1150,6 +1196,19 @@ export class PostsService {
           const validationErrors = await validate(instance as object, {
             skipMissingProperties: false,
           });
+          const collect = (
+            errors: any[],
+            prefix = 'settings'
+          ): typeof fieldErrors =>
+            errors.flatMap((e) => [
+              ...Object.entries(e.constraints || {}).map(([code, message]) => ({
+                field: `${prefix}.${e.property}`,
+                code,
+                message: String(message),
+              })),
+              ...collect(e.children || [], `${prefix}.${e.property}`),
+            ]);
+          fieldErrors = collect(validationErrors);
           settingsError = this.firstValidationError(validationErrors);
           valid = validationErrors.length === 0;
         }
@@ -1165,6 +1224,19 @@ export class PostsService {
         } catch (err: any) {
           errors = err?.message || 'Invalid media';
         }
+
+        if (metadataErrors.length) errors = metadataErrors.join(' ');
+
+        const readiness = await this._mediaService?.assertReadyForPosts?.(
+          orgId,
+          [
+            ...(post.value || []).flatMap((v) => v.image || []),
+            ...(settings.cover?.path ? [settings.cover] : []),
+          ],
+          integration.profileId || undefined
+        );
+        if (readiness?.length)
+          errors = readiness.map((r) => r.message).join(' ');
 
         const maximumCharacters = provider.maxLength(
           additionalSettings,
@@ -1189,6 +1261,7 @@ export class PostsService {
           name: integration.name,
           valid,
           settingsError,
+          fieldErrors,
           errors,
           emptyContent,
           tooLong,
@@ -1237,6 +1310,64 @@ export class PostsService {
         post.integration?.providerIdentifier || 'the channel'
       }. To edit without republishing, ${howToUpdate}. To intentionally publish again, pass republish: true.`
     );
+  }
+
+  async runIdempotentPostOperation<T>(
+    org: string,
+    profile: string | undefined,
+    kind: string,
+    key: string,
+    request: unknown,
+    execute: () => Promise<T>
+  ): Promise<T> {
+    if (typeof key !== 'string' || key.length < 8 || key.length > 200)
+      throw new BadRequestException(
+        'Idempotency key must contain 8 to 200 characters.'
+      );
+    const stable = (v: any): any =>
+      Array.isArray(v)
+        ? v.map(stable)
+        : v && typeof v === 'object'
+        ? Object.fromEntries(
+            Object.keys(v)
+              .sort()
+              .map((k) => [k, stable(v[k])])
+          )
+        : v;
+    const digest = (v: unknown) =>
+      createHash('sha256')
+        .update(JSON.stringify(stable(v)))
+        .digest('hex');
+    const id = digest([org, profile ?? null, kind, key]);
+    const requestHash = digest(request);
+    const receipt = await this._postRepository.reservePostOperation(
+      id,
+      org,
+      profile,
+      requestHash
+    );
+    if (receipt.requestHash !== requestHash)
+      throw new HttpException(
+        {
+          code: 'IDEMPOTENCY_KEY_REUSED',
+          message: 'This key belongs to a different request.',
+        },
+        409
+      );
+    if (!receipt.claimed) {
+      if (receipt.result !== null) return JSON.parse(receipt.result);
+      throw new HttpException(
+        {
+          code: 'OPERATION_UNKNOWN_RESULT',
+          message:
+            'Request in progress or interrupted. Reconcile its result before another attempt; do not use a new key.',
+        },
+        409
+      );
+    }
+    const result = await execute();
+    await this._postRepository.completePostOperation(id, result);
+    return result;
   }
 
   async createPost(
@@ -1421,7 +1552,8 @@ export class PostsService {
     postId: string,
     settings: Record<string, any>,
     creationMethod: CreationMethod,
-    profileId?: string
+    profileId?: string,
+    expectedVersion?: string
   ): Promise<{ postId: string; publishDate: string }> {
     await this.assertPostReviewAccess(orgId, postId, profileId);
     // Ordered as post -> comments, root includes integration and tags.
@@ -1521,42 +1653,16 @@ export class PostsService {
       }
     }
 
-    const date = dayjs.utc(root.publishDate).format('YYYY-MM-DDTHH:mm:ss');
-
-    const [output] = await this.createPost(
+    await this._postRepository.patchManagedPost(
       orgId,
-      {
-        date,
-        // Settings-only update: keep the current state and leave the running
-        // publish workflow alone.
-        type: 'update',
-        shortLink: false,
-        tags: ((root as any).tags || []).map((t: any) => ({
-          value: t.tag.name,
-          label: t.tag.name,
-        })),
-        posts: [
-          {
-            integration,
-            group: root.group,
-            settings: mergedSettings,
-            value,
-          },
-        ],
-      } as any,
-      creationMethod,
-      // Keep the group stable: a client may have the calendar open while the
-      // settings are updated out of band, and the calendar links posts by group.
-      true
+      profileId,
+      postId,
+      expectedVersion ?? root.updatedAt.toISOString(),
+      { settings: JSON.stringify(mergedSettings) }
     );
-
-    if (!output) {
-      throw new BadRequestException('Failed to update the post');
-    }
-
     return {
-      postId: output.postId,
-      publishDate: date,
+      postId,
+      publishDate: dayjs.utc(root.publishDate).format('YYYY-MM-DDTHH:mm:ss'),
     };
   }
 
@@ -1621,33 +1727,178 @@ export class PostsService {
     }
   }
 
+  private async withPostQueueLock<T>(
+    org: string,
+    profile: string | undefined,
+    id: string,
+    execute: (markQueueTouched: () => void) => Promise<T>
+  ): Promise<T> {
+    const post = await this._postRepository.getPostById(id, org);
+    if (!post || post.deletedAt || (profile && post.profileId !== profile))
+      throw new NotFoundException('Post not found');
+    const owner = uuidv4();
+    const lock = await this._postRepository.reservePostOperation(
+      `queue:${id}`,
+      org,
+      profile,
+      owner
+    );
+    if (!lock.claimed)
+      throw new HttpException(
+        {
+          code: 'POST_QUEUE_LOCKED',
+          message:
+            'Another queue change is running or has an unknown result. Read the post and reconcile the previous execution before retrying.',
+        },
+        409
+      );
+    let touched = false;
+    let completed = false;
+    try {
+      const result = await execute(() => {
+        touched = true;
+      });
+      completed = true;
+      return result;
+    } finally {
+      // No expiry: an ambiguous external result must be reconciled, never replayed by a timer.
+      if (completed || !touched)
+        await this._postRepository.releasePostQueueLock(id, owner);
+    }
+  }
+
+  async stopPendingPost(id: string) {
+    const client = this._temporalService.client.getRawClient();
+    if (!client)
+      throw new HttpException(
+        {
+          code: 'QUEUE_UNAVAILABLE',
+          message: 'Cannot verify cancellation while the queue is unavailable.',
+        },
+        503
+      );
+    const handle = client.workflow.getHandle(`post_${id}`);
+    try {
+      const info = await handle.describe();
+      if (info.status.name === 'RUNNING')
+        await handle.terminate('Moved to draft by user');
+      if ((await handle.describe()).status.name === 'RUNNING')
+        throw new Error('Still running');
+    } catch (error) {
+      if ((error as Error).name === 'WorkflowNotFoundError') return;
+      throw new HttpException(
+        {
+          code: 'QUEUE_CANCELLATION_UNCONFIRMED',
+          message: 'Could not confirm that the pending execution stopped.',
+        },
+        503
+      );
+    }
+  }
+
   async changePostStatus(
     orgId: string,
     id: string,
     status: 'draft' | 'schedule',
-    profileId?: string
+    profileId?: string,
+    version?: string
   ) {
-    const getPostById = await this._postRepository.getPostById(id, orgId);
-    this.assertNotImported(getPostById);
-    if (!getPostById) {
-      throw new BadRequestException('Post not found');
-    }
-
-    if (profileId && getPostById.profileId !== profileId)
-      throw new BadRequestException('Post does not belong to this profile');
-    const state: State = status === 'draft' ? 'DRAFT' : 'QUEUE';
-    await this._postRepository.changeState(id, state);
-
-    try {
-      await this.startWorkflow(
-        getPostById.integration.providerIdentifier.split('-')[0].toLowerCase(),
-        getPostById.id,
-        orgId,
-        state
-      );
-    } catch (err) {}
-
-    return { id, state };
+    return this.withPostQueueLock(
+      orgId,
+      profileId,
+      id,
+      async (markQueueTouched) => {
+        const post = await this._postRepository.getPostById(id, orgId);
+        if (
+          !post ||
+          post.deletedAt ||
+          (profileId && post.profileId !== profileId)
+        )
+          throw new NotFoundException('Post not found');
+        this.assertNotImported(post);
+        this.guardAgainstRepublish(post, 'changeDate');
+        if (
+          post.state === 'QUEUE' &&
+          post.publishDate.getTime() <= Date.now() + 30000
+        )
+          throw new HttpException(
+            {
+              code: 'PUBLICATION_MAY_HAVE_STARTED',
+              message:
+                'Check the publication result before changing its state.',
+            },
+            409
+          );
+        if (
+          status === 'schedule' &&
+          post.publishDate.getTime() <= Date.now() + 30000
+        )
+          throw new BadRequestException('Set a future date before scheduling.');
+        if (status === 'schedule' && post.state === 'ERROR')
+          throw new BadRequestException(
+            'Resolve the previous publication result first.'
+          );
+        const expectedVersion = version ?? post.updatedAt.toISOString();
+        if (new Date(expectedVersion).getTime() !== post.updatedAt.getTime())
+          throw new HttpException(
+            {
+              code: 'POST_VERSION_CONFLICT',
+              message: 'Read the latest post before changing its state.',
+            },
+            409
+          );
+        if (status === 'draft') {
+          markQueueTouched();
+          await this.stopPendingPost(id);
+        }
+        const state: State = status === 'draft' ? 'DRAFT' : 'QUEUE';
+        await this._postRepository.patchManagedPost(
+          orgId,
+          profileId,
+          id,
+          expectedVersion,
+          { state }
+        );
+        if (status === 'schedule') {
+          markQueueTouched();
+          await this.startWorkflow(
+            post.integration.providerIdentifier.split('-')[0].toLowerCase(),
+            id,
+            orgId,
+            state,
+            undefined,
+            true
+          );
+          try {
+            const handle = this._temporalService.client
+              .getRawClient()
+              ?.workflow.getHandle(`post_${id}`);
+            if (!handle || (await handle.describe()).status.name !== 'RUNNING')
+              throw new Error();
+          } catch {
+            throw new HttpException(
+              {
+                code: 'SCHEDULE_UNCONFIRMED',
+                message:
+                  'Post saved, but an active execution could not be confirmed. Read its status before retrying.',
+              },
+              503
+            );
+          }
+        }
+        const final = await this._postRepository.getPostById(id, orgId);
+        if (final.state !== state)
+          throw new HttpException(
+            {
+              code: 'POST_STATE_CHANGED',
+              message:
+                'Post state changed during this operation. Read it again.',
+            },
+            409
+          );
+        return { id, state: final.state };
+      }
+    );
   }
 
   async changeDate(
@@ -1656,43 +1907,89 @@ export class PostsService {
     date: string,
     action: 'schedule' | 'update' = 'schedule',
     republish = false,
-    profileId?: string
+    profileId?: string,
+    expectedVersion?: string
   ) {
-    const getPostById = await this._postRepository.getPostById(id, orgId);
-    if (!getPostById) throw new BadRequestException('Post not found');
-    if (profileId && getPostById.profileId !== profileId)
-      throw new BadRequestException('Post does not belong to this profile');
-    this.assertNotImported(getPostById);
-
-    if (action === 'schedule' && republish !== true) {
-      this.guardAgainstRepublish(getPostById, 'changeDate');
-    }
-
-    // schedule: Set status to QUEUE and change date (reschedule the post)
-    // update: Just change the date without changing the status
-    const newDate = await this._postRepository.changeDate(
+    return this.withPostQueueLock(
       orgId,
+      profileId,
       id,
-      date,
-      getPostById.state === 'DRAFT',
-      action,
-      profileId
-    );
+      async (markQueueTouched) => {
+        const getPostById = await this._postRepository.getPostById(id, orgId);
+        if (!getPostById) throw new BadRequestException('Post not found');
+        if (profileId && getPostById.profileId !== profileId)
+          throw new BadRequestException('Post does not belong to this profile');
+        this.assertNotImported(getPostById);
+        if (
+          getPostById.state === 'QUEUE' &&
+          getPostById.publishDate.getTime() <= Date.now() + 30000
+        )
+          throw new HttpException(
+            {
+              code: 'PUBLICATION_MAY_HAVE_STARTED',
+              message: 'Check the publication result before changing its date.',
+            },
+            409
+          );
 
-    if (action === 'schedule') {
-      try {
-        await this.startWorkflow(
-          getPostById.integration.providerIdentifier
-            .split('-')[0]
-            .toLowerCase(),
-          getPostById.id,
+        if (action === 'schedule' && republish !== true) {
+          this.guardAgainstRepublish(getPostById, 'changeDate');
+        }
+
+        // schedule: Set status to QUEUE and change date (reschedule the post)
+        // update: Just change the date without changing the status
+        const newDate = await this._postRepository.changeDate(
           orgId,
-          getPostById.state === 'DRAFT' ? 'DRAFT' : 'QUEUE'
+          id,
+          date,
+          getPostById.state === 'DRAFT',
+          action,
+          profileId,
+          ...(expectedVersion ? [expectedVersion] : [])
         );
-      } catch (err) {}
-    }
 
-    return newDate;
+        if (
+          action === 'schedule' ||
+          (action === 'update' && getPostById.state === 'QUEUE')
+        ) {
+          markQueueTouched();
+          try {
+            await this.startWorkflow(
+              getPostById.integration.providerIdentifier
+                .split('-')[0]
+                .toLowerCase(),
+              getPostById.id,
+              orgId,
+              getPostById.state === 'DRAFT' ? 'DRAFT' : 'QUEUE',
+              undefined,
+              !!expectedVersion
+            );
+          } catch (err) {
+            if (expectedVersion) throw err;
+          }
+        }
+
+        if (expectedVersion && getPostById.state === 'QUEUE') {
+          try {
+            const handle = this._temporalService.client
+              .getRawClient()
+              ?.workflow.getHandle(`post_${id}`);
+            if (!handle || (await handle.describe()).status.name !== 'RUNNING')
+              throw new Error();
+          } catch {
+            throw new HttpException(
+              {
+                code: 'SCHEDULE_UNCONFIRMED',
+                message:
+                  'Date saved, but an active execution could not be confirmed. Read the post state before retrying.',
+              },
+              503
+            );
+          }
+        }
+        return newDate;
+      }
+    );
   }
 
   async generatePostsDraft(

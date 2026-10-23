@@ -15,8 +15,8 @@ export class UploadWidgetStatusTool implements AgentToolInterface {
   run() {
     return createTool({
       id: 'uploadWidgetStatusTool',
-      description: `List the media the user uploaded with the upload widget, using the sessionId returned by uploadWidgetTool.
-Only for files uploaded through the upload widget (uploadWidgetTool, shown in apps that display MCP Apps). For a media id returned by uploadFromUrlTool, the public API or the Postiz CLI, use mediaStatusTool instead.
+      description: `List the media the user uploaded with the upload widget, using the sessionId returned by uploadWidgetTool or uploadLinkTool.
+For files uploaded through the upload widget or temporary uploadLinkTool URL. For a media id returned by uploadFromUrlTool, the public API or the Postiz CLI, use mediaStatusTool instead.
 It lists only the files uploaded in that widget session, not the whole media library.
 An empty list means the user did not upload anything yet. A media with the status "processing" is still being prepared: wait about 10 seconds and call again.
 A media with the status "ready" can be used as a post attachment with its { id, path }. "ready" with a warning means the adjustment failed and the original file was kept and will be used for publishing.`,
@@ -32,7 +32,9 @@ A media with the status "ready" can be used as a post attachment with its { id, 
       inputSchema: z.object({
         sessionId: z
           .string()
-          .describe('The sessionId returned by uploadWidgetTool'),
+          .describe(
+            'The sessionId returned by uploadWidgetTool or uploadLinkTool'
+          ),
       }),
       outputSchema: z.object({
         media: z
@@ -50,7 +52,9 @@ A media with the status "ready" can be used as a post attachment with its { id, 
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
-        const profileId = readRequestContext(context).get('profileId') as string | undefined;
+        const profileId = readRequestContext(context).get('profileId') as
+          | string
+          | undefined;
         try {
           const org = JSON.parse(
             readRequestContext(context).get('organization') as string

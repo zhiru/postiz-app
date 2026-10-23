@@ -1,3 +1,18 @@
+jest.mock('@gitroom/nestjs-libraries/services/exception.filter', () => ({
+  HttpForbiddenException: class extends Error {},
+}));
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service',
+  () => ({ OrganizationService: class {} })
+);
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/oauth/oauth.service',
+  () => ({ OAuthService: class {} })
+);
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/profiles/profile.service',
+  () => ({ ProfileService: class {} })
+);
 import { PublicAuthMiddleware } from './public.auth.middleware';
 
 const makeOrgService = () => ({ getOrgByApiKey: jest.fn() });
@@ -23,12 +38,17 @@ describe('PublicAuthMiddleware', () => {
     orgService = makeOrgService();
     oauthService = makeOauthService();
     profileService = makeProfileService();
-    middleware = new PublicAuthMiddleware(orgService as any, oauthService as any, profileService as any);
+    middleware = new PublicAuthMiddleware(
+      orgService as any,
+      oauthService as any,
+      profileService as any
+    );
     delete process.env.STRIPE_SECRET_KEY;
   });
 
   afterEach(() => {
-    if (originalStripe !== undefined) process.env.STRIPE_SECRET_KEY = originalStripe;
+    if (originalStripe !== undefined)
+      process.env.STRIPE_SECRET_KEY = originalStripe;
     else delete process.env.STRIPE_SECRET_KEY;
   });
 

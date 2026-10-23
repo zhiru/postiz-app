@@ -8,7 +8,7 @@ import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { AllProvidersSettings } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/all.providers.settings';
 import { Integration } from '@prisma/client';
 import { checkAuth } from '@gitroom/nestjs-libraries/chat/auth.context';
-import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
+import { postContentToHtml } from '@gitroom/helpers/utils/sanitize.post.content';
 import { readRequestContext } from '@gitroom/nestjs-libraries/chat/tools/tool.context.helper';
 import { weightedLength } from '@gitroom/helpers/utils/count.length';
 import {
@@ -104,6 +104,7 @@ export class IntegrationSchedulePostTool implements AgentToolInterface {
       },
       description: `
 Use this when the user wants to create a draft, scheduled, or immediate social media post on their connected channels, based on the integrationSchema tool.
+Preserve the user's wording, paragraphs and blank lines. For a generated caption, use readable paragraphs separated by a blank line; keep event date/location together and separate the call to action and hashtags. In HTML, every line is a <p> and every blank line is <p></p>; do not collapse the whole caption into one paragraph or strip empty paragraphs. Plain text with actual newlines is also accepted. Never add literal \n text in place of a real line break.
 Examples of the input shape:
 
 A single LinkedIn post with one comment
@@ -114,11 +115,18 @@ A single LinkedIn post with one comment
 - socialPost array length will be 20
 - postsAndComments array length will be one
 
-Do not use this to update or delete existing posts - use postSettingsTool to update the settings of a post and deletePostTool to delete one.
+Do not use this to update or delete existing posts - use getPostTool then updatePostTool for partial edits, changePostDateTool for time, changePostStatusTool for draft/schedule, and deletePostTool for local deletion. Successful acceptance is not proof of publication; check getPostExecutionTool. Reuse idempotencyKey on retries.
 On success, each item in output contains a previewUrl the user can open to see the post.
 If validation fails, the result contains output.errors describing what to fix; the call can be retried with corrected parameters.
 `,
       inputSchema: z.object({
+        idempotencyKey: z
+          .string()
+          .min(8)
+          .max(200)
+          .describe(
+            'Unique creation request key. Reuse exactly this key and request on retry; never use a new key after an unknown result.'
+          ),
         socialPost: z
           .array(
             z.object({
@@ -147,7 +155,7 @@ If validation fails, the result contains output.errors describing what to fix; t
                     content: z
                       .string()
                       .describe(
-                        "The content of the post, HTML, Each line must be wrapped in <p> here is the possible tags: h1, h2, h3, u, strong, li, ul, p (you can't have u and strong together), img (<img src=\"...\">) only when the integration rules say pictures go inside the content, and span only for a mention in the exact format given by a mention tool from the integrationSchema tools"
+                        'The content of the post, plain text with real line breaks or HTML. Preserve all blank lines. In HTML each line must be wrapped in <p>, with <p></p> for a blank line; here is the possible tags: h1, h2, h3, u, strong, li, ul, p (you can\'t have u and strong together), img (<img src="...">) only when the integration rules say pictures go inside the content, and span only for a mention in the exact format given by a mention tool from the integrationSchema tools'
                       ),
                     attachments: z
                       .array(attachment)
@@ -202,133 +210,161 @@ If validation fails, the result contains output.errors describing what to fix; t
         ).id;
         const profileId =
           (requestContext.get('profileId') as string) || undefined;
-        const finalOutput = [];
+        const create = async () => {
+          const finalOutput = [];
 
-        const integrations = {} as Record<string, Integration>;
-        for (const platform of input.socialPost) {
-          integrations[platform.integrationId] =
-            await this._integrationService.getIntegrationById(
-              organizationId,
-              platform.integrationId
+          const integrations = {} as Record<string, Integration>;
+          for (const platform of input.socialPost) {
+            integrations[platform.integrationId] =
+              await this._integrationService.getIntegrationById(
+                organizationId,
+                platform.integrationId
+              );
+
+            if (
+              !integrations[platform.integrationId] ||
+              (profileId &&
+                integrations[platform.integrationId].profileId !== profileId)
+            ) {
+              throw new Error(
+                'Integration does not belong to the active profile'
+              );
+            }
+
+            // Same server-side validation as the dashboard / public API
+            // (settings DTO + media checkValidity + empty / too-long content).
+            const settings = platform.settings.reduce(
+              (acc: AllProvidersSettings, s: { key: string; value: any }) => ({
+                ...acc,
+                [s.key]: tryParseJson(s.value),
+              }),
+              {} as AllProvidersSettings
             );
 
-          if (!integrations[platform.integrationId] || (profileId && integrations[platform.integrationId].profileId !== profileId)) {
-            throw new Error('Integration does not belong to the active profile');
-          }
-
-          // Same server-side validation as the dashboard / public API
-          // (settings DTO + media checkValidity + empty / too-long content).
-          const settings = platform.settings.reduce(
-            (acc: AllProvidersSettings, s: { key: string; value: any }) => ({
-              ...acc,
-              [s.key]: tryParseJson(s.value),
-            }),
-            {} as AllProvidersSettings
-          );
-
-          const [validation] = await this._postsService.validatePosts(
-            organizationId,
-            [
-              {
-                integration: { id: platform.integrationId },
-                settings,
-                value: platform.postsAndComments.map((p: any) => ({
-                  content: p.content,
-                  image: (p.attachments || []).map(toMedia),
-                })),
-              },
-            ]
-          );
-
-          if (validation.emptyContent) {
-            return {
-              output: {
-                errors: `${validation.name}: Your post should have at least one character or one image.`,
-              },
-            };
-          }
-
-          if (platform.type !== 'draft') {
-            if (!validation.valid) {
-              return {
-                output: {
-                  errors: `${validation.name}: ${
-                    validation.settingsError || 'Please fix your settings'
-                  }, please fix it, and try integrationSchedulePostTool again.`,
-                },
-              };
-            }
-
-            if (validation.errors !== true) {
-              return {
-                output: {
-                  errors: `${validation.name}: ${validation.errors}, please fix it, and try integrationSchedulePostTool again.`,
-                },
-              };
-            }
-
-            if (validation.tooLong) {
-              return {
-                output: {
-                  errors: `${validation.name}: The maximum characters is ${validation.maximumCharacters}, please fix it, and try integrationSchedulePostTool again.`,
-                },
-              };
-            }
-          }
-        }
-
-        for (const post of input.socialPost) {
-          const integration = integrations[post.integrationId];
-
-          if (!integration) {
-            throw new Error('Integration not found');
-          }
-
-          const output = await this._postsService.createPost(organizationId, {
-            date: post.date,
-            type: post.type as 'draft' | 'schedule' | 'now',
-            shortLink: post.shortLink,
-            tags: [],
-            posts: [
-              {
-                integration,
-                group: makeId(10),
-                settings: post.settings.reduce(
-                  (acc: AllProvidersSettings, s: { key: string; value: string }) => ({
-                    ...acc,
-                    // Schema declara value como string (compatibilidade Gemini);
-                    // tentamos JSON.parse para reidratar arrays/objects/numbers/booleans.
-                    // Falha de parse → mantemos como string crua.
-                    [s.key]: tryParseJson(s.value),
-                  }),
-                  {
-                    __type: integration.providerIdentifier,
-                  } as AllProvidersSettings
-                ),
-                value: post.postsAndComments.map((p: { content: string; attachments: z.infer<typeof attachment>[] }) => ({
-                  content: p.content,
-                  id: makeId(10),
-                  delay: 0,
-                  image: p.attachments.map((a: any) => ({
-                    id: makeId(10),
-                    ...toMedia(a),
+            const [validation] = await this._postsService.validatePosts(
+              organizationId,
+              [
+                {
+                  integration: { id: platform.integrationId },
+                  settings,
+                  value: platform.postsAndComments.map((p: any) => ({
+                    content: postContentToHtml(p.content),
+                    image: (p.attachments || []).map(toMedia),
                   })),
-                })),
-              },
-            ],
-          }, 'MCP', false, profileId);
-          // Same public preview page the calendar "Preview Post" button opens.
-          finalOutput.push(
-            ...output.map((p) => ({
-              ...p,
-              previewUrl: `${process.env.FRONTEND_URL}/p/${p.postId}?share=true`,
-            }))
-          );
-        }
+                },
+              ]
+            );
 
-        return {
-          output: finalOutput,
+            if (validation.emptyContent) {
+              return {
+                output: {
+                  errors: `${validation.name}: Your post should have at least one character or one image.`,
+                },
+              };
+            }
+
+            if (platform.type !== 'draft') {
+              if (!validation.valid) {
+                return {
+                  output: {
+                    errors: `${validation.name}: ${
+                      validation.settingsError || 'Please fix your settings'
+                    }, please fix it, and try integrationSchedulePostTool again.`,
+                  },
+                };
+              }
+
+              if (validation.errors !== true) {
+                return {
+                  output: {
+                    errors: `${validation.name}: ${validation.errors}, please fix it, and try integrationSchedulePostTool again.`,
+                  },
+                };
+              }
+
+              if (validation.tooLong) {
+                return {
+                  output: {
+                    errors: `${validation.name}: The maximum characters is ${validation.maximumCharacters}, please fix it, and try integrationSchedulePostTool again.`,
+                  },
+                };
+              }
+            }
+          }
+
+          for (const post of input.socialPost) {
+            const integration = integrations[post.integrationId];
+
+            if (!integration) {
+              throw new Error('Integration not found');
+            }
+
+            const output = await this._postsService.createPost(
+              organizationId,
+              {
+                date: post.date,
+                type: post.type as 'draft' | 'schedule' | 'now',
+                shortLink: post.shortLink,
+                tags: [],
+                posts: [
+                  {
+                    integration,
+                    group: makeId(10),
+                    settings: post.settings.reduce(
+                      (
+                        acc: AllProvidersSettings,
+                        s: { key: string; value: string }
+                      ) => ({
+                        ...acc,
+                        // Schema declara value como string (compatibilidade Gemini);
+                        // tentamos JSON.parse para reidratar arrays/objects/numbers/booleans.
+                        // Falha de parse → mantemos como string crua.
+                        [s.key]: tryParseJson(s.value),
+                      }),
+                      {
+                        __type: integration.providerIdentifier,
+                      } as AllProvidersSettings
+                    ),
+                    value: post.postsAndComments.map(
+                      (p: {
+                        content: string;
+                        attachments: z.infer<typeof attachment>[];
+                      }) => ({
+                        content: postContentToHtml(p.content),
+                        id: makeId(10),
+                        delay: 0,
+                        image: p.attachments.map((a: any) => ({
+                          id: makeId(10),
+                          ...toMedia(a),
+                        })),
+                      })
+                    ),
+                  },
+                ],
+              },
+              'MCP',
+              false,
+              profileId
+            );
+            // Same public preview page the calendar "Preview Post" button opens.
+            finalOutput.push(
+              ...output.map((p) => ({
+                ...p,
+                previewUrl: `${process.env.FRONTEND_URL}/p/${p.postId}?share=true`,
+              }))
+            );
+          }
+
+          return { output: finalOutput };
         };
+        return this._postsService.runIdempotentPostOperation(
+          organizationId,
+          profileId,
+          'mcp-create',
+          input.idempotencyKey,
+          input,
+          create
+        );
       },
     });
   }

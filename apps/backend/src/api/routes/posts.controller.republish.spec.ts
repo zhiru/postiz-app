@@ -1,3 +1,11 @@
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/posts/posts.service',
+  () => ({ PostsService: class {} })
+);
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/review-links/review-links.service',
+  () => ({ ReviewLinksService: class {} })
+);
 jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
   IntegrationManager: class IntegrationManagerMock {},
 }));
@@ -50,12 +58,12 @@ describe('PostsController.changeDate - republicacao explicita', () => {
       'post-1',
       '2026-09-04T17:00:00.000Z',
       'update',
-      'profile-1',
-      false
+      false,
+      'profile-1'
     );
   });
 
-  it('repassa o opt-in depois do profileId', () => {
+  it('repassa o opt-in antes do profileId conforme o service', () => {
     const { controller, postsService } = buildController();
 
     controller.changeDate(
@@ -72,8 +80,8 @@ describe('PostsController.changeDate - republicacao explicita', () => {
       'post-1',
       '2026-09-04T17:00:00.000Z',
       'schedule',
-      'profile-1',
-      true
+      true,
+      'profile-1'
     );
   });
 });

@@ -92,6 +92,12 @@ const buildService = () => {
     id: 'int-1',
     profileId: 'profile-1',
   } as any);
+  repository.reservePostOperation.mockResolvedValue({
+    claimed: true,
+    requestHash: 'owner',
+    result: null,
+  });
+  repository.releasePostQueueLock.mockResolvedValue({ count: 1 });
   repository.getAnchoredCommentsForPost.mockResolvedValue([]);
   repository.getPostById.mockResolvedValue(publishedPost as any);
   repository.createOrUpdatePost.mockResolvedValue({
@@ -338,12 +344,13 @@ describe('PostsService - republicacao explicita', () => {
     repository.getPostById.mockResolvedValue({
       ...publishedPost,
       state: 'QUEUE',
+      publishDate: new Date(Date.now() + 86400000),
     } as any);
 
     await service.changeDate(
       'org-1',
       'post-1',
-      '2026-09-04T17:00:00.000Z',
+      new Date(Date.now() + 172800000).toISOString(),
       'schedule',
       false,
       'profile-1'
@@ -380,7 +387,7 @@ describe('PostsService - republicacao explicita', () => {
         false,
         'profile-other'
       )
-    ).rejects.toThrow('Post does not belong to this profile');
+    ).rejects.toThrow('Post not found');
     expect(repository.changeDate).not.toHaveBeenCalled();
     expect((service as any).startWorkflow).not.toHaveBeenCalled();
   });
@@ -451,5 +458,265 @@ describe('PostsService - republicacao explicita', () => {
       )
     ).rejects.toThrow('Post does not belong to this profile');
     expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+  });
+});
+
+describe('durable post operation receipts', () => {
+  const receipts = (repository: any) => {
+    const saved = new Map<string, any>();
+    repository.reservePostOperation.mockImplementation(
+      async (id: string, _o: string, _p: string, h: string) => {
+        if (saved.has(id)) return { claimed: false, ...saved.get(id) };
+        saved.set(id, { requestHash: h, result: null });
+        return { claimed: true, ...saved.get(id) };
+      }
+    );
+    repository.completePostOperation.mockImplementation(
+      async (id: string, result: any) => {
+        saved.get(id).result = JSON.stringify(result);
+        return { id };
+      }
+    );
+  };
+  it('replays successful creates and rejects key reuse for another payload', async () => {
+    const { service, repository } = buildService();
+    receipts(repository);
+    const create = jest.fn().mockResolvedValue([{ postId: 'same-id' }]);
+    const first = await service.runIdempotentPostOperation(
+      'o1',
+      'p1',
+      'create',
+      'request-123',
+      { caption: 'A' },
+      create
+    );
+    const replay = await service.runIdempotentPostOperation(
+      'o1',
+      'p1',
+      'create',
+      'request-123',
+      { caption: 'A' },
+      create
+    );
+    expect(replay).toEqual(first);
+    expect(create).toHaveBeenCalledTimes(1);
+    await expect(
+      service.runIdempotentPostOperation(
+        'o1',
+        'p1',
+        'create',
+        'request-123',
+        { caption: 'B' },
+        create
+      )
+    ).rejects.toMatchObject({ status: 409 });
+  });
+  it('never repeats an interrupted unknown-result creation', async () => {
+    const { service, repository } = buildService();
+    receipts(repository);
+    const create = jest
+      .fn()
+      .mockRejectedValue(new Error('Interrupted after write'));
+    await expect(
+      service.runIdempotentPostOperation(
+        'o1',
+        'p1',
+        'create',
+        'unknown-123',
+        {},
+        create
+      )
+    ).rejects.toThrow();
+    await expect(
+      service.runIdempotentPostOperation(
+        'o1',
+        'p1',
+        'create',
+        'unknown-123',
+        {},
+        create
+      )
+    ).rejects.toMatchObject({ status: 409 });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+  it('keeps receipt identity separate across profiles', async () => {
+    const { service, repository } = buildService();
+    receipts(repository);
+    const create = jest.fn().mockResolvedValue({ id: 'own' });
+    await service.runIdempotentPostOperation(
+      'o1',
+      'p1',
+      'create',
+      'same-key-123',
+      {},
+      create
+    );
+    await service.runIdempotentPostOperation(
+      'o1',
+      'p2',
+      'create',
+      'same-key-123',
+      {},
+      create
+    );
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('verified queue cancellation', () => {
+  it('waits for termination and confirms it by a second description', async () => {
+    const { service } = buildService();
+    const handle = {
+      describe: jest
+        .fn()
+        .mockResolvedValueOnce({ status: { name: 'RUNNING' } })
+        .mockResolvedValueOnce({ status: { name: 'TERMINATED' } }),
+      terminate: jest.fn().mockResolvedValue(undefined),
+    };
+    (service as any)._temporalService = {
+      client: {
+        getRawClient: () => ({ workflow: { getHandle: () => handle } }),
+      },
+    };
+    await service.stopPendingPost('post-1');
+    expect(handle.terminate).toHaveBeenCalledTimes(1);
+    expect(handle.describe).toHaveBeenCalledTimes(2);
+  });
+  it('returns an explicit failure instead of hiding a cancellation error', async () => {
+    const { service } = buildService();
+    (service as any)._temporalService = {
+      client: {
+        getRawClient: () => ({
+          workflow: {
+            getHandle: () => ({
+              describe: async () => ({ status: { name: 'RUNNING' } }),
+              terminate: async () => {
+                throw new Error('queue unavailable');
+              },
+            }),
+          },
+        }),
+      },
+    };
+    await expect(service.stopPendingPost('post-1')).rejects.toMatchObject({
+      status: 503,
+    });
+  });
+});
+
+describe('publication media processing gate', () => {
+  it.each(['processing', 'failed'])(
+    'blocks %s media before publishing, including references without ids',
+    async (status) => {
+      const { service, repository } = buildService();
+      repository.getPostById.mockResolvedValue({
+        ...publishedPost,
+        settings: '{}',
+      } as any);
+      const media = {
+        assertReadyForPosts: jest
+          .fn()
+          .mockResolvedValue([
+            { field: 'media.0', code: 'MEDIA_NOT_READY', message: status },
+          ]),
+        getMediaById: jest.fn(),
+      };
+      (service as any)._mediaService = media;
+      await expect(
+        service.updateMedia('post-1', [
+          { path: 'https://uploads.test/movie.mov' },
+        ])
+      ).rejects.toMatchObject({ status: 400 });
+      expect(media.getMediaById).not.toHaveBeenCalled();
+      expect(repository.updateImages).not.toHaveBeenCalled();
+    }
+  );
+});
+
+describe('queue mutation locking', () => {
+  it('retains the lock after an ambiguous queue activation', async () => {
+    const { service, repository } = buildService();
+    const post = {
+      ...publishedPost,
+      state: 'DRAFT',
+      updatedAt: new Date(),
+      publishDate: new Date(Date.now() + 86400000),
+    };
+    repository.getPostById.mockResolvedValue(post as any);
+    repository.patchManagedPost.mockResolvedValue(true);
+    (service.startWorkflow as jest.Mock).mockRejectedValue(
+      new Error('Unknown activation result')
+    );
+    await expect(
+      service.changePostStatus(
+        'org-1',
+        'post-1',
+        'schedule',
+        'profile-1',
+        post.updatedAt.toISOString()
+      )
+    ).rejects.toThrow('Unknown activation result');
+    expect(repository.releasePostQueueLock).not.toHaveBeenCalled();
+  });
+  it('checks a stale version before terminating any workflow and releases its unused lock', async () => {
+    const { service, repository } = buildService();
+    repository.getPostById.mockResolvedValue({
+      ...publishedPost,
+      state: 'DRAFT',
+      updatedAt: new Date(),
+      publishDate: new Date(Date.now() + 86400000),
+    } as any);
+    const stop = jest.spyOn(service, 'stopPendingPost');
+    await expect(
+      service.changePostStatus(
+        'org-1',
+        'post-1',
+        'draft',
+        'profile-1',
+        '2020-01-01T00:00:00Z'
+      )
+    ).rejects.toMatchObject({ status: 409 });
+    expect(stop).not.toHaveBeenCalled();
+    expect(repository.releasePostQueueLock).toHaveBeenCalledTimes(1);
+  });
+});
+
+it('refreshes execution media through the scoped resolver, including original paths after preparation', async () => {
+  const { service, repository } = buildService();
+  repository.getPostById.mockResolvedValue({
+    ...publishedPost,
+    settings: '{}',
+  } as any);
+  const media = {
+    assertReadyForPosts: jest.fn().mockResolvedValue([]),
+    resolvePostMedia: jest.fn().mockResolvedValue({
+      id: 'owned',
+      path: 'https://uploads.test/prepared.mp4',
+      name: 'prepared.mp4',
+    }),
+    getMediaById: jest.fn(),
+  };
+  (service as any)._mediaService = media;
+  const result = await service.updateMedia('post-1', [
+    {
+      id: 'foreign',
+      path: 'https://uploads.test/original.mov',
+      alt: 'Preserve',
+    },
+  ]);
+  expect(media.resolvePostMedia).toHaveBeenCalledWith(
+    'org-1',
+    {
+      id: 'foreign',
+      path: 'https://uploads.test/original.mov',
+      alt: 'Preserve',
+    },
+    'profile-1'
+  );
+  expect(media.getMediaById).not.toHaveBeenCalled();
+  expect(result[0]).toMatchObject({
+    id: 'owned',
+    path: 'https://uploads.test/prepared.mp4',
+    alt: 'Preserve',
   });
 });
