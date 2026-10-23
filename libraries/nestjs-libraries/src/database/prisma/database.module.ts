@@ -1,3 +1,5 @@
+import { PostMetricsRepository } from './analytics/post-metrics.repository';
+import { PostMetricsService } from './analytics/post-metrics.service';
 import { MediaTransferService } from './media/media.transfer.service';
 import { MediaTransferRepository } from './media/media.transfer.repository';
 import {
@@ -120,6 +122,8 @@ import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/p
     SocialCommentsService,
     IntegrationService,
     IntegrationRepository,
+    PostMetricsRepository,
+    PostMetricsService,
     AnalyticsReportService,
     AnalyticsReportRepository,
     PostsService,
@@ -145,7 +149,10 @@ import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/p
     NeuralTalkProvider,
     NeuralTalkConnectionService,
     NeuralTalkDeliveryService,
-    { provide: NEURALTALK_DELIVERY_STORE, useExisting: NeuralTalkDeliveryService },
+    {
+      provide: NEURALTALK_DELIVERY_STORE,
+      useExisting: NeuralTalkDeliveryService,
+    },
     RefreshIntegrationService,
     MetaSystemUserService,
     ExtractContentService,

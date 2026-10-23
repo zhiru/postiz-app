@@ -19,6 +19,7 @@ export type NotificationType = 'success' | 'fail' | 'info';
 // useT no frontend) e o corpo do e-mail; subjectKey e so do e-mail/digest;
 // profileId escopa destinatarios e visibilidade (null = org-wide).
 export type NotificationPayload = {
+  dedupeKey?: string;
   subjectKey: string;
   messageKey: string;
   params?: Record<string, string | number | undefined>;
@@ -84,12 +85,17 @@ export class NotificationService {
     // `content` fica renderizado no idioma da org como fallback (sininho legado
     // / clientes sem contentKey); o sininho novo usa contentKey+params via useT.
     const content = emailT(messageKey, lang, params);
-    await this._notificationRepository.createNotification(orgId, content, {
-      contentKey: messageKey,
-      contentParams: params,
-      profileId: profileId ?? null,
-    });
-    if (!sendEmail) {
+    const created = await this._notificationRepository.createNotification(
+      orgId,
+      content,
+      {
+        dedupeKey: payload.dedupeKey,
+        contentKey: messageKey,
+        contentParams: params,
+        profileId: profileId ?? null,
+      }
+    );
+    if (created === false || !sendEmail) {
       return;
     }
 

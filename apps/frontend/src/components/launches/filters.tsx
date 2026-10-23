@@ -177,13 +177,7 @@ export const Filters = () => {
       return;
     }
 
-    const range = getDateRange('week');
-    calendar.setFilters({
-      startDate: range.startDate,
-      endDate: range.endDate,
-      display: 'week',
-      customer: calendar.customer,
-    });
+    calendar.returnToCalendar();
   }, [calendar]);
 
   const setCustomer = useCallback(

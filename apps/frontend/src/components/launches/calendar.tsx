@@ -1047,19 +1047,66 @@ export const ListView = () => {
 };
 
 export const Calendar = () => {
-  const { display } = useCalendar();
+  const calendar = useCalendar();
+  const t = useT();
+  const { display, postsPanelOpen, setPostsPanelOpen } = calendar;
   return (
-    <>
-      {display === 'list' ? (
-        <ListView />
-      ) : display === 'day' ? (
-        <DayView />
-      ) : display === 'week' ? (
-        <WeekView />
-      ) : (
-        <MonthView />
+    <div className="flex flex-col flex-1 min-h-0 min-w-0">
+      {display !== 'list' && (
+        <div className="flex justify-end pb-2 mobile:hidden">
+          <Button
+            onClick={() => setPostsPanelOpen(!postsPanelOpen)}
+            aria-expanded={postsPanelOpen}
+          >
+            {t('calendar_posts_panel', 'Posts panel')}
+          </Button>
+        </div>
       )}
-    </>
+      <div className="flex flex-1 min-h-0 min-w-0 gap-3">
+        <div className="flex flex-col flex-1 min-w-0 min-h-0">
+          {display === 'list' ? (
+            <ListView />
+          ) : display === 'day' ? (
+            <DayView />
+          ) : display === 'week' ? (
+            <WeekView />
+          ) : (
+            <MonthView />
+          )}
+        </div>
+        {display !== 'list' && postsPanelOpen && (
+          <aside
+            aria-label={t('calendar_posts_panel', 'Posts panel')}
+            className="w-[360px] max-w-[40%] flex flex-col border-s border-newTableBorder ps-3 min-h-0 mobile:hidden"
+          >
+            <div className="flex flex-wrap gap-2 mb-3">
+              {(['scheduled', 'draft', 'published'] as const).map((state) => (
+                <button
+                  key={state}
+                  type="button"
+                  className="rounded-lg p-2 bg-newSettings focus-visible:ring-2 focus-visible:ring-btnPrimary"
+                  aria-pressed={calendar.listState === state}
+                  onClick={() => calendar.setListState(state)}
+                >
+                  {t(state, state)}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-textItemBlur mb-2">
+              {t(
+                'calendar_panel_scope',
+                'All dates, with the same channel, format and search filters.'
+              )}
+            </p>
+            <CalendarContext.Provider
+              value={{ ...calendar, loading: calendar.listLoading }}
+            >
+              <ListView />
+            </CalendarContext.Provider>
+          </aside>
+        )}
+      </div>
+    </div>
   );
 };
 export const CalendarColumn: FC<{

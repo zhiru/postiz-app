@@ -1,3 +1,6 @@
+jest.mock('@gitroom/nestjs-libraries/services/email.service', () => ({
+  EmailService: class {},
+}));
 import { NotificationService } from './notification.service';
 
 const makeRepo = () => ({
@@ -56,6 +59,17 @@ describe('NotificationService', () => {
     );
   });
 
+  it('does not send a second email/digest for a database-deduplicated notification', async () => {
+    repo.createNotification.mockResolvedValue(false);
+    await service.localizedInAppNotification(
+      'org',
+      { ...payload, dedupeKey: 'channel:problem:day' },
+      true,
+      true
+    );
+    expect(temporal.signalWithStart).not.toHaveBeenCalled();
+    expect(email.sendEmail).not.toHaveBeenCalled();
+  });
   describe('inAppNotification', () => {
     it('grava contentKey params e profileId renderizando content no idioma da org', async () => {
       await service.inAppNotification('org-1', payload, false, false, 'fail');
@@ -83,7 +97,7 @@ describe('NotificationService', () => {
       await service.inAppNotification('org-1', payload, true, true, 'success');
 
       expect(temporal.signalWithStart).toHaveBeenCalledWith(
-        'digestEmailWorkflow',
+        'digestEmailWorkflowV2',
         expect.objectContaining({
           signal: 'email',
           signalArgs: [
@@ -126,8 +140,16 @@ describe('NotificationService', () => {
   describe('sendEmailsToOrg', () => {
     it('respeita a preferencia sendFailureEmails para o tipo fail', async () => {
       orgRepo.getUsersForNotification.mockResolvedValue([
-        { email: 'skip@b.com', sendSuccessEmails: true, sendFailureEmails: false },
-        { email: 'send@b.com', sendSuccessEmails: false, sendFailureEmails: true },
+        {
+          email: 'skip@b.com',
+          sendSuccessEmails: true,
+          sendFailureEmails: false,
+        },
+        {
+          email: 'send@b.com',
+          sendSuccessEmails: false,
+          sendFailureEmails: true,
+        },
       ]);
 
       await service.sendEmailsToOrg('org-1', payload, 'fail', 'en');
@@ -145,8 +167,16 @@ describe('NotificationService', () => {
 
     it('tipo info ignora preferencias e envia a todos os destinatarios', async () => {
       orgRepo.getUsersForNotification.mockResolvedValue([
-        { email: 'a@b.com', sendSuccessEmails: false, sendFailureEmails: false },
-        { email: 'c@d.com', sendSuccessEmails: false, sendFailureEmails: false },
+        {
+          email: 'a@b.com',
+          sendSuccessEmails: false,
+          sendFailureEmails: false,
+        },
+        {
+          email: 'c@d.com',
+          sendSuccessEmails: false,
+          sendFailureEmails: false,
+        },
       ]);
 
       await service.sendEmailsToOrg('org-1', payload, 'info', 'en');

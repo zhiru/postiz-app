@@ -229,6 +229,31 @@ export class InstagramStandaloneProvider
     );
   }
 
+  postAnalyticsLifetime = true;
+  storyInsightsWindowHours = 24;
+  storyAnalytics(
+    id: string,
+    token: string,
+    postId: string,
+    date: number,
+    integration?: Integration
+  ) {
+    return instagramProvider.storyAnalytics(
+      id,
+      token,
+      postId,
+      date,
+      integration,
+      'graph.instagram.com'
+    );
+  }
+  listActiveStories(id: string, token: string) {
+    return instagramProvider.listActiveStories(
+      id,
+      token,
+      'graph.instagram.com'
+    );
+  }
   async postAnalytics(
     integrationId: string,
     accessToken: string,

@@ -21,6 +21,7 @@ export type EmailCatalog = Record<string, string>;
  * e-mail. Devem ter paridade com o translation.json do frontend.
  */
 export const NOTIFICATION_MESSAGE_KEYS = [
+  'notif_post_metrics_unavailable',
   'notif_channel_refresh_failed',
   'notif_post_reconnect',
   'notif_post_disabled',
@@ -32,6 +33,8 @@ export const NOTIFICATION_MESSAGE_KEYS = [
 ] as const;
 
 const pt: EmailCatalog = {
+  notif_post_metrics_unavailable:
+    'Uma publicação em {{name}} está confirmada como publicada, mas suas métricas não puderam ser coletadas. Verifique as permissões ou tente mais tarde. Isso não significa falha na publicação; não publique novamente.',
   // --- Transacionais (somente e-mail) ---
   email_activate_subject: 'Ative sua conta',
   email_activate_html:
@@ -78,10 +81,8 @@ const pt: EmailCatalog = {
     'Não foi possível publicar no {{provider}} para {{integrationName}} porque você precisa reconectá-lo. Ative-o e tente novamente.',
   notif_post_disabled:
     'Não foi possível publicar no {{provider}} para {{integrationName}} porque está desativado. Ative-o e tente novamente.',
-  notif_post_published:
-    'Sua publicação foi feita no {{provider}} em {{url}}',
-  notif_post_error:
-    'Ocorreu um erro ao publicar no {{provider}}{{error}}',
+  notif_post_published: 'Sua publicação foi feita no {{provider}} em {{url}}',
+  notif_post_error: 'Ocorreu um erro ao publicar no {{provider}}{{error}}',
   notif_post_error_comments:
     'Ocorreu um erro ao publicar comentários no {{provider}}{{error}}',
   notif_post_unconfirmed:
@@ -91,6 +92,8 @@ const pt: EmailCatalog = {
 };
 
 const en: EmailCatalog = {
+  notif_post_metrics_unavailable:
+    'A publication on {{name}} is confirmed published, but its metrics could not be collected. Check permissions or try again later. This does not mean publication failed; do not publish again.',
   // --- Transactional (email only) ---
   email_activate_subject: 'Activate your account',
   email_activate_html:
@@ -139,8 +142,7 @@ const en: EmailCatalog = {
     "We couldn't post to {{provider}} for {{integrationName}} because it's disabled. Please enable it and try again.",
   notif_post_published:
     'Your post has been published on {{provider}} at {{url}}',
-  notif_post_error:
-    'An error occurred while posting on {{provider}}{{error}}',
+  notif_post_error: 'An error occurred while posting on {{provider}}{{error}}',
   notif_post_error_comments:
     'An error occurred while posting comments on {{provider}}{{error}}',
   notif_post_unconfirmed:

@@ -1074,6 +1074,92 @@ export class InstagramProvider
     );
   }
 
+  postAnalyticsLifetime = true;
+  storyInsightsWindowHours = 24;
+  async storyAnalytics(
+    integrationId: string,
+    accessToken: string,
+    postId: string,
+    date: number,
+    integration?: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<AnalyticsData[]> {
+    const today = dayjs().format('YYYY-MM-DD');
+    const read = async (query: string) => {
+      const response = await this.analyticsFetch(
+        `${metaGraphUrl(type)}/${encodeURIComponent(postId)}/insights?${query}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken.split('___')[0]}` },
+          signal: AbortSignal.timeout(15000),
+        }
+      );
+      const body = await response.json();
+      if (!Array.isArray(body.data))
+        throw new Error('Story insights unavailable');
+      return body.data;
+    };
+    const data = await read('metric=views,reach,replies,shares');
+    try {
+      data.push(
+        ...(await read(
+          'metric=navigation&breakdown=story_navigation_action_type'
+        ))
+      );
+    } catch (error) {
+      if (error instanceof RefreshToken)
+        throw error; /* Optional breakdown must not discard available core metrics. */
+    }
+    return data.flatMap((metric: any) => {
+      const rows: Array<{ label: string; value: unknown }> = [
+        {
+          label: metric.name,
+          value: metric.total_value?.value ?? metric.values?.[0]?.value,
+        },
+      ];
+      if (metric.name === 'navigation')
+        for (const b of metric.total_value?.breakdowns || [])
+          if (b.dimension_keys?.includes('story_navigation_action_type'))
+            for (const result of b.results || [])
+              rows.push({
+                label: String(result.dimension_values?.[0]).toLowerCase(),
+                value: result.value,
+              });
+      return rows
+        .filter((r) => typeof r.value === 'number')
+        .map((r) => ({
+          label: r.label,
+          percentageChange: 0,
+          data: [{ total: String(r.value), date: today }],
+        }));
+    });
+  }
+  async listActiveStories(
+    id: string,
+    token: string,
+    type = 'graph.facebook.com'
+  ): Promise<PublishedPostsPage> {
+    const { stories } = await this.getRecentStories(id, token, type);
+    return {
+      posts: stories
+        .filter((s) => s.timestamp && Number.isFinite(Date.parse(s.timestamp)))
+        .map((s) => ({
+          id: s.id,
+          content: s.caption || '',
+          publishedAt: s.timestamp!,
+          url: s.permalink || '',
+          settings: { post_type: 'story' as const },
+          media: s.mediaUrl
+            ? [
+                {
+                  id: s.id,
+                  path: s.mediaUrl,
+                  ...(s.thumbnailUrl ? { thumbnail: s.thumbnailUrl } : {}),
+                },
+              ]
+            : [],
+        })),
+    };
+  }
   async postAnalytics(
     integrationId: string,
     accessToken: string,
@@ -1561,40 +1647,54 @@ export class InstagramProvider
         fields:
           'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp',
         access_token: userToken || pageToken,
+        limit: '100',
       });
-      const response = await ssrfSafeFetch(
-        `${metaGraphUrl(type)}/${encodeURIComponent(
-          igAccountId
-        )}/stories?${params}`,
-        { signal: AbortSignal.timeout(25000), redirect: 'error' }
-      );
-      if (!response.ok) throw new Error();
-      const body = await response.json();
-      if (
-        body?.error ||
-        !Array.isArray(body?.data) ||
-        body.data.some(
-          (item: any) =>
-            !item ||
-            typeof item.id !== 'string' ||
-            !item.id ||
-            typeof item.media_type !== 'string' ||
-            !item.media_type
-        )
-      ) {
-        throw new Error();
+      const stories: any[] = [];
+      const seen = new Set<string>();
+      for (let page = 0; page < 20; page++) {
+        const response = await ssrfSafeFetch(
+          `${metaGraphUrl(type)}/${encodeURIComponent(
+            igAccountId
+          )}/stories?${params}`,
+          { signal: AbortSignal.timeout(25000), redirect: 'error' }
+        );
+        if (!response.ok) throw new Error();
+        const body = await response.json();
+        if (
+          body?.error ||
+          !Array.isArray(body?.data) ||
+          body.data.some(
+            (item: any) =>
+              !item ||
+              typeof item.id !== 'string' ||
+              !item.id ||
+              typeof item.media_type !== 'string' ||
+              !item.media_type
+          )
+        ) {
+          throw new Error();
+        }
+        stories.push(
+          ...body.data.map((m: any) => ({
+            id: m.id,
+            caption: m.caption,
+            mediaType: m.media_type,
+            mediaUrl: m.media_url,
+            thumbnailUrl: m.thumbnail_url,
+            permalink: m.permalink,
+            timestamp: m.timestamp,
+          }))
+        );
+        const after = body.paging?.next
+          ? body.paging?.cursors?.after
+          : undefined;
+        if (!body.paging?.next) return { stories };
+        if (typeof after !== 'string' || !after || seen.has(after))
+          throw new Error();
+        seen.add(after);
+        params.set('after', after);
       }
-      return {
-        stories: body.data.map((m: any) => ({
-          id: m.id,
-          caption: m.caption,
-          mediaType: m.media_type,
-          mediaUrl: m.media_url,
-          thumbnailUrl: m.thumbnail_url,
-          permalink: m.permalink,
-          timestamp: m.timestamp,
-        })),
-      };
+      throw new Error();
     } catch {
       throw new Error('Could not retrieve Instagram stories');
     }

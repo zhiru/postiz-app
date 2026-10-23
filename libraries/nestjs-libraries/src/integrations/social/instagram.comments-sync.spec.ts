@@ -108,15 +108,94 @@ describe('Instagram comments synchronization', () => {
     } while (cursor);
     expect(ids).toHaveLength(55);
     expect(new Set(ids).size).toBe(55);
-  });  it('reads post metrics with the page-token half in a header and a bounded timeout', async () => {
+  });
+  it('reads post metrics with the page-token half in a header and a bounded timeout', async () => {
     const provider = new InstagramProvider();
-    const fetch = jest.spyOn(provider as any, 'analyticsFetch').mockResolvedValue(response({ data: [{ name: 'likes', values: [{ value: 4 }] }] }));
-    const metrics = await provider.postAnalytics('account', 'page-token___user-token', 'media', 7);
+    const fetch = jest
+      .spyOn(provider as any, 'analyticsFetch')
+      .mockResolvedValue(
+        response({ data: [{ name: 'likes', values: [{ value: 4 }] }] })
+      );
+    const metrics = await provider.postAnalytics(
+      'account',
+      'page-token___user-token',
+      'media',
+      7
+    );
     const [url, options] = fetch.mock.calls[0] as [string, RequestInit];
-    expect(url).not.toContain('page-token'); expect(url).not.toContain('user-token');
+    expect(url).not.toContain('page-token');
+    expect(url).not.toContain('user-token');
     expect(options.headers).toEqual({ Authorization: 'Bearer page-token' });
     expect(options.signal).toBeTruthy();
-    expect(metrics[0]).toMatchObject({ label: 'Likes', data: [{ total: '4' }] });
+    expect(metrics[0]).toMatchObject({
+      label: 'Likes',
+      data: [{ total: '4' }],
+    });
   });
+});
 
+it('collects Story counts and navigation separately without requesting feed-only metrics', async () => {
+  const provider = new InstagramProvider();
+  const fetch = jest
+    .spyOn(provider as any, 'analyticsFetch')
+    .mockResolvedValueOnce({
+      json: async () => ({ data: [{ name: 'views', values: [{ value: 5 }] }] }),
+    } as any)
+    .mockResolvedValueOnce({
+      json: async () => ({
+        data: [
+          {
+            name: 'navigation',
+            total_value: {
+              value: 3,
+              breakdowns: [
+                {
+                  dimension_keys: ['story_navigation_action_type'],
+                  results: [{ dimension_values: ['TAP_BACK'], value: 2 }],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    } as any);
+  const result = await provider.storyAnalytics('a', 'page___user', 'story', 7);
+  expect(result).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        label: 'views',
+        data: [expect.objectContaining({ total: '5' })],
+      }),
+      expect.objectContaining({
+        label: 'tap_back',
+        data: [expect.objectContaining({ total: '2' })],
+      }),
+    ])
+  );
+  expect(fetch.mock.calls[0][0]).not.toMatch(/likes|saved|comments/);
+  expect(fetch.mock.calls[1][0]).toContain(
+    'breakdown=story_navigation_action_type'
+  );
+  jest.restoreAllMocks();
+});
+it('imports active Stories with their original identity/date and Story format without publishing', async () => {
+  const provider = new InstagramProvider();
+  jest.spyOn(provider, 'getRecentStories').mockResolvedValue({
+    stories: [
+      {
+        id: 'story',
+        timestamp: '2026-10-23T10:00:00Z',
+        mediaType: 'IMAGE',
+        mediaUrl: 'https://cdn.example/story.jpg',
+      },
+    ],
+  });
+  const result = await provider.listActiveStories('account', 'token');
+  expect(result.posts[0]).toMatchObject({
+    id: 'story',
+    publishedAt: '2026-10-23T10:00:00Z',
+    settings: { post_type: 'story' },
+    media: [{ id: 'story', path: 'https://cdn.example/story.jpg' }],
+  });
+  jest.restoreAllMocks();
 });

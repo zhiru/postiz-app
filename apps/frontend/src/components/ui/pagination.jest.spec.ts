@@ -1,6 +1,26 @@
-/** @jest-environment jsdom */
-import React from 'react';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+export {};
+jest.mock('canvas', () => null);
+const { JSDOM } = require('jsdom');
+const dom = new JSDOM('<html><body></body></html>', {
+  url: 'http://localhost',
+});
+Object.assign(global, {
+  window: dom.window,
+  document: dom.window.document,
+  localStorage: dom.window.localStorage,
+});
+Object.defineProperty(global, 'navigator', {
+  value: dom.window.navigator,
+  configurable: true,
+});
+(global as any).IS_REACT_ACT_ENVIRONMENT = true;
+const React = require('react');
+const {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+} = require('@testing-library/react');
 import { Pagination } from './pagination';
 jest.mock('@gitroom/react/translation/get.transation.service.client', () => ({
   useT:
@@ -61,3 +81,5 @@ describe('Pagination', () => {
     expect(setPage).not.toHaveBeenCalled();
   });
 });
+
+afterAll(() => dom.window.close());

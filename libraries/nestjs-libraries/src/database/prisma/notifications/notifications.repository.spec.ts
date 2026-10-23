@@ -69,7 +69,9 @@ describe('NotificationsRepository', () => {
 
   describe('escopo por perfil nas leituras', () => {
     beforeEach(() => {
-      mockUserFindFirst.mockResolvedValue({ lastReadNotifications: new Date(0) });
+      mockUserFindFirst.mockResolvedValue({
+        lastReadNotifications: new Date(0),
+      });
       mockNotifCount.mockResolvedValue(0);
     });
 
@@ -114,7 +116,9 @@ describe('NotificationsRepository', () => {
 
   describe('getNotifications', () => {
     it('seleciona contentKey/contentParams, escopa e marca como lido', async () => {
-      mockUserFindFirst.mockResolvedValue({ lastReadNotifications: new Date(0) });
+      mockUserFindFirst.mockResolvedValue({
+        lastReadNotifications: new Date(0),
+      });
       mockNotifFindMany.mockResolvedValue([]);
 
       await repository.getNotifications('org-1', 'u-1', {
@@ -135,5 +139,36 @@ describe('NotificationsRepository', () => {
         { profileId: { in: ['p1'] } },
       ]);
     });
+  });
+});
+
+describe('notification idempotence', () => {
+  it('scopes the database uniqueness key by organization and profile; a duplicate suppresses another delivery', async () => {
+    const create = jest.fn().mockResolvedValue({});
+    const repo = new NotificationsRepository(
+      { model: { notifications: { create } } } as any,
+      {} as any
+    );
+    await repo.createNotification('o', 'message', {
+      profileId: 'p',
+      dedupeKey: 'i:problem:day',
+    });
+    const a = create.mock.calls[0][0].data.dedupeKey;
+    await repo.createNotification('o', 'message', {
+      profileId: 'q',
+      dedupeKey: 'i:problem:day',
+    });
+    expect(create.mock.calls[1][0].data.dedupeKey).not.toBe(a);
+    create.mockRejectedValue({ code: 'P2002' });
+    expect(
+      await repo.createNotification('o', 'message', {
+        profileId: 'p',
+        dedupeKey: 'i:problem:day',
+      })
+    ).toBe(false);
+    create.mockRejectedValue({ code: 'P1001' });
+    await expect(
+      repo.createNotification('o', 'message', { dedupeKey: 'x' })
+    ).rejects.toMatchObject({ code: 'P1001' });
   });
 });

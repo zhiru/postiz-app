@@ -1,3 +1,4 @@
+import { PublicAnalyticsController } from './routes/v1/public.analytics.controller';
 import { PublicPostsController } from './routes/v1/public.posts.controller';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
@@ -16,6 +17,7 @@ import { PublicAuthMiddleware } from '@gitroom/backend/services/auth/public.auth
 import { SuperAdminGuard } from '@gitroom/backend/services/auth/super.admin.guard';
 
 const authenticatedController = [
+  PublicAnalyticsController,
   PublicIntegrationsController,
   PublicPostsController,
   PublicProfilesController,

@@ -10,6 +10,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useRef,
 } from 'react';
 import dayjs from 'dayjs';
 import useSWR from 'swr';
@@ -122,6 +123,10 @@ export const CalendarContext = createContext({
       }[];
     }
   >,
+  returnToCalendar: () => {},
+  postsPanelOpen: false,
+  setPostsPanelOpen: (_open: boolean) => {},
+  listLoading: false,
   listOrder: 'default' as 'default' | 'asc' | 'desc',
   setListOrder: (order: 'default' | 'asc' | 'desc') => {},
   listRange: 'all' as ListRangeFilter,
@@ -339,6 +344,7 @@ export const CalendarWeekProvider: FC<{
     return expandPosts(data);
   }, [filters, params]);
 
+  const [postsPanelOpen, setPostsPanelOpen] = useState(false);
   const currentHour = useNow('hour');
   const currentDay = currentHour.format('YYYY-MM-DD');
 
@@ -391,7 +397,9 @@ export const CalendarWeekProvider: FC<{
     isLoading: listIsLoading,
     mutate: mutateList,
   } = useSWR(
-    filters.display === 'list' ? `/posts-list-${listParams}` : null,
+    filters.display === 'list' || postsPanelOpen
+      ? `/posts-list-${listParams}`
+      : null,
     loadListData,
     {
       refreshInterval: 15000,
@@ -426,6 +434,12 @@ export const CalendarWeekProvider: FC<{
     refreshWhenOffline: false,
   });
 
+  const calendarBeforeList = useRef<{
+    startDate: string;
+    endDate: string;
+    display: 'week' | 'month' | 'day';
+    customer: string | null;
+  } | null>(null);
   const setFiltersWrapper = useCallback(
     (newFilters: {
       startDate: string;
@@ -433,6 +447,11 @@ export const CalendarWeekProvider: FC<{
       display: 'week' | 'month' | 'day' | 'list';
       customer: string | null;
     }) => {
+      if (newFilters.display === 'list' && filters.display !== 'list')
+        calendarBeforeList.current = {
+          ...filters,
+          display: filters.display as 'week' | 'month' | 'day',
+        };
       setDisplaySaved(newFilters.display);
       setFilters(newFilters);
       setInternalData([]);
@@ -450,8 +469,18 @@ export const CalendarWeekProvider: FC<{
       ].filter((f) => f);
       window.history.replaceState(null, '', `/launches?${path.join('&')}`);
     },
-    []
+    [filters]
   );
+
+  const returnToCalendar = useCallback(() => {
+    setFiltersWrapper(
+      calendarBeforeList.current || {
+        ...getDateRange('week', filters.startDate),
+        display: 'week',
+        customer: filters.customer,
+      }
+    );
+  }, [setFiltersWrapper, filters]);
 
   const filterByChannels = useCallback(
     (list: any[]) =>
@@ -537,6 +566,10 @@ export const CalendarWeekProvider: FC<{
   return (
     <CalendarContext.Provider
       value={{
+        returnToCalendar,
+        postsPanelOpen,
+        setPostsPanelOpen,
+        listLoading: listIsLoading,
         trendings,
         reloadCalendarView,
         ...filters,

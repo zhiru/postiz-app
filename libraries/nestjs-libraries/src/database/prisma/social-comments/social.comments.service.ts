@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Optional,
   NotFoundException,
   Logger,
   HttpException,
@@ -19,6 +20,7 @@ import { SocialCommentDetails } from '@gitroom/nestjs-libraries/integrations/soc
 
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import { randomUUID } from 'crypto';
+import { PostMetricsService } from '../analytics/post-metrics.service';
 
 // Where a reply came from. 'human' is a person acting in the UI, 'automation'
 // is anything else (the public API, an agent, n8n).
@@ -48,7 +50,8 @@ export class SocialCommentsService {
     private _socialCommentsRepository: SocialCommentsRepository,
     private _integrationManager: IntegrationManager,
     private _encryption: EncryptionService,
-    private _webhooksService: WebhooksService
+    private _webhooksService: WebhooksService,
+    @Optional() private postMetrics?: PostMetricsService
   ) {}
 
   async getComments(
@@ -151,7 +154,21 @@ export class SocialCommentsService {
     );
     if (!post) throw new NotFoundException('Published post not found');
     const cached = await ioRedis.get(`post-engagement:${orgId}:${post.id}`);
-    return cached ? JSON.parse(cached) : { checkedAt: null, metrics: [] };
+    const result = cached
+      ? JSON.parse(cached)
+      : { checkedAt: null, metrics: [] };
+    if (this.postMetrics)
+      try {
+        const durable = await this.postMetrics.readMetrics(
+          orgId,
+          postId,
+          profileId
+        );
+        return durable.metricsCheckedAt ? { ...result, ...durable } : result;
+      } catch {
+        /* Keep the existing preview available during a metrics storage outage. */
+      }
+    return result;
   }
 
   async refreshPost(orgId: string, postId: string, profileId?: string) {
@@ -213,6 +230,15 @@ export class SocialCommentsService {
       await ioRedis.set(cursorKey, post.id);
     }
     if (!posts.length) await ioRedis.del(cursorKey);
+    if (this.postMetrics)
+      try {
+        await this.postMetrics.collectBatch();
+      } catch {
+        Logger.warn(
+          'Post metrics collection unavailable',
+          SocialCommentsService.name
+        );
+      }
     return { posts: processed, comments: stored };
   }
 
@@ -243,7 +269,9 @@ export class SocialCommentsService {
     const lock = randomUUID();
     if ((await ioRedis.set(lockKey, lock, 'EX', 600, 'NX')) !== 'OK') {
       if (manual)
-        throw new ConflictException('Post synchronization is already in progress. Try again shortly.');
+        throw new ConflictException(
+          'Post synchronization is already in progress. Try again shortly.'
+        );
       return 0;
     }
     try {
@@ -302,13 +330,22 @@ export class SocialCommentsService {
       if (!page.nextCursor && provider.postAnalytics) {
         metricsAvailable = false;
         try {
-          const result = await provider.postAnalytics(
-            post.integration.internalId || post.integration.id,
-            token,
-            post.releaseId,
-            7,
-            post.integration as any
-          );
+          const result = this.postMetrics
+            ? (
+                await this.postMetrics.refresh(
+                  post.organizationId,
+                  post.id,
+                  undefined,
+                  manual
+                )
+              ).data
+            : await provider.postAnalytics(
+                post.integration.internalId || post.integration.id,
+                token,
+                post.releaseId,
+                7,
+                post.integration as any
+              );
           if (result?.length) {
             metrics = result;
             metricsCheckedAt = new Date().toISOString();

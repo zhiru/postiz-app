@@ -345,7 +345,13 @@ export class PostsService {
     profileId?: string
   ): Promise<AnalyticsData[] | { missing: true }> {
     const post = await this._postRepository.getPostById(postId, orgId);
-    if (!post || !post.releaseId) {
+    if (
+      !post ||
+      !post.releaseId ||
+      (profileId &&
+        (post.profileId !== profileId ||
+          post.integration.profileId !== profileId))
+    ) {
       return [];
     }
 

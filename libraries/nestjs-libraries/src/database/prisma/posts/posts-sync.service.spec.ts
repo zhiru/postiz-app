@@ -45,6 +45,36 @@ describe('post synchronization service', () => {
     );
   });
 
+  it('reads active Stories on every first-page refresh without altering workflow parameters', async () => {
+    provider.listActiveStories = jest.fn().mockResolvedValue({
+      posts: [{ id: 'story', settings: { post_type: 'story' } }],
+    });
+    await service.page('org', 'channel', false);
+    expect(posts.importPlatformPost).toHaveBeenCalledWith(
+      'org',
+      'channel',
+      { id: 'story', settings: { post_type: 'story' } },
+      undefined
+    );
+    expect(start).not.toHaveBeenCalled();
+    provider.listActiveStories.mockClear();
+    await service.page('org', 'channel', true, 'resume');
+    expect(provider.listActiveStories).not.toHaveBeenCalled();
+  });
+  it('preserves feed synchronization when the Story edge is unavailable', async () => {
+    provider.listActiveStories = jest
+      .fn()
+      .mockRejectedValue(new Error('secret'));
+    await expect(service.page('org', 'channel', false)).resolves.toMatchObject({
+      imported: 1,
+    });
+    expect(posts.importPlatformPost).toHaveBeenCalledWith(
+      'org',
+      'channel',
+      { id: 'remote' },
+      undefined
+    );
+  });
   it('does not expose channels belonging to another organization', async () => {
     repository.get.mockResolvedValue(null);
     await expect(service.request('other-org', 'channel')).rejects.toThrow(

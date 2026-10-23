@@ -1,3 +1,7 @@
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/analytics/post-metrics.service',
+  () => ({ PostMetricsService: class {} })
+);
 jest.mock('@gitroom/nestjs-libraries/redis/redis.service', () => {
   const values = new Map<string, string>();
   return {
@@ -317,4 +321,40 @@ describe('Post engagement refresh', () => {
       clock.mockRestore();
     }
   });
+});
+
+it('preserves pre-release cached metrics until the durable collector has an available snapshot', async () => {
+  const repository = {
+    getPostToRefresh: jest.fn().mockResolvedValue({ id: 'post' }),
+  };
+  const metrics = {
+    readMetrics: jest.fn().mockResolvedValue({
+      metrics: [],
+      metricsCheckedAt: null,
+      metricsAvailable: false,
+    }),
+  };
+  const service = new SocialCommentsService(
+    repository as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    metrics as any
+  );
+  const cached = {
+    checkedAt: '2026-10-23T10:00:00Z',
+    metrics: [{ label: 'Likes', data: [{ total: '7' }] }],
+    metricsAvailable: true,
+  };
+  await ioRedis.set('post-engagement:org:post', JSON.stringify(cached));
+  expect(await service.getPostData('org', 'post', 'profile')).toEqual(cached);
+  metrics.readMetrics.mockResolvedValue({
+    metrics: [{ label: 'reactions', data: [{ total: '8' }] }],
+    metricsCheckedAt: '2026-10-23T11:00:00Z',
+    metricsAvailable: true,
+  });
+  expect(
+    (await service.getPostData('org', 'post', 'profile')).metrics[0].data[0]
+      .total
+  ).toBe('8');
 });

@@ -1,3 +1,4 @@
+jest.mock('@gitroom/nestjs-libraries/database/prisma/analytics/post-metrics.service',()=>({PostMetricsService:class {}}));
 import 'reflect-metadata';
 
 // Mocks ANTES dos imports — FlowsService/IntegrationService importam o
@@ -129,7 +130,8 @@ describe('IgWebhookController', () => {
     controller = new IgWebhookController(
       flowsService,
       integrationService,
-      credentialService
+      credentialService,
+      {storyWebhook:jest.fn()} as any
     );
   });
 
@@ -160,6 +162,45 @@ describe('IgWebhookController', () => {
       );
     });
 
+    it('stores Story observations only after valid signature without calling comment automation', async () => {
+      process.env.INSTAGRAM_APP_SECRET = 'env-secret';
+      integrationService.getIntegrationsByInternalId.mockResolvedValue([
+        integration('int-1', 'org-1'),
+      ] as any);
+      const metrics = { storyWebhook: jest.fn() };
+      const ctrl = new IgWebhookController(
+        flowsService,
+        integrationService,
+        credentialService,
+        metrics as any
+      );
+      const body = {
+        object: 'instagram',
+        entry: [
+          {
+            id: 'account-1',
+            changes: [
+              {
+                field: 'story_insights',
+                value: { media_id: 'story', reach: 4 },
+              },
+            ],
+          },
+        ],
+      };
+      await ctrl.handleWebhook(makeReq(body, 'env-secret'));
+      expect(metrics.storyWebhook).toHaveBeenCalledWith(
+        'account-1',
+        { media_id: 'story', reach: 4 },
+        undefined
+      );
+      expect(flowsService.handleIncomingComment).not.toHaveBeenCalled();
+      metrics.storyWebhook.mockClear();
+      await expect(
+        ctrl.handleWebhook(makeReq(body, 'invalid'))
+      ).rejects.toThrow();
+      expect(metrics.storyWebhook).not.toHaveBeenCalled();
+    });
     it('preserva o fan-out multi-conta quando assinado com o segredo global', async () => {
       process.env.INSTAGRAM_APP_SECRET = 'env-secret';
       // Mesma conta co-conectada em duas orgs.

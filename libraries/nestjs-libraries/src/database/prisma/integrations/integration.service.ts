@@ -286,6 +286,9 @@ export class IntegrationService {
       {
         subjectKey: 'notif_channel_refresh_failed_subject',
         messageKey: 'notif_channel_refresh_failed',
+        dedupeKey: `refresh:${integration.id}:${new Date()
+          .toISOString()
+          .slice(0, 10)}`,
         params: {
           name: integration.name,
           provider: integration.providerIdentifier,
@@ -625,7 +628,7 @@ export class IntegrationService {
     }
     if (
       source.inBetweenSteps &&
-      results.some(result => result.status === 'connected') &&
+      results.some((result) => result.status === 'connected') &&
       results.every((r) =>
         ['connected', 'already_connected'].includes(r.status)
       )
