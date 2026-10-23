@@ -1600,6 +1600,11 @@ export const CalendarItem: FC<{
           setActionPosition(null);
         }}
         onKeyDown={(event) => {
+          if (event.key === 'Tab') {
+            setActionPosition(null);
+            actionButton.current?.focus();
+            return;
+          }
           const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
           if (!keys.includes(event.key)) return;
           event.preventDefault();

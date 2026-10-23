@@ -150,6 +150,11 @@ it('supports menu keyboard navigation, Escape and outside clicks', () => {
   expect(screen.queryByRole('menu')).toBeNull();
   expect(document.activeElement).toBe(button);
   fireEvent.click(button);
+  fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Edit post' }), {
+    key: 'Tab',
+  });
+  expect(screen.queryByRole('menu')).toBeNull();
+  fireEvent.click(button);
   fireEvent.pointerDown(document.body);
   expect(screen.queryByRole('menu')).toBeNull();
 });
