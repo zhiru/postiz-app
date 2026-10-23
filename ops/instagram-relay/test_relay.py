@@ -68,6 +68,42 @@ class StoreTest(unittest.TestCase):
         self.assertIsNone(self.store.take('postiz'))
         self.assertIsNotNone(self.store.take('hermes'))
 
+    def test_story_insights_only_reaches_postiz_and_deduplicates(self):
+        raw = body([{'id': '200', 'changes': [{'field': 'story_insights', 'value': {'media_id': 'story', 'reach': 12}}]}])
+        self.accept(raw)
+        self.assertIsNone(self.store.take('hermes'))
+        calls = []
+        def transport(url, method, sent, headers):
+            calls.append(url)
+            self.assertEqual(sent, raw)
+            self.assertEqual(headers['X-Hub-Signature-256'], relay.sign(SECRET, raw))
+            return 200, b'', 'application/json'
+        relay.deliver(self.store, 'postiz', transport)
+        self.assertEqual(calls, [relay.POSTIZ_URL])
+        self.assertFalse(self.store.events)
+        self.restart()
+        self.assertFalse(self.accept(raw))
+
+    def test_mixed_story_comments_and_messages_preserve_other_events(self):
+        comment = {'field': 'comments', 'value': {'text': 'Original'}}
+        story = {'field': 'story_insights', 'value': {'reach': 5}}
+        message = {'sender': {'id': 'sender'}, 'message': {'text': 'DM'}}
+        raw = body([{'id': '200', 'changes': [story, comment], 'messaging': [message]}, {'id': 'unowned', 'changes': [story]}])
+        self.accept(raw)
+        _, hermes_raw, signature, _ = self.store.take('hermes')
+        self.assertEqual(json.loads(hermes_raw)['entry'], [{'id': '200', 'changes': [comment], 'messaging': [message]}])
+        self.assertEqual(signature, relay.sign(SECRET, hermes_raw))
+        _, postiz_raw, signature, _ = self.store.take('postiz')
+        self.assertEqual(json.loads(postiz_raw)['entry'], [json.loads(raw)['entry'][0]])
+        self.assertEqual(signature, relay.sign(SECRET, postiz_raw))
+
+    def test_unowned_story_only_is_acknowledged_without_queue_or_dispatch(self):
+        raw = body([{'id': 'unowned', 'changes': [{'field': 'story_insights', 'value': {}}]}])
+        self.assertTrue(self.accept(raw))
+        self.assertFalse(self.store.events)
+        self.restart()
+        self.assertFalse(self.accept(raw))
+
     def test_invalid_signature_never_persists(self):
         with self.assertRaises(relay.Rejected) as error:
             self.store.accept(self.raw, relay.sign(b'wrong', self.raw), 'application/json')

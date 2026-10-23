@@ -98,6 +98,18 @@ class Store:
         if not isinstance(entries, list) or len(entries) > 100 or any(not isinstance(entry, dict) for entry in entries):
             raise Rejected(400)
         selected = [entry for entry in entries if str(entry.get('id', '')) in self.allowed_ids]
+        # NeuralTalk's test-message handler does not support Story metric payloads.
+        hermes_entries = []
+        for entry in entries:
+            changes = entry.get('changes')
+            if isinstance(changes, list) and any(isinstance(change, dict) and change.get('field') == 'story_insights' for change in changes):
+                remaining = [change for change in changes if not isinstance(change, dict) or change.get('field') != 'story_insights']
+                if remaining or entry.get('messaging') or entry.get('standby'):
+                    hermes_entries.append({**entry, 'changes': remaining})
+            else:
+                hermes_entries.append(entry)
+        hermes_body = body if hermes_entries == entries else json.dumps(
+            {**payload, 'entry': hermes_entries}, ensure_ascii=False, separators=(',', ':')).encode()
         forwarded = body if len(selected) == len(entries) else json.dumps(
             {**payload, 'entry': selected}, ensure_ascii=False, separators=(',', ':')).encode()
         digest = hashlib.sha256(body).hexdigest()
@@ -107,13 +119,19 @@ class Store:
                 return False
             event = {
                 'created': time.time(), 'content_type': content_type,
-                'hermes_body': base64.b64encode(body).decode(), 'hermes_signature': signature,
+                'hermes_body': base64.b64encode(hermes_body).decode() if hermes_entries else '',
+                'hermes_signature': sign(self.secret, hermes_body) if hermes_entries else '',
                 'postiz_body': base64.b64encode(forwarded).decode() if selected else '',
                 'postiz_signature': sign(self.secret, forwarded) if selected else '',
                 'deliveries': {name: {'state': 'pending', 'attempts': 0, 'next': 0} for name in DESTINATIONS},
             }
+            if not hermes_entries:
+                event['deliveries']['hermes']['state'] = 'skipped'
             if not selected:
                 event['deliveries']['postiz']['state'] = 'skipped'
+            if not selected and not hermes_entries:
+                atomic_write(self.receipts / digest, {'completed': time.time()})
+                return True
             size = len(json.dumps(event).encode()) + 32
             if len(self.events) >= self.max_events or sum(item['size'] for item in self.events.values()) + size > self.max_bytes:
                 raise Rejected(503)

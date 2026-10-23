@@ -1706,6 +1706,7 @@ export const CalendarItem: FC<{
   post: Post & {
     integration: Integration;
     format?: PostFormat;
+    remoteDeletionSupported?: boolean;
     mediaPreview?: { src: string; video: boolean } | null;
     tags: {
       tag: Tags;
@@ -1858,6 +1859,17 @@ export const CalendarItem: FC<{
       setDeletingRemote(false);
     }
   };
+  const copyText = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toastRemote.show(t('post_action_copied', 'Copied.'), 'success');
+    } catch {
+      toastRemote.show(
+        t('post_action_copy_failed', 'Could not copy. Try again.'),
+        'warning'
+      );
+    }
+  };
   const [actionPosition, setActionPosition] = useState<{
     x: number;
     y: number;
@@ -1970,6 +1982,16 @@ export const CalendarItem: FC<{
             {t('edit_post', 'Edit post')}
           </button>
         )}
+        {editable && (
+          <button
+            type="button"
+            role="menuitem"
+            className="p-2 text-start hover:bg-newColColor"
+            onClick={editPost}
+          >
+            {t('post_action_change_date', 'Change date and time')}
+          </button>
+        )}
         {canWrite && !post.importedFromPlatform && (
           <button
             type="button"
@@ -1987,6 +2009,26 @@ export const CalendarItem: FC<{
           onClick={preview}
         >
           {t('preview_post', 'Preview post')}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={() => copyText(postContentPlainText(post.content))}
+        >
+          {t('post_action_copy_caption', 'Copy caption')}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={() =>
+            copyText(
+              `${window.location.origin}/p/${encodeURIComponent(post.id)}`
+            )
+          }
+        >
+          {t('post_action_copy_link', 'Copy post link')}
         </button>
         {canWrite && (
           <button
@@ -2006,6 +2048,16 @@ export const CalendarItem: FC<{
             onClick={openPost}
           >
             {t('posts_sync_view_original', 'View original publication')}
+          </button>
+        )}
+        {post.releaseURL?.startsWith('https://') && (
+          <button
+            type="button"
+            role="menuitem"
+            className="p-2 text-start hover:bg-newColColor"
+            onClick={() => copyText(post.releaseURL!)}
+          >
+            {t('post_action_copy_network_link', 'Copy network link')}
           </button>
         )}
         {post.releaseId &&
@@ -2033,17 +2085,21 @@ export const CalendarItem: FC<{
             {t('copy_debug_json', 'Copy Debug JSON')}
           </button>
         )}
-        {canWrite && state === 'PUBLISHED' && post.releaseId && (
-          <button
-            type="button"
-            role="menuitem"
-            disabled={deletingRemote}
-            className="p-2 text-start text-red-500 hover:bg-newColColor disabled:opacity-50"
-            onClick={deleteRemote}
-          >
-            {t('delete_from_network', 'Delete from network')}
-          </button>
-        )}
+        {canWrite &&
+          state === 'PUBLISHED' &&
+          post.releaseId &&
+          !remoteDeleted &&
+          post.remoteDeletionSupported && (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={deletingRemote}
+              className="p-2 text-start text-red-500 hover:bg-newColColor disabled:opacity-50"
+              onClick={deleteRemote}
+            >
+              {t('delete_from_network', 'Delete from network')}
+            </button>
+          )}
         {canWrite && (
           <button
             type="button"

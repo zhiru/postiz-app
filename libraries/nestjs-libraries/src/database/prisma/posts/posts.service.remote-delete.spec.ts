@@ -163,3 +163,44 @@ it('blocks a multi-story batch because only the final remote ID is retained', as
   ).rejects.toMatchObject({ status: 422 });
   expect(x.provider.deletePublishedPost).not.toHaveBeenCalled();
 });
+
+it('adds provider deletion capability to scoped list metadata without executing provider requests', async () => {
+  const x = setup();
+  const remoteDeletedPostIds = jest
+    .fn()
+    .mockResolvedValue(new Set(['deleted']));
+  Object.assign(x.repository, { remoteDeletedPostIds });
+  Object.assign(x.service, {
+    _integrationManager: {
+      getSocialIntegration: (id: string) =>
+        id === 'instagram' ? x.provider : undefined,
+    },
+  });
+  const rows = [
+    {
+      id: 'published',
+      releaseId: '123',
+      content: 'Keep caption',
+      integration: { providerIdentifier: 'instagram' },
+    },
+    {
+      id: 'deleted',
+      releaseId: '456',
+      integration: { providerIdentifier: 'instagram-standalone' },
+    },
+    { id: 'legacy' },
+  ];
+  const result = await (x.service as any).withRemoteDeletion(
+    'org',
+    'profile',
+    rows
+  );
+  expect(remoteDeletedPostIds).toHaveBeenCalledWith('org', 'profile', rows);
+  expect(result).toEqual([
+    { ...rows[0], remoteDeleted: false, remoteDeletionSupported: true },
+    { ...rows[1], remoteDeleted: true, remoteDeletionSupported: false },
+    { ...rows[2], remoteDeleted: false, remoteDeletionSupported: false },
+  ]);
+  expect(x.provider.checkRemoteDeletion).not.toHaveBeenCalled();
+  expect(x.provider.deletePublishedPost).not.toHaveBeenCalled();
+});

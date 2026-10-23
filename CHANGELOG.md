@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Route Story metric callbacks only to Postiz while preserving NeuralTalk messages/comments; add caption/link copy and date editor shortcuts to post menus, with provider-aware remote deletion visibility and Portuguese labels.
+
 - Fix post insights comment sorting and keep table actions/profile pictures readable in narrow columns.
 
 - Insights por publicação com filtros, ranking, cobertura explícita, distribuição por canal/dia, histórico, CSV e prévia existente; métricas desconhecidas não viram zero.
