@@ -350,7 +350,7 @@ export const WorkspaceAnalytics = () => {
         >
           {[
             ['reactions', 'insights_reactions', 'Reactions'],
-            ['insights_comments', 'comments', 'Comments'],
+            ['comments', 'insights_comments', 'Comments'],
             ['views', 'insights_views', 'Views'],
             ['reach', 'insights_reach', 'Reach'],
             ['impressions', 'insights_impressions', 'Impressions'],
@@ -537,7 +537,7 @@ export const WorkspaceAnalytics = () => {
                       <td className="p-3">
                         <button
                           type="button"
-                          className="flex items-center gap-3 text-start max-w-sm focus-visible:ring-2 focus-visible:ring-btnPrimary"
+                          className="flex items-center gap-3 text-start min-w-[260px] max-w-sm focus-visible:ring-2 focus-visible:ring-btnPrimary"
                           onClick={() => preview(post)}
                         >
                           <Thumb post={post} />
@@ -551,7 +551,7 @@ export const WorkspaceAnalytics = () => {
                                 <SafeImage
                                   src={post.channelPicture}
                                   alt=""
-                                  className="h-5 w-5 rounded-full"
+                                  className="h-5 w-5 shrink-0 rounded-full"
                                 />
                               )}
                               {post.channelName} ·{' '}
@@ -605,11 +605,15 @@ export const WorkspaceAnalytics = () => {
                         )}
                       </td>
                       <td className="p-3">
-                        <div className="flex flex-wrap gap-2">
-                          <Button onClick={() => history(post)}>
+                        <div className="flex flex-col items-start gap-2 min-w-[180px]">
+                          <Button
+                            className="whitespace-nowrap"
+                            onClick={() => history(post)}
+                          >
                             {t('insights_history', 'Metrics history')}
                           </Button>
                           <Button
+                            className="whitespace-nowrap"
                             disabled={!!busy}
                             onClick={() => refresh(post)}
                           >
