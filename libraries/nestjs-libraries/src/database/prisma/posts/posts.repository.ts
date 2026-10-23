@@ -1,4 +1,7 @@
-import { getPostFormat } from '@gitroom/helpers/utils/posts.list.minify';
+import {
+  getPostFormat,
+  firstCalendarMedia,
+} from '@gitroom/helpers/utils/posts.list.minify';
 import {
   PrismaRepository,
   PrismaTransaction,
@@ -463,7 +466,12 @@ export class PostsRepository {
       .map(({ image, ...post }) => ({
         ...post,
         ...(includeAttachments ? { image } : {}),
-        ...(includeFormat ? { format: getPostFormat({ ...post, image }) } : {}),
+        ...(includeFormat
+          ? {
+              format: getPostFormat({ ...post, image }),
+              mediaPreview: firstCalendarMedia(image),
+            }
+          : {}),
         error: this.curatedError(post.error),
       }))
       .reduce((all, post) => {
@@ -531,7 +539,8 @@ export class PostsRepository {
           };
 
     const orderDirection: 'asc' | 'desc' =
-      stateFilter === 'scheduled' || stateFilter === 'draft' ? 'asc' : 'desc';
+      query.order ||
+      (stateFilter === 'scheduled' || stateFilter === 'draft' ? 'asc' : 'desc');
 
     const where: Prisma.PostWhereInput = {
       AND: [
@@ -573,6 +582,15 @@ export class PostsRepository {
           : {}),
       },
     };
+
+    if (query.startDate || query.endDate) {
+      (where.AND as Prisma.PostWhereInput[]).push({
+        publishDate: {
+          ...(query.startDate ? { gte: new Date(query.startDate) } : {}),
+          ...(query.endDate ? { lte: new Date(query.endDate) } : {}),
+        },
+      });
+    }
 
     if (query.format && query.format !== 'all') {
       // shortcut: classify scoped metadata before paging; index a normalized format if histories make this slow.
@@ -635,6 +653,7 @@ export class PostsRepository {
       posts: posts.map(({ settings, image, ...post }) => ({
         ...post,
         format: getPostFormat({ ...post, settings, image }),
+        mediaPreview: firstCalendarMedia(image),
       })),
       total,
       page,

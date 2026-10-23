@@ -191,3 +191,33 @@ export function getPostFormat(post: {
   if (media.length === 1 && isVideo(media[0]?.path)) return 'video';
   return 'post';
 }
+
+// Adapted from GkhanKINAY/postqueen-app f8e33f52067c18efd6f958ed70bb708522aa6bdf.
+export function firstCalendarMedia(image: unknown): {
+  src: string;
+  video: boolean;
+} | null {
+  let list: unknown = image;
+  if (typeof image === 'string') {
+    const trimmed = image.trim();
+    if (!trimmed || trimmed === '[]' || trimmed === 'null') return null;
+    try {
+      list = JSON.parse(trimmed);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const first = list.find(
+    (item): item is { path?: string; thumbnail?: string } =>
+      !!item && typeof item === 'object'
+  );
+  const path = typeof first?.path === 'string' ? first.path : '';
+  if (!path) return null;
+  const video = isVideo(path);
+  const thumb =
+    typeof first.thumbnail === 'string' && first.thumbnail
+      ? first.thumbnail
+      : '';
+  return { src: video && thumb ? thumb : path, video };
+}

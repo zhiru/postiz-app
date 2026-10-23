@@ -62,7 +62,10 @@ export default async function Auth(props: {
       postIds={post.map((p: any) => p.id)}
       organizationId={post[0].organizationId}
     >
-      <div className="mx-auto w-full max-w-[1346px] p-[12px] flex flex-col gap-[8px] text-newTextColor">
+      <div
+        data-post-preview-content
+        className="mx-auto w-full max-w-[1346px] p-[12px] flex flex-col gap-[8px] text-newTextColor"
+      >
         <div className="flex bg-newBgColorInner rounded-[12px] min-h-[80px] px-[20px] py-[12px] items-center gap-[20px] flex-wrap">
           <Link
             href="/"

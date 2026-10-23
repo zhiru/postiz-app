@@ -261,6 +261,56 @@ describe('PostsRepository.getPostsList filters', () => {
     expect(query.where.integration.profileId).toBe('profile-1');
   });
 
+  it('intersects date ranges with state filters before pagination, preserving profile isolation', async () => {
+    const { repo, prisma } = setup();
+    await repo.getPostsList(
+      'org-1',
+      {
+        state: 'scheduled',
+        order: 'desc',
+        page: 2,
+        limit: 10,
+        startDate: '2030-01-01T03:00:00Z',
+        endDate: '2030-01-02T02:59:59Z',
+      } as any,
+      'profile-1'
+    );
+    const query = prisma.model.post.findMany.mock.calls[0][0];
+    expect(query.skip).toBe(20);
+    expect(query.orderBy).toEqual([{ publishDate: 'desc' }, { id: 'desc' }]);
+    expect(query.where.AND).toContainEqual({
+      publishDate: {
+        gte: new Date('2030-01-01T03:00:00Z'),
+        lte: new Date('2030-01-02T02:59:59Z'),
+      },
+    });
+    expect(query.where.publishDate.gte).toBeInstanceOf(Date);
+    expect(query.where.integration).toMatchObject({
+      organizationId: 'org-1',
+      profileId: 'profile-1',
+    });
+    expect(prisma.model.post.count.mock.calls[0][0].where).toEqual(query.where);
+  });
+
+  it('returns only the first media preview, without exposing settings or media metadata', async () => {
+    const { repo, prisma } = setup();
+    prisma.model.post.findMany.mockResolvedValueOnce([
+      {
+        id: 'video',
+        settings: '{"collaborators":["test"]}',
+        image:
+          '[{"path":"/clip.mp4","thumbnail":"/cover.png","privateField":"hidden"},{"path":"/second.png"}]',
+      },
+    ] as any);
+    const result = await repo.getPostsList('org-1', {}, 'profile-1');
+    expect(result.posts[0].mediaPreview).toEqual({
+      src: '/cover.png',
+      video: true,
+    });
+    expect(result.posts[0]).not.toHaveProperty('image');
+    expect(result.posts[0]).not.toHaveProperty('settings');
+  });
+
   it('filters formats before counting and paging and never returns raw media/settings', async () => {
     const { repo, prisma } = setup();
     prisma.model.post.findMany

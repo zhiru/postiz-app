@@ -3,6 +3,7 @@
 import {
   useCalendar,
   ListStateFilter,
+  ListRangeFilter,
 } from '@gitroom/frontend/components/launches/calendar.context';
 import clsx from 'clsx';
 import dayjs from 'dayjs';
@@ -354,6 +355,102 @@ export const Filters = () => {
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {isListView && (
+        <div className="flex flex-wrap items-center gap-2 mobile:order-3 mobile:w-full">
+          <label className="flex items-center gap-2 text-sm">
+            {t('post_period', 'Period')}
+            <select
+              aria-label={t('post_period', 'Period')}
+              className="h-[42px] rounded-lg border border-newTableBorder bg-newBgColorInner px-3"
+              value={
+                calendar.listRange.startsWith('day:')
+                  ? 'day'
+                  : calendar.listRange
+              }
+              onChange={(event) =>
+                calendar.setListRange(
+                  event.target.value === 'day'
+                    ? `day:${newDayjs().format('YYYY-MM-DD')}`
+                    : (event.target.value as ListRangeFilter)
+                )
+              }
+            >
+              <option value="all">{t('all_dates', 'All dates')}</option>
+              <option value="today">{t('today', 'Today')}</option>
+              <option value="tomorrow">{t('tomorrow', 'Tomorrow')}</option>
+              <option value="yesterday">{t('yesterday', 'Yesterday')}</option>
+              <option value="week">{t('this_week', 'This week')}</option>
+              <option value="next7">
+                {t('next_seven_days', 'Next 7 days')}
+              </option>
+              <option value="month">{t('this_month', 'This month')}</option>
+              <option value="day">{t('specific_day', 'Specific day')}</option>
+            </select>
+          </label>
+          <select
+            aria-label={t('post_order', 'Sort by date')}
+            className="h-[42px] rounded-lg border border-newTableBorder bg-newBgColorInner px-3"
+            value={calendar.listOrder}
+            onChange={(event) =>
+              calendar.setListOrder(
+                event.target.value as 'default' | 'asc' | 'desc'
+              )
+            }
+          >
+            <option value="default">
+              {t('default_order', 'Default order')}
+            </option>
+            <option value="asc">
+              {t('oldest_first', 'Oldest / earliest first')}
+            </option>
+            <option value="desc">
+              {t('newest_first', 'Newest / latest first')}
+            </option>
+          </select>
+          {calendar.listRange.startsWith('day:') && (
+            <>
+              <button
+                type="button"
+                className="h-[42px] px-3 rounded-lg border border-newTableBorder"
+                aria-label={t('previous_day', 'Previous day')}
+                onClick={() =>
+                  calendar.setListRange(
+                    `day:${newDayjs(calendar.listRange.slice(4))
+                      .subtract(1, 'day')
+                      .format('YYYY-MM-DD')}`
+                  )
+                }
+              >
+                ‹
+              </button>
+              <input
+                type="date"
+                aria-label={t('specific_day', 'Specific day')}
+                className="h-[42px] rounded-lg border border-newTableBorder bg-newBgColorInner px-2"
+                value={calendar.listRange.slice(4)}
+                onChange={(event) => {
+                  if (event.target.value)
+                    calendar.setListRange(`day:${event.target.value}`);
+                }}
+              />
+              <button
+                type="button"
+                className="h-[42px] px-3 rounded-lg border border-newTableBorder"
+                aria-label={t('next_day', 'Next day')}
+                onClick={() =>
+                  calendar.setListRange(
+                    `day:${newDayjs(calendar.listRange.slice(4))
+                      .add(1, 'day')
+                      .format('YYYY-MM-DD')}`
+                  )
+                }
+              >
+                ›
+              </button>
+            </>
+          )}
         </div>
       )}
       {isListView && (

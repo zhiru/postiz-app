@@ -7,6 +7,10 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Prévia centralizada em 80vw × 80vh, com carregamento, erro e repetição; evita tela vazia e mantém a revisão no aplicativo.
+- Reaproveitamento adaptado do PostQueen: miniaturas, cards mensais compactos e agenda móvel por dia, preservando estados reais e ações do Mali Posts.
+- Listagem com períodos rápidos, dia específico e navegação anterior/próximo, aplicados antes da paginação no servidor e atualizados na virada do dia do fuso selecionado.
+
 - Menu de ações ancorado nos três pontos, sem modal/backdrop, com portal para evitar cortes, navegação por teclado e execução antes do fechamento. Cancelar conexão fecha o formulário correto.
 
 - Cards: rascunhos abrem edição por clique/teclado, ações em três pontos e prévia em modal de tela inteira.

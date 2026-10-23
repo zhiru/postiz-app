@@ -41,6 +41,37 @@ export type ListStateFilter =
   | 'overdue'
   | 'error';
 
+// Period presets adapted from PostQueen f8e33f5; converted to UTC before server pagination.
+export type ListRangeFilter =
+  | 'all'
+  | 'today'
+  | 'tomorrow'
+  | 'yesterday'
+  | 'week'
+  | 'next7'
+  | 'month'
+  | `day:${string}`;
+export function listRangeDates(range: ListRangeFilter, today = newDayjs()) {
+  if (range === 'all') return {};
+  let start = today.startOf('day');
+  let end = start;
+  if (range.startsWith('day:')) start = end = newDayjs(range.slice(4));
+  else if (range === 'tomorrow') start = end = start.add(1, 'day');
+  else if (range === 'yesterday') start = end = start.subtract(1, 'day');
+  else if (range === 'week') {
+    start = today.startOf('isoWeek');
+    end = today.endOf('isoWeek');
+  } else if (range === 'next7') end = start.add(6, 'day');
+  else if (range === 'month') {
+    start = today.startOf('month');
+    end = today.endOf('month');
+  }
+  return {
+    startDate: start.startOf('day').utc().toISOString(),
+    endDate: end.endOf('day').utc().toISOString(),
+  };
+}
+
 export const CalendarContext = createContext({
   startDate: newDayjs().startOf('isoWeek').format('YYYY-MM-DD'),
   endDate: newDayjs().endOf('isoWeek').format('YYYY-MM-DD'),
@@ -91,6 +122,10 @@ export const CalendarContext = createContext({
       }[];
     }
   >,
+  listOrder: 'default' as 'default' | 'asc' | 'desc',
+  setListOrder: (order: 'default' | 'asc' | 'desc') => {},
+  listRange: 'all' as ListRangeFilter,
+  setListRange: (range: ListRangeFilter) => {},
   listPage: 0,
   listTotal: 0,
   listPageSize: 20,
@@ -205,6 +240,18 @@ export const CalendarWeekProvider: FC<{
   const display = searchParams.get('display') || displaySaved;
 
   // List view state
+  const [listOrder, setListOrderRaw] = useState<'default' | 'asc' | 'desc'>(
+    'default'
+  );
+  const setListOrder = useCallback((order: 'default' | 'asc' | 'desc') => {
+    setListOrderRaw(order);
+    setListPage(0);
+  }, []);
+  const [listRange, setListRangeRaw] = useState<ListRangeFilter>('all');
+  const setListRange = useCallback((range: ListRangeFilter) => {
+    setListRangeRaw(range);
+    setListPage(0);
+  }, []);
   const [listPage, setListPage] = useState(0);
   const [listPageSizeSaved, saveListPageSize] = useCookie(
     'posts-page-size',
@@ -292,9 +339,14 @@ export const CalendarWeekProvider: FC<{
     return expandPosts(data);
   }, [filters, params]);
 
+  const currentHour = useNow('hour');
+  const currentDay = currentHour.format('YYYY-MM-DD');
+
   // List view data fetcher
   const listParams = useMemo(() => {
     return new URLSearchParams({
+      ...listRangeDates(listRange),
+      ...(listOrder === 'default' ? {} : { order: listOrder }),
       page: listPage.toString(),
       limit: String(listPageSize),
       format: postFormat,
@@ -304,6 +356,9 @@ export const CalendarWeekProvider: FC<{
       ...(selectedChannels ? { integrations: selectedChannels.join(',') } : {}),
     }).toString();
   }, [
+    listRange,
+    listOrder,
+    currentDay,
     listPage,
     listPageSize,
     filters.customer,
@@ -469,9 +524,6 @@ export const CalendarWeekProvider: FC<{
   const loading =
     filters.display === 'list' ? listIsLoading : calendarIsLoading;
 
-  // one clock for every calendar cell, instead of a timer per cell
-  const currentHour = useNow('hour');
-
   // every calendar cell looks for its posts in the whole list, so the dates
   // are parsed once here instead of in each cell
   const postDates = useMemo(
@@ -499,6 +551,10 @@ export const CalendarWeekProvider: FC<{
         signature: sign,
         // List view specific
         listPosts,
+        listRange,
+        setListRange,
+        listOrder,
+        setListOrder,
         listPage,
         listTotal,
         listPageSize,
