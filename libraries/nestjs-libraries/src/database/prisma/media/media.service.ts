@@ -1,5 +1,18 @@
+import sharp from 'sharp';
+import { createReadStream } from 'fs';
+import { mkdtemp, rm, stat } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { readResponseBodyWithLimit } from '@gitroom/nestjs-libraries/upload/bounded.response.reader';
 import { MediaLibraryOptions } from '@gitroom/nestjs-libraries/dtos/media/get.media.dto';
-import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import {
   MediaRepository,
   MediaUsageCandidate,
@@ -58,6 +71,10 @@ import { organizationId } from '@gitroom/nestjs-libraries/temporal/temporal.sear
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { MediaProcessorJob } from '@gitroom/nestjs-libraries/upload/media.processor.interface';
 import { extname } from 'path';
+import {
+  ValidUrlExtension,
+  ValidUrlPath,
+} from '@gitroom/helpers/utils/valid.url.path';
 import { randomBytes } from 'crypto';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import { ssrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
@@ -355,10 +372,13 @@ export class MediaService {
           );
           return result.base64;
         } catch (err) {
-          const status =
-            err instanceof HttpException ? err.getStatus() : 'n/a';
+          const status = err instanceof HttpException ? err.getStatus() : 'n/a';
           this._logger.error(
-            `generateImage falhou: mode=${extra?.mode ?? 'T2I'} aspect=${aspectRatio ?? '(default)'} hasRef=${extra?.referenceImageUrl ? 'y' : 'n'} status=${status} msg=${(err as Error).message}`
+            `generateImage falhou: mode=${extra?.mode ?? 'T2I'} aspect=${
+              aspectRatio ?? '(default)'
+            } hasRef=${
+              extra?.referenceImageUrl ? 'y' : 'n'
+            } status=${status} msg=${(err as Error).message}`
           );
           throw err;
         }
@@ -371,7 +391,12 @@ export class MediaService {
   // Streams the remote body straight into storage: only the sniffing prefix
   // and a few upload parts are ever in memory, so a 1 GB video does not cost
   // 1 GB of heap
-  async uploadFromUrl(org: string, url: string, profileId?: string, adjust?: boolean) {
+  async uploadFromUrl(
+    org: string,
+    url: string,
+    profileId?: string,
+    adjust?: boolean
+  ) {
     let response: globalThis.Response;
     try {
       response = await fetch(url, {
@@ -406,15 +431,254 @@ export class MediaService {
     // Keep the remote file name so the Media Library shows something readable
     // instead of the generated storage name. Done here rather than at each
     // caller so the public API route and the MCP tool both get it.
-    return adjust ? this.saveUploadedFile(
-      org, uploaded.originalname, uploaded.path, new URL(url).pathname.split('/').pop() || undefined, profileId
-    ) : this.saveFile(
+    return adjust
+      ? this.saveUploadedFile(
+          org,
+          uploaded.originalname,
+          uploaded.path,
+          new URL(url).pathname.split('/').pop() || undefined,
+          profileId
+        )
+      : this.saveFile(
+          org,
+          uploaded.originalname,
+          uploaded.path,
+          new URL(url).pathname.split('/').pop() || undefined,
+          profileId
+        );
+  }
+
+  async resolvePostMedia(
+    org: string,
+    reference: { id?: string; path?: string },
+    profileId?: string
+  ) {
+    if (!reference?.id && !reference?.path)
+      throw new BadRequestException('A media id or path is required.');
+    const media = await this._mediaRepository.findPostMedia(
       org,
-      uploaded.originalname,
-      uploaded.path,
-      new URL(url).pathname.split('/').pop() || undefined,
+      reference,
       profileId
     );
+    if (!media)
+      throw new BadRequestException({
+        code: 'MEDIA_NOT_FOUND',
+        field: 'media',
+        message:
+          'Media must belong to this organization/profile. Upload it first.',
+      });
+    if (media.status !== 'ready')
+      throw new BadRequestException({
+        code: 'MEDIA_NOT_READY',
+        field: 'media',
+        message: 'Wait for processing to finish successfully.',
+      });
+    if (
+      !new ValidUrlPath().validate(media.path, {} as any) ||
+      !new ValidUrlExtension().validate(media.path, {} as any)
+    )
+      throw new BadRequestException('Media format or path is not supported.');
+    return media;
+  }
+
+  async getPostMediaMetadata(
+    org: string,
+    reference: { id?: string; path?: string },
+    profileId?: string
+  ) {
+    const media = await this.resolvePostMedia(org, reference, profileId);
+    if (
+      media.metadata &&
+      typeof media.metadata === 'object' &&
+      Number((media.metadata as any).width) > 0 &&
+      Number((media.metadata as any).height) > 0
+    )
+      return { ...(media.metadata as Record<string, any>), path: media.path };
+    const local = this.storage.localFilePath?.(media.path);
+    let metadata: Record<string, any>;
+    if (/\.mp4(?:$|[?#])/i.test(media.path)) {
+      if (!local)
+        throw new BadRequestException(
+          'Prepare this video first so its dimensions can be verified.'
+        );
+      const { stdout } = await promisify(execFile)(
+        'ffprobe',
+        [
+          '-v',
+          'error',
+          '-protocol_whitelist',
+          'file,pipe',
+          '-show_entries',
+          'stream=codec_type,codec_name,width,height:format=duration,size',
+          '-of',
+          'json',
+          local,
+        ],
+        { timeout: 30000, maxBuffer: 65536 }
+      );
+      const info = JSON.parse(stdout);
+      const video = info.streams?.find((v: any) => v.codec_type === 'video');
+      metadata = {
+        width: video?.width,
+        height: video?.height,
+        duration_seconds: Number(info.format?.duration),
+        bytes: Number(info.format?.size),
+        content_type: 'video/mp4',
+        video_codec: video?.codec_name,
+      };
+    } else {
+      let input: string | Buffer = local;
+      if (!input) {
+        const response = await fetch(media.path, {
+          dispatcher: ssrfSafeDispatcher,
+          signal: AbortSignal.timeout(15000),
+        } as any);
+        if (!response.ok)
+          throw new BadRequestException('Could not inspect media.');
+        input = await readResponseBodyWithLimit(response, 10 * 1024 * 1024);
+      }
+      const info = await sharp(input).metadata();
+      metadata = {
+        width: info.width,
+        height: info.height,
+        bytes: info.size ?? 0,
+        content_type: `image/${info.format}`,
+      };
+    }
+    if (!(metadata.width > 0 && metadata.height > 0))
+      throw new BadRequestException('Could not verify media dimensions.');
+    return { ...metadata, path: media.path };
+  }
+
+  async prepareLocalMedia(mediaId: string) {
+    const media = await this._mediaRepository.getMediaById(mediaId);
+    if (!media || media.status !== 'processing') return;
+    const source = this.storage.localFilePath?.(media.path);
+    if (!source)
+      throw new BadRequestException(
+        'The original local upload is unavailable.'
+      );
+    const temporary = await mkdtemp(join(tmpdir(), 'postiz-prepare-'));
+    try {
+      const output = join(temporary, 'prepared.mp4');
+      await promisify(execFile)(
+        'ffmpeg',
+        [
+          '-nostdin',
+          '-v',
+          'error',
+          '-protocol_whitelist',
+          'file,pipe',
+          '-i',
+          source,
+          '-map',
+          '0:v:0',
+          '-map',
+          '0:a:0?',
+          '-c:v',
+          'libx264',
+          '-pix_fmt',
+          'yuv420p',
+          '-vf',
+          'scale=1920:1920:force_original_aspect_ratio=decrease:force_divisible_by=2',
+          '-r',
+          '30',
+          '-c:a',
+          'aac',
+          '-movflags',
+          '+faststart',
+          output,
+        ],
+        { timeout: 1200000, maxBuffer: 65536 }
+      );
+      const bytes = (await stat(output)).size;
+      const uploaded = await this.storage.uploadStream(
+        createReadStream(output),
+        'video/mp4',
+        'mp4'
+      );
+      await this._mediaRepository.finishProcessing(
+        media.organizationId,
+        media.id,
+        { name: uploaded.originalname, path: uploaded.path, fileSize: bytes }
+      );
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  }
+
+  async assertReadyForPosts(
+    org: string,
+    media: Array<{ id?: string; path: string; thumbnail?: string }>,
+    profileId?: string
+  ) {
+    const errors = [];
+    for (const [i, item] of media.entries()) {
+      try {
+        await this.resolvePostMedia(org, item, profileId);
+        if (item.thumbnail)
+          await this.resolvePostMedia(org, { path: item.thumbnail }, profileId);
+      } catch (error) {
+        errors.push({
+          field: `media.${i}`,
+          code: 'MEDIA_NOT_READY',
+          message:
+            'Media or cover is missing, unavailable to this profile, still processing, or incompatible.',
+        });
+      }
+    }
+    return errors;
+  }
+
+  async uploadFileReference(
+    org: string,
+    file: { name: string; base64: string; adjust?: boolean },
+    profileId?: string
+  ) {
+    if (
+      !file ||
+      typeof file.name !== 'string' ||
+      file.name.length > 200 ||
+      typeof file.base64 !== 'string' ||
+      !file.base64.length ||
+      file.base64.length > 6 * 1024 * 1024 ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+        file.base64
+      )
+    ) {
+      throw new BadRequestException(
+        'Use a valid base64 file reference up to 4.5 MB, or uploadLinkTool for larger files. Server/local filesystem paths are not accepted.'
+      );
+    }
+    const bytes = Buffer.from(file.base64, 'base64');
+    const uploaded = await uploadStreamToStorage(
+      this.storage,
+      new Response(bytes).body,
+      bytes.length
+    );
+    const adjust =
+      file.adjust === true || extname(file.name).toLowerCase() === '.mov';
+    const media = adjust
+      ? await this.saveUploadedFile(
+          org,
+          uploaded.originalname,
+          uploaded.path,
+          file.name,
+          profileId
+        )
+      : await this.saveFile(
+          org,
+          uploaded.originalname,
+          uploaded.path,
+          file.name,
+          profileId
+        );
+    return {
+      fileReference: media.id,
+      originalPath: uploaded.path,
+      ...this.toUploadStatus(media),
+      progress: media.status === 'processing' ? null : 100,
+    };
   }
 
   saveFile(
@@ -442,17 +706,51 @@ export class MediaService {
     originalName?: string,
     profileId?: string
   ) {
-    const media = await this.saveFile(org, fileName, filePath, originalName, profileId);
+    const media = await this.saveFile(
+      org,
+      fileName,
+      filePath,
+      originalName,
+      profileId
+    );
     const client = this._temporalService.client.getRawClient();
+    if (
+      !this.processor &&
+      this.storage.localFilePath &&
+      extname(fileName).toLowerCase() === '.mov' &&
+      client
+    ) {
+      await this._mediaRepository.startProcessing(org, media.id, filePath);
+      try {
+        await client.workflow.start('prepareLocalMediaWorkflowV1', {
+          workflowId: `media_local_${media.id}`,
+          taskQueue: 'main',
+          args: [{ mediaId: media.id }],
+        });
+      } catch {
+        await this._mediaRepository.finishProcessing(org, media.id, {
+          error: 'Could not start local MOV preparation.',
+        });
+        return { ...media, status: 'failed' };
+      }
+      return { ...media, originalPath: filePath, status: 'processing' };
+    }
     if (
       !this.processor ||
       !PROCESSABLE[extname(fileName).toLowerCase()] ||
       !client
     ) {
+      if (extname(fileName).toLowerCase() === '.mov') {
+        await this._mediaRepository.finishProcessing(org, media.id, {
+          error:
+            'A configured media processor is required to prepare MOV as MP4.',
+        });
+        return { ...media, status: 'failed' };
+      }
       return media;
     }
 
-    await this._mediaRepository.startProcessing(org, media.id);
+    await this._mediaRepository.startProcessing(org, media.id, filePath);
     try {
       await client.workflow.start('processMediaWorkflow', {
         workflowId: `media_${media.id}`,
@@ -470,7 +768,7 @@ export class MediaService {
       return this.releaseUnprocessed(org, media.id, media.name);
     }
 
-    return { ...media, status: 'processing' };
+    return { ...media, originalPath: filePath, status: 'processing' };
   }
 
   // Lets go of a media the normalizer will not touch. A source the platforms
@@ -488,18 +786,36 @@ export class MediaService {
 
   // Upload widget (MCP Apps): the session id is what the model sees and polls,
   // the ticket is the credential the widget uploads with. It is handed to the
-  // widget only, so it doesn't end up in the conversation
+  // widget only, except uploadLinkTool which deliberately gives a temporary
+  // upload-only credential to an agent that can transfer a local file.
   async createUploadSession(org: string, profileId?: string) {
     const sessionId = randomBytes(16).toString('hex');
-    await ioRedis.set(`uploadSession:${sessionId}`, JSON.stringify({ org, profileId }), 'EX', 3600);
+    await ioRedis.set(
+      `uploadSession:${sessionId}`,
+      JSON.stringify({ org, profileId }),
+      'EX',
+      3600
+    );
     return sessionId;
   }
 
-  private async checkUploadSession(org: string, sessionId: string, profileId?: string) {
+  private async checkUploadSession(
+    org: string,
+    sessionId: string,
+    profileId?: string
+  ) {
     const stored = await ioRedis.get(`uploadSession:${sessionId}`);
     let session: { org: string; profileId?: string } | null = null;
-    try { session = JSON.parse(stored || 'null'); } catch { if (stored) session = { org: stored }; }
-    if (!session || session.org !== org || (profileId && session.profileId !== profileId)) {
+    try {
+      session = JSON.parse(stored || 'null');
+    } catch {
+      if (stored) session = { org: stored };
+    }
+    if (
+      !session ||
+      session.org !== org ||
+      (profileId && session.profileId !== profileId)
+    ) {
       throw new HttpException('Upload session not found or expired', 404);
     }
     return session;
@@ -520,13 +836,21 @@ export class MediaService {
   // A ticket never outlives its session: the file is streamed to storage right
   // after this check, so an expired session has to be refused here
   async getUploadTicket(ticket: string) {
-    const found = JSON.parse((await ioRedis.get(`uploadTicket:${ticket}`)) || 'null') as { org: string; sessionId: string; profileId?: string } | null;
+    const found = JSON.parse(
+      (await ioRedis.get(`uploadTicket:${ticket}`)) || 'null'
+    ) as { org: string; sessionId: string; profileId?: string } | null;
     if (!found) return null;
     try {
-      const session = await this.checkUploadSession(found.org, found.sessionId, found.profileId);
+      const session = await this.checkUploadSession(
+        found.org,
+        found.sessionId,
+        found.profileId
+      );
       if (session.profileId !== found.profileId) return null;
       return found;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 
   async saveUploadSessionFile(
@@ -538,13 +862,21 @@ export class MediaService {
     adjust?: boolean
   ) {
     const session = await this.checkUploadSession(org, sessionId);
-    const media = adjust ? await this.saveUploadedFile(
-      org,
-      fileName,
-      filePath,
-      originalName,
-      session.profileId
-    ) : await this.saveFile(org, fileName, filePath, originalName, session.profileId);
+    const media = adjust
+      ? await this.saveUploadedFile(
+          org,
+          fileName,
+          filePath,
+          originalName,
+          session.profileId
+        )
+      : await this.saveFile(
+          org,
+          fileName,
+          filePath,
+          originalName,
+          session.profileId
+        );
     // a list, so parallel uploads of the same session can't overwrite each other
     await ioRedis.rpush(`uploadSessionMedia:${sessionId}`, media.id);
     await ioRedis.expire(`uploadSessionMedia:${sessionId}`, 3600);
@@ -562,7 +894,11 @@ export class MediaService {
   }
 
   async getMediaStatus(org: string, id: string, profileId?: string) {
-    const media = await this._mediaRepository.getMediaStatus(org, id, profileId);
+    const media = await this._mediaRepository.getMediaStatus(
+      org,
+      id,
+      profileId
+    );
     if (!media) {
       throw new HttpException('Media not found', 404);
     }
@@ -583,32 +919,32 @@ export class MediaService {
       return { id: media.id, path: media.path, status: media.status };
     }
 
-    return USABLE_AS_IS.has(extname(media.name).toLowerCase())
-      ? {
-          id: media.id,
-          path: media.path,
-          status: 'ready',
-          warning:
-            'Adjustment failed, the original file was kept and will be used for publishing',
-        }
-      : {
-          id: media.id,
-          path: media.path,
-          status: 'failed',
-          error: 'Processing failed and the original file cannot be used',
-        };
+    return {
+      id: media.id,
+      path: media.path,
+      status: 'failed',
+      error:
+        'Processing failed. The original file was preserved; prepare it successfully before publishing.',
+    };
   }
 
   async getMediaUploadStatus(org: string, id: string, profileId?: string) {
-    return this.toUploadStatus(await this.getMediaStatus(org, id, profileId));
+    const media = await this.getMediaStatus(org, id, profileId);
+    return {
+      ...this.toUploadStatus(media),
+      originalPath: media.originalPath,
+      progress: media.status === 'processing' ? null : 100,
+    };
   }
 
   // The normalized file overwrites the original in place; only a container
   // change (mov -> mp4, jpeg -> jpg) lands under a new key. Either way the
   // polling side needs nothing but the media record to know where it is
-  private normalizedName(name: string) {
+  private normalizedName(name: string, preserveOriginal = false) {
     const ext = extname(name).toLowerCase();
-    return `${name.slice(0, -ext.length)}.${PROCESSABLE[ext].ext}`;
+    return `${name.slice(0, -ext.length)}${
+      preserveOriginal ? '.prepared' : ''
+    }.${PROCESSABLE[ext].ext}`;
   }
 
   // Returns the processor job id; when this process has nothing to run the
@@ -631,7 +967,7 @@ export class MediaService {
       return null;
     }
 
-    const outputName = this.normalizedName(media.name);
+    const outputName = this.normalizedName(media.name, !!media.originalPath);
     return this.processor.submit({
       version: 1,
       type: processable.type,
@@ -713,20 +1049,23 @@ export class MediaService {
     }
 
     if (result.status === 'unchanged') {
-      await this._mediaRepository.finishProcessing(org, mediaId, {});
+      await this._mediaRepository.finishProcessing(org, mediaId, {
+        metadata: result.output ? { ...result.output } : undefined,
+      });
       return true;
     }
 
-    const outputName = this.normalizedName(media.name);
+    const outputName = this.normalizedName(media.name, !!media.originalPath);
     await this._mediaRepository.finishProcessing(org, mediaId, {
       name: outputName,
       path: media.path.slice(0, media.path.lastIndexOf('/') + 1) + outputName,
       fileSize: result.output?.bytes,
+      metadata: result.output ? { ...result.output } : undefined,
     });
 
     // a same-key output already replaced the original; a stray object after a
     // container change is harmless, so a failed delete never fails the media
-    if (outputName !== media.name) {
+    if (outputName !== media.name && !media.originalPath) {
       try {
         await this.storage.removeFile(media.path);
       } catch (err) {
@@ -789,7 +1128,11 @@ export class MediaService {
     };
   }
 
-  saveMediaInformation(org: string, data: SaveMediaInformationDto, profileId?: string) {
+  saveMediaInformation(
+    org: string,
+    data: SaveMediaInformationDto,
+    profileId?: string
+  ) {
     return this._mediaRepository.saveMediaInformation(org, data, profileId);
   }
 

@@ -1,7 +1,10 @@
 import { IUploadProvider, UploadedStream } from './upload.interface';
 import { constants, createWriteStream, mkdirSync, writeFileSync } from 'fs';
 import { access, mkdir, unlink } from 'fs/promises';
-import { extractUploadPathSegments, resolveSafeUploadFile } from './safe.upload.path';
+import {
+  extractUploadPathSegments,
+  resolveSafeUploadFile,
+} from './safe.upload.path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
@@ -19,6 +22,7 @@ const LOCAL_STORAGE_ALLOWED_MIME = new Set<string>([
   'image/bmp',
   'image/tiff',
   'video/mp4',
+  'video/quicktime',
   'audio/mpeg',
   'audio/mp4',
   'audio/wav',
@@ -148,6 +152,13 @@ export class LocalStorage implements IUploadProvider {
       console.error('Error streaming file to Local Storage:', err);
       throw err;
     }
+  }
+
+  localFilePath(publicPath: string): string | null {
+    const segments = extractUploadPathSegments(publicPath);
+    return segments.length
+      ? resolveSafeUploadFile(this.uploadDirectory, segments)
+      : null;
   }
 
   async removeFile(publicPath: string): Promise<void> {

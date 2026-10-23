@@ -1,3 +1,4 @@
+import { PostManagementService } from './posts/post.management.service';
 import { AutomationDeliveryService } from './flows/automation-delivery.service';
 import { Global, Module } from '@nestjs/common';
 import {
@@ -114,6 +115,7 @@ import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/p
     AnalyticsReportService,
     AnalyticsReportRepository,
     PostsService,
+    PostManagementService,
     PostsRepository,
     PostsSyncRepository,
     PostsSyncService,

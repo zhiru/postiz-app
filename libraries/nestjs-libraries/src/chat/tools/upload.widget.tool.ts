@@ -18,7 +18,7 @@ export class UploadWidgetTool implements AgentToolInterface {
       id: 'uploadWidgetTool',
       description: `Show the user an upload widget to add images or videos from their own device to the media library.
 Use this when the user wants to attach a local file to a post. When the media is already available on a public URL, use uploadFromUrlTool instead.
-The widget is only displayed by apps that support MCP Apps (interactive UI); in any other app no widget appears, and local files go through the Postiz CLI (postiz upload, https://docs.postiz.com/cli/introduction) or the public API (POST /public/v1/upload with an API key, https://docs.postiz.com/public-api/introduction). uploadFromUrlTool is only for public URLs.
+The widget is only displayed by apps that support MCP Apps (interactive UI); in other apps no widget appears. Agents that can run commands on the user's computer should use uploadLinkTool to upload local files with a temporary URL. Other options are the Postiz CLI (postiz upload, https://docs.postiz.com/cli/introduction) or the public API (POST /public/v1/upload with an API key, https://docs.postiz.com/public-api/introduction). uploadFromUrlTool is only for public URLs.
 Returns a sessionId: the files the user uploads are reported in the conversation, and can also be read with uploadWidgetStatusTool.`,
       mcp: {
         annotations: {
@@ -41,13 +41,18 @@ Returns a sessionId: the files the user uploads are reported in the conversation
       }),
       execute: async (inputData, context) => {
         checkAuth(inputData, context);
-        const profileId = readRequestContext(context).get('profileId') as string | undefined;
+        const profileId = readRequestContext(context).get('profileId') as
+          | string
+          | undefined;
         try {
           const org = JSON.parse(
             readRequestContext(context).get('organization') as string
           );
           return {
-            sessionId: await this._mediaService.createUploadSession(org.id, profileId),
+            sessionId: await this._mediaService.createUploadSession(
+              org.id,
+              profileId
+            ),
           };
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);

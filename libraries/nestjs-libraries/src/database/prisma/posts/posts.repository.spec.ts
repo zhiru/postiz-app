@@ -140,7 +140,7 @@ describe('PostsRepository - ciclo de republicacao apos erro', () => {
         releaseURL: 'https://example.com/post/1',
         releaseId: 'remote-1',
         externalId: 'remote-1',
-        error: null,
+        error: null as string | null,
       },
     });
   });
@@ -161,7 +161,7 @@ describe('PostsRepository - ciclo de republicacao apos erro', () => {
         state: 'QUEUE',
         releaseId: null,
         releaseURL: null,
-        error: null,
+        error: null as string | null,
       },
     });
   });
@@ -305,7 +305,7 @@ describe('PostsRepository calendar format compatibility', () => {
       state: 'DRAFT',
       settings: '{}',
       image: '[{"path":"a.jpg"},{"path":"b.jpg"}]',
-      error: null,
+      error: null as string | null,
     };
     prisma.model.post.findMany.mockResolvedValue([row] as any);
     const repo = new PostsRepository(

@@ -1,3 +1,4 @@
+import { PublicPostsController } from './routes/v1/public.posts.controller';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
 import { StripeService } from '@gitroom/nestjs-libraries/services/stripe.service';
@@ -16,6 +17,7 @@ import { SuperAdminGuard } from '@gitroom/backend/services/auth/super.admin.guar
 
 const authenticatedController = [
   PublicIntegrationsController,
+  PublicPostsController,
   PublicProfilesController,
   PublicFlowsController,
 ];
@@ -42,4 +44,3 @@ export class PublicApiModule implements NestModule {
     consumer.apply(PublicAuthMiddleware).forRoutes(...authenticatedController);
   }
 }
-

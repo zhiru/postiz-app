@@ -1,5 +1,5 @@
 import DOMPurify from 'isomorphic-dompurify';
-import { parseFragment } from 'parse5';
+import { parseFragment, serialize } from 'parse5';
 
 const ALLOWED_TAGS = [
   'p',
@@ -8,6 +8,7 @@ const ALLOWED_TAGS = [
   'u',
   'a',
   'ul',
+  'ol',
   'li',
   'h1',
   'h2',
@@ -70,4 +71,120 @@ export const postContentPlainText = (value: unknown): string => {
       .join('');
 
   return walk(parseFragment(sanitizePostContent(value)).childNodes as any[]);
+};
+
+// Plain captions must become editor paragraphs without treating literal text as HTML.
+export const postContentToHtml = (value: string): string => {
+  const fragment = parseFragment(value);
+  if (fragment.childNodes.some((node: any) => node.tagName)) {
+    return sanitizePostContent(value);
+  }
+  return value
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map(
+      (line) =>
+        `<p>${line
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')}</p>`
+    )
+    .join('');
+};
+
+// Unlike anchor offsets, a caption's plain representation includes block breaks.
+export const captionText = (value: string): string => {
+  const walk = (node: any): string => {
+    if (node.nodeName === '#text') return node.value;
+    if (node.tagName === 'br') return '\n';
+    return (
+      (node.childNodes || []).map(walk).join('') +
+      (['p', 'li', 'h1', 'h2', 'h3'].includes(node.tagName) ? '\n' : '')
+    );
+  };
+  return walk(parseFragment(postContentToHtml(value))).replace(/\n$/, '');
+};
+
+export const normalizeCaptionSpacing = (value: string): string => {
+  const html = postContentToHtml(value);
+  const fragment = parseFragment(html);
+  const blocks: { html: string; text: string }[] = [];
+  let inline: any[] = [];
+  const add = (nodes: any[], wrap = false) => {
+    const serialized = serialize({
+      nodeName: '#document-fragment',
+      childNodes: nodes,
+    });
+    const block = wrap ? `<p>${serialized}</p>` : serialized;
+    const text = captionText(block);
+    if (text.trim()) blocks.push({ html: block, text: text.trim() });
+  };
+  const splitLines = (nodes: any[]): any[][] => {
+    const lines: any[][] = [[]];
+    for (const node of nodes) {
+      const parts =
+        node.tagName === 'br'
+          ? [[], []]
+          : node.childNodes
+          ? splitLines(node.childNodes).map((children) => [
+              { ...node, childNodes: children },
+            ])
+          : [[node]];
+      lines[lines.length - 1].push(...parts[0]);
+      lines.push(...parts.slice(1));
+    }
+    return lines;
+  };
+  const addParagraph = (node: any) => {
+    let children: any[] = [];
+    const flush = () => {
+      if (children.length) add([{ ...node, childNodes: children }]);
+      children = [];
+    };
+    for (const line of splitLines(node.childNodes || [])) {
+      const text = captionText(
+        serialize({ nodeName: '#document-fragment', childNodes: line })
+      );
+      if (!text.trim()) {
+        flush();
+        continue;
+      }
+      if (children.length)
+        children.push({
+          nodeName: 'br',
+          tagName: 'br',
+          attrs: [],
+          childNodes: [],
+          namespaceURI: 'http://www.w3.org/1999/xhtml',
+        });
+      children.push(...line);
+    }
+    flush();
+  };
+  for (const node of fragment.childNodes as any[]) {
+    if (['p', 'ul', 'ol', 'h1', 'h2', 'h3'].includes(node.tagName)) {
+      if (inline.length) {
+        add(inline, true);
+        inline = [];
+      }
+      if (['p', 'h1', 'h2', 'h3'].includes(node.tagName)) addParagraph(node);
+      else add([node]);
+    } else inline.push(node);
+  }
+  if (inline.length) add(inline, true);
+  const kind = (text: string) =>
+    /^(?:📅|📆|🗓|📍|⏰|🕐)/u.test(text)
+      ? 'event'
+      : /^(?:📌|✅|✔|☑|🔹|🔸|[-•▪]|\d+[.)])\s*/u.test(text)
+      ? 'list'
+      : /^#/u.test(text)
+      ? 'hashtags'
+      : '';
+  return blocks
+    .map((block, i) => {
+      const sameGroup =
+        i && kind(block.text) && kind(block.text) === kind(blocks[i - 1].text);
+      return (i && !sameGroup ? '<p></p>' : '') + block.html;
+    })
+    .join('');
 };

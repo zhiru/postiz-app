@@ -9,12 +9,16 @@ import {
   Min,
   ValidateNested,
   IsOptional,
+  Matches,
 } from 'class-validator';
 import { MediaDto } from '@gitroom/nestjs-libraries/dtos/media/media.dto';
 
 export class Collaborators {
   @IsDefined()
   @IsString()
+  @Matches(/^@?[A-Za-z0-9._]{1,30}$/, {
+    message: 'Use a valid collaborator username, not a caption mention or URL',
+  })
   label: string;
 }
 

@@ -52,6 +52,7 @@ export class MediaRepository {
         id: true,
         name: true,
         originalName: true,
+        originalPath: true,
         path: true,
         thumbnail: true,
         alt: true,
@@ -60,10 +61,14 @@ export class MediaRepository {
     });
   }
 
-  startProcessing(org: string, id: string) {
+  startProcessing(org: string, id: string, originalPath?: string) {
     return this._media.model.media.update({
       where: { id, organizationId: org },
-      data: { status: 'processing', processingError: null },
+      data: {
+        status: 'processing',
+        processingError: null,
+        ...(originalPath ? { originalPath } : {}),
+      },
       select: { id: true, status: true },
     });
   }
@@ -71,11 +76,18 @@ export class MediaRepository {
   finishProcessing(
     org: string,
     id: string,
-    data: { name?: string; path?: string; fileSize?: number; error?: string }
+    data: {
+      name?: string;
+      path?: string;
+      fileSize?: number;
+      error?: string;
+      metadata?: Prisma.InputJsonValue;
+    }
   ) {
     return this._media.model.media.update({
       where: { id, organizationId: org },
       data: {
+        ...(data.metadata ? { metadata: data.metadata } : {}),
         ...(data.name ? { name: data.name } : {}),
         ...(data.path ? { path: data.path } : {}),
         ...(data.fileSize ? { fileSize: data.fileSize } : {}),
@@ -98,11 +110,46 @@ export class MediaRepository {
         id: true,
         name: true,
         originalName: true,
+        originalPath: true,
         path: true,
         thumbnail: true,
         alt: true,
         status: true,
         processingError: true,
+      },
+    });
+  }
+
+  findPostMedia(
+    org: string,
+    reference: { id?: string; path?: string },
+    profileId?: string
+  ) {
+    return this._media.model.media.findFirst({
+      where: {
+        organizationId: org,
+        deletedAt: null,
+        AND: [
+          this.profileFilter(profileId),
+          reference.path
+            ? {
+                OR: [
+                  { path: reference.path },
+                  { originalPath: reference.path },
+                ],
+              }
+            : { id: reference.id },
+        ],
+      },
+      select: {
+        id: true,
+        path: true,
+        name: true,
+        status: true,
+        thumbnail: true,
+        alt: true,
+        originalPath: true,
+        metadata: true,
       },
     });
   }
@@ -281,7 +328,16 @@ export class MediaRepository {
     };
     const typeFilter =
       options.type === 'image-static'
-        ? [{ OR: ['jpg', 'jpeg', 'png'].map(extension => ({ name: { endsWith: `.${extension}`, mode: 'insensitive' as const } })) }]
+        ? [
+            {
+              OR: ['jpg', 'jpeg', 'png'].map((extension) => ({
+                name: {
+                  endsWith: `.${extension}`,
+                  mode: 'insensitive' as const,
+                },
+              })),
+            },
+          ]
         : options.type === 'video'
         ? [videos]
         : options.type === 'image'
@@ -331,6 +387,7 @@ export class MediaRepository {
         id: true,
         name: true,
         originalName: true,
+        originalPath: true,
         path: true,
         thumbnail: true,
         alt: true,

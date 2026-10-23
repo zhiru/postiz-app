@@ -4,6 +4,8 @@ Referência geral da API pública — autenticação, canais, posts, upload, ana
 
 ---
 
+Edição parcial, versões, validação, lote, upload MCP e confirmação: [gestão de posts](post-management.md). Criações exigem `Idempotency-Key` (8–200 caracteres) ou `body.idempotencyKey`; use a mesma chave/corpo ao repetir.
+
 ## Autenticação
 
 Header **`Authorization`** com a chave de API (valor **cru, sem `Bearer`**). Pegue em **Configurações > Integrações** (chave de organização = todos os perfis; chave de perfil = só o próprio).
@@ -22,20 +24,20 @@ Authorization: SUA_CHAVE_DE_API
 
 ## Endpoints (tag **Public API**)
 
-| Método | Rota | Descrição |
-|---|---|---|
-| `GET` | `/public/v1/profiles` | Listar perfis (id, name, isDefault) |
-| `GET` | `/public/v1/integrations` | Listar canais conectados (use `id` como `integrationId`) |
-| `GET` | `/public/v1/find-slot/:id` | Próximo horário livre para agendar |
-| `POST` | `/public/v1/upload` | Upload de arquivo (multipart, campo `file`) |
-| `POST` | `/public/v1/upload-from-url` | Upload de mídia a partir de uma URL |
-| `GET` | `/public/v1/posts` | Listar posts (`startDate`/`endDate`) |
-| `POST` | `/public/v1/posts` | Criar / agendar / rascunho de post |
-| `DELETE` | `/public/v1/posts/:id` | Excluir um post |
-| `GET` | `/public/v1/analytics/:integration` | Analytics de um canal (`?date=` dias) |
-| `GET` | `/public/v1/analytics/post/:postId` | Analytics de um post |
-| `POST` | `/public/v1/generate-video` | Gerar vídeo (IA) |
-| `GET` | `/public/v1/notifications` | Listar notificações |
+| Método   | Rota                                | Descrição                                                |
+| -------- | ----------------------------------- | -------------------------------------------------------- |
+| `GET`    | `/public/v1/profiles`               | Listar perfis (id, name, isDefault)                      |
+| `GET`    | `/public/v1/integrations`           | Listar canais conectados (use `id` como `integrationId`) |
+| `GET`    | `/public/v1/find-slot/:id`          | Próximo horário livre para agendar                       |
+| `POST`   | `/public/v1/upload`                 | Upload de arquivo (multipart, campo `file`)              |
+| `POST`   | `/public/v1/upload-from-url`        | Upload de mídia a partir de uma URL                      |
+| `GET`    | `/public/v1/posts`                  | Listar posts (`startDate`/`endDate`)                     |
+| `POST`   | `/public/v1/posts`                  | Criar / agendar / rascunho de post                       |
+| `DELETE` | `/public/v1/posts/:id`              | Excluir somente do Postiz; não remove da rede            |
+| `GET`    | `/public/v1/analytics/:integration` | Analytics de um canal (`?date=` dias)                    |
+| `GET`    | `/public/v1/analytics/post/:postId` | Analytics de um post                                     |
+| `POST`   | `/public/v1/generate-video`         | Gerar vídeo (IA)                                         |
+| `GET`    | `/public/v1/notifications`          | Listar notificações                                      |
 
 > Automações: `POST/GET/PUT/DELETE /public/v1/flows` — ver [`public-flows-api.md`](public-flows-api.md).
 
@@ -52,14 +54,14 @@ Authorization: SUA_CHAVE_DE_API
 
 ## `POST /public/v1/posts` — corpo
 
-| Campo | Tipo | Obrigatório | Notas |
-|---|---|---|---|
-| `type` | `now` \| `schedule` \| `draft` | ✅ | Publicar agora, agendar ou rascunho |
-| `date` | string ISO 8601 | ✅ | Quando publicar (use uma data futura para `schedule`) |
-| `shortLink` | boolean | ✅ | Encurtar links do post |
-| `republish` | boolean | — | Obrigatório como `true` para publicar novamente um post que já está `PUBLISHED` |
-| `tags` | `{value,label}[]` | ✅ | Tags (pode ser `[]`) |
-| `posts` | `Post[]` (≥1) | ✅ | Um item por canal |
+| Campo       | Tipo                           | Obrigatório | Notas                                                                           |
+| ----------- | ------------------------------ | ----------- | ------------------------------------------------------------------------------- |
+| `type`      | `now` \| `schedule` \| `draft` | ✅          | Publicar agora, agendar ou rascunho                                             |
+| `date`      | string ISO 8601                | ✅          | Quando publicar (use uma data futura para `schedule`)                           |
+| `shortLink` | boolean                        | ✅          | Encurtar links do post                                                          |
+| `republish` | boolean                        | —           | Obrigatório como `true` para publicar novamente um post que já está `PUBLISHED` |
+| `tags`      | `{value,label}[]`              | ✅          | Tags (pode ser `[]`)                                                            |
+| `posts`     | `Post[]` (≥1)                  | ✅          | Um item por canal                                                               |
 
 Os tipos são estritos. Envie booleanos e números como valores JSON reais:
 `false`, `true` e `10`. Valores em texto como `"false"`, `"true"` ou `"10"`
@@ -82,10 +84,12 @@ ou envie `republish: true` quando a nova publicação for intencional. Texto com
 **`value[].image[]` (MediaDto):** `{ id, path }` — `path` é a URL da mídia (de `POST /upload`).
 
 **`settings` por canal:** além de `__type`, aceita opções do provider. No Instagram:
+
 - `settings.post_type` — `"post"` (feed/Reels) ou `"story"`.
 - `settings.cover` — **capa do Reels**: um `MediaDto` `{ id, path }` (mídia de `POST /upload`). O `path` (URL pública) é enviado como `cover_url` à Meta. Só vale para **Reels** (um único vídeo `.mp4`, não story); em foto/carrossel/story é ignorado. Exige `id` **e** `path` válidos — senão a API responde **400**.
 
 ### Exemplo — publicar agora com imagem
+
 ```json
 {
   "type": "now",
@@ -98,7 +102,9 @@ ou envie `republish: true` quando a nova publicação for intencional. Texto com
       "value": [
         {
           "content": "Meu post de teste 🚀",
-          "image": [{ "id": "media-1", "path": "https://seu-cdn.com/imagem.jpg" }]
+          "image": [
+            { "id": "media-1", "path": "https://seu-cdn.com/imagem.jpg" }
+          ]
         }
       ],
       "settings": { "__type": "instagram" }
@@ -108,7 +114,9 @@ ou envie `republish: true` quando a nova publicação for intencional. Texto com
 ```
 
 ### Exemplo — Reels do Instagram com capa
+
 > Suba o vídeo (`.mp4`) e a imagem de capa via `POST /upload` (ou `/upload-from-url`) e use os `{ id, path }` retornados.
+
 ```json
 {
   "type": "now",
@@ -121,7 +129,9 @@ ou envie `republish: true` quando a nova publicação for intencional. Texto com
       "value": [
         {
           "content": "Meu Reels 🚀",
-          "image": [{ "id": "media-video", "path": "https://seu-cdn.com/video.mp4" }]
+          "image": [
+            { "id": "media-video", "path": "https://seu-cdn.com/video.mp4" }
+          ]
         }
       ],
       "settings": {
@@ -135,9 +145,20 @@ ou envie `republish: true` quando a nova publicação for intencional. Texto com
 ```
 
 ### Exemplo — rascunho (sem `settings`)
+
 ```json
-{ "type": "draft", "date": "2026-06-15T09:00:00Z", "shortLink": false, "tags": [],
-  "posts": [{ "integration": { "id": "SEU_INTEGRATION_ID" }, "value": [{ "content": "Rascunho ✍️", "image": [] }] }] }
+{
+  "type": "draft",
+  "date": "2026-06-15T09:00:00Z",
+  "shortLink": false,
+  "tags": [],
+  "posts": [
+    {
+      "integration": { "id": "SEU_INTEGRATION_ID" },
+      "value": [{ "content": "Rascunho ✍️", "image": [] }]
+    }
+  ]
+}
 ```
 
 > No Swagger, o `POST /posts` traz esses exemplos prontos no dropdown do "Example Value" (Try it out).

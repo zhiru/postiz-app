@@ -15,9 +15,10 @@ export class UploadWidgetAuthMiddleware implements NestMiddleware {
     // on "simple" requests (GET / multipart POST, no custom headers)
     res.setHeader('Access-Control-Allow-Origin', '*');
 
+    const credential = req.header('X-Postiz-Upload-Ticket') || req.query.ticket;
     const ticket =
-      typeof req.query.ticket === 'string' &&
-      (await this._mediaService.getUploadTicket(req.query.ticket));
+      typeof credential === 'string' &&
+      (await this._mediaService.getUploadTicket(credential));
     if (!ticket) {
       res
         .status(HttpStatus.UNAUTHORIZED)
