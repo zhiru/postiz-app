@@ -324,10 +324,10 @@ export const CalendarWeekProvider: FC<{
     isLoading: calendarIsLoading,
     mutate: mutateCalendar,
   } = useSWR(filters.display !== 'list' ? `/posts-${params}` : null, loadData, {
-    refreshInterval: 60000,
+    refreshInterval: 15000,
     refreshWhenOffline: false,
     refreshWhenHidden: false,
-    revalidateOnFocus: false,
+    revalidateOnFocus: true,
   });
 
   // SWR for list view
@@ -339,10 +339,10 @@ export const CalendarWeekProvider: FC<{
     filters.display === 'list' ? `/posts-list-${listParams}` : null,
     loadListData,
     {
-      refreshInterval: 60000,
+      refreshInterval: 15000,
       refreshWhenOffline: false,
       refreshWhenHidden: false,
-      revalidateOnFocus: false,
+      revalidateOnFocus: true,
     }
   );
 

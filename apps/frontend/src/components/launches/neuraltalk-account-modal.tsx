@@ -2,6 +2,7 @@
 
 import React, { FC, useEffect, useRef, useState } from 'react';
 import useSWRMutation from 'swr/mutation';
+import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { Button } from '@gitroom/react/form/button';
 import { Input } from '@gitroom/react/form/input';
@@ -12,8 +13,11 @@ import type {
 } from '@gitroom/nestjs-libraries/dtos/integrations/neuraltalk.dto';
 
 type Connection = {
-  baseUrl: string;
-  apiToken: string;
+  baseUrl?: string;
+  apiToken?: string;
+  useSavedConnection?: boolean;
+  savedIntegrationId?: string;
+  saveAsDefault?: boolean;
   accountId?: string;
   inboxId?: string;
 };
@@ -34,11 +38,37 @@ const useNeuralTalkRequest = <T,>(path: string) => {
   );
 };
 
+const useDefaultConnection = () => {
+  const fetch = useFetch();
+  return useSWR<{
+    configured: boolean;
+    baseUrl?: string;
+    connections: { id: string; name: string }[];
+  }>(
+    '/integrations/neuraltalk/default-connection',
+    async (url) => {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Connection lookup failed');
+      return response.json();
+    },
+    { revalidateOnMount: true }
+  );
+};
+
 export const NeuralTalkAccountModal: FC<{
   onComplete: () => void;
   onCancel: () => void;
 }> = ({ onComplete, onCancel }) => {
   const t = useT();
+  const fetch = useFetch();
+  const defaults = useDefaultConnection();
+  const [source, setSource] = useState<string | null>(null);
+  const [saveAsDefault, setSaveAsDefault] = useState(true);
+  const selectedSource =
+    source ??
+    (defaults.data?.configured
+      ? 'default'
+      : defaults.data?.connections?.[0]?.id || 'new');
   const [baseUrl, setBaseUrl] = useState('https://chat.neuraltalk.com.br');
   const [apiToken, setApiToken] = useState('');
   const [accounts, setAccounts] = useState<NeuralTalkAccount[] | null>(null);
@@ -77,7 +107,12 @@ export const NeuralTalkAccountModal: FC<{
       if (!cancelled.current) setBusy(false);
     }
   };
-  const credentials = { baseUrl: baseUrl.trim(), apiToken: apiToken.trim() };
+  const credentials: Connection =
+    selectedSource === 'default'
+      ? { useSavedConnection: true }
+      : selectedSource !== 'new'
+      ? { savedIntegrationId: selectedSource }
+      : { baseUrl: baseUrl.trim(), apiToken: apiToken.trim() };
   const cancel = () => {
     cancelled.current = true;
     setApiToken('');
@@ -112,42 +147,118 @@ export const NeuralTalkAccountModal: FC<{
           onSubmit={(event) => {
             event.preventDefault();
             void run(async () => {
-              const result = await accountsRequest.trigger(credentials);
+              const result = await accountsRequest.trigger({
+                ...credentials,
+                saveAsDefault: selectedSource !== 'default' && saveAsDefault,
+              });
               if (!Array.isArray(result?.accounts))
                 throw new Error('Invalid accounts');
               if (!cancelled.current) {
+                setSource(selectedSource);
                 setAccounts(result.accounts);
                 setSearch('');
               }
             });
           }}
         >
-          <Input
-            disableForm
-            required
-            type="url"
-            name="neuraltalk-url"
-            label={t('neuraltalk_instance_url', 'NeuralTalk URL')}
-            aria-label={t('neuraltalk_instance_url', 'NeuralTalk URL')}
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            disabled={busy}
-          />
-          <Input
-            disableForm
-            required
-            type="password"
-            autoComplete="new-password"
-            name="neuraltalk-token"
-            label={t('neuraltalk_api_token', 'API access token')}
-            aria-label={t('neuraltalk_api_token', 'API access token')}
-            value={apiToken}
-            onChange={(e) => setApiToken(e.target.value)}
-            disabled={busy}
-          />
+          {defaults.data && (
+            <label className="flex flex-col gap-2">
+              {t('neuraltalk_connection_source', 'Connection')}
+              <select
+                aria-label={t('neuraltalk_connection_source', 'Connection')}
+                className="rounded-lg border border-newTableBorder bg-newBgColorInner p-3"
+                value={selectedSource}
+                disabled={busy}
+                onChange={(event) => {
+                  setSource(event.target.value);
+                  setApiToken('');
+                }}
+              >
+                {defaults.data.configured && (
+                  <option value="default">
+                    {t('neuraltalk_saved_default', 'Saved default connection')}
+                  </option>
+                )}
+                {(defaults.data.connections || []).map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+                <option value="new">
+                  {t('neuraltalk_new_connection', 'Use another token')}
+                </option>
+              </select>
+            </label>
+          )}
+          {selectedSource === 'default' && (
+            <>
+              <p>{defaults.data?.baseUrl}</p>
+              <Button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    const response = await fetch(
+                      '/integrations/neuraltalk/default-connection',
+                      { method: 'DELETE' }
+                    );
+                    if (!response.ok)
+                      throw new Error('Could not remove default');
+                    setSource('new');
+                    await defaults.mutate();
+                  })
+                }
+              >
+                {t('neuraltalk_remove_default', 'Remove saved default')}
+              </Button>
+            </>
+          )}
+          {selectedSource === 'new' && (
+            <>
+              <Input
+                disableForm
+                required
+                type="url"
+                name="neuraltalk-url"
+                label={t('neuraltalk_instance_url', 'NeuralTalk URL')}
+                aria-label={t('neuraltalk_instance_url', 'NeuralTalk URL')}
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                disabled={busy}
+              />
+              <Input
+                disableForm
+                required
+                type="password"
+                autoComplete="new-password"
+                name="neuraltalk-token"
+                label={t('neuraltalk_api_token', 'API access token')}
+                aria-label={t('neuraltalk_api_token', 'API access token')}
+                value={apiToken}
+                onChange={(e) => setApiToken(e.target.value)}
+                disabled={busy}
+              />
+            </>
+          )}
+          {selectedSource !== 'default' && (
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={saveAsDefault}
+                disabled={busy}
+                onChange={(event) => setSaveAsDefault(event.target.checked)}
+              />
+              {t('neuraltalk_save_default', 'Save as default for this profile')}
+            </label>
+          )}
           <Button
             type="submit"
-            disabled={busy || !baseUrl.trim() || !apiToken.trim()}
+            disabled={
+              busy ||
+              defaults.isLoading ||
+              (selectedSource === 'new' &&
+                (!baseUrl.trim() || !apiToken.trim()))
+            }
             loading={busy}
           >
             {t('continue', 'Continue')}

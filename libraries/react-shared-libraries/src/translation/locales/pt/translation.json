@@ -2413,5 +2413,20 @@
   "neuraltalk_remove_destination": "Remover {{name}}",
   "neuraltalk_inbox_unavailable": "Envio indisponível nesta caixa de entrada",
   "post_recurrence_unavailable": "Um canal selecionado não permite postagens recorrentes. Agende um envio único ou envie agora.",
-  "post_recurrence_unavailable_channels": "{{channels}} não permite postagens recorrentes. Remova a repetição para salvar, agendar um envio único ou enviar agora."
+  "post_recurrence_unavailable_channels": "{{channels}} não permite postagens recorrentes. Remova a repetição para salvar, agendar um envio único ou enviar agora.",
+  "neuraltalk_connection_source": "Conexão",
+  "neuraltalk_saved_default": "Conexão padrão salva",
+  "neuraltalk_new_connection": "Usar outro token",
+  "neuraltalk_remove_default": "Remover conexão padrão",
+  "neuraltalk_save_default": "Salvar como padrão deste perfil",
+  "post_actions": "Ações da publicação",
+  "remove_from_postiz": "Remover do Mali Posts",
+  "delete_from_network": "Excluir da rede social",
+  "remote_delete_unsupported": "Esta conexão não permite excluir da rede social.",
+  "remote_delete_done": "Excluído da rede social. Histórico local preservado.",
+  "remote_delete_unknown": "Exclusão não confirmada. Confira na rede social; não repita o envio.",
+  "remote_delete_confirm": "Excluir permanentemente esta publicação da rede social? O carrossel inteiro será excluído. Esta ação não pode ser desfeita.",
+  "remote_delete_permission": "Reconecte pelo Facebook Login com instagram_manage_contents aprovada. Nenhuma exclusão foi confirmada.",
+  "remote_delete_failed": "Não foi possível confirmar a exclusão. Consulte o estado atual antes de tentar novamente.",
+  "remote_deleted_label": "Excluído da rede social"
 }

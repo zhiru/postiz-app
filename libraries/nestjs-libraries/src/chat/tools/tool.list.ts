@@ -4,6 +4,8 @@ import {
   CompleteMediaUploadTool,
 } from './media.transfer.tools';
 import {
+  GetRemoteDeletionTool,
+  DeleteRemotePostTool,
   GetPostTool,
   UpdatePostTool,
   ValidatePostTool,
@@ -45,6 +47,8 @@ import { UploadWidgetStatusTool } from '@gitroom/nestjs-libraries/chat/tools/upl
 import { UploadLinkTool } from './upload.link.tool';
 
 export const toolList = [
+  GetRemoteDeletionTool,
+  DeleteRemotePostTool,
   GetPostTool,
   UpdatePostTool,
   ValidatePostTool,

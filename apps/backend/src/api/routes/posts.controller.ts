@@ -30,7 +30,10 @@ import {
   AuthorizationActions,
   Sections,
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
-import { AllowViewer } from '@gitroom/nestjs-libraries/services/auth/profile-access/profile-access.decorators';
+import {
+  AllowViewer,
+  ProfileManage,
+} from '@gitroom/nestjs-libraries/services/auth/profile-access/profile-access.decorators';
 import { getOrgRole } from '@gitroom/nestjs-libraries/user/org.role';
 import { PostValidationException } from '@gitroom/backend/api/routes/posts.validation.exception';
 import {
@@ -48,6 +51,27 @@ export class PostsController {
     private _shortLinkService: ShortLinkService,
     private _reviewLinksService: ReviewLinksService
   ) {}
+
+  @Get('/:id/remote-deletion')
+  @ProfileManage()
+  getRemoteDeletion(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string
+  ) {
+    return this._postsService.getRemoteDeletionInfo(org.id, profile?.id, id);
+  }
+
+  @Post('/:id/delete-remote')
+  @ProfileManage()
+  async deleteRemote(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string,
+    @Body() body: { version: string; confirmRemoteId: string }
+  ) {
+    return this._postsService.deleteRemotePost(org.id, profile?.id, id, body);
+  }
 
   @Get('/:id/statistics')
   async getStatistics(
@@ -107,7 +131,14 @@ export class PostsController {
     @Body() body: CreatePublicCommentDto,
     @RealIP() ip: string
   ) {
-    return this._postsService.createPublicComment(id, body, user.id, ip, org.id, profile?.id);
+    return this._postsService.createPublicComment(
+      id,
+      body,
+      user.id,
+      ip,
+      org.id,
+      profile?.id
+    );
   }
 
   @Put('/comments/:commentId/resolve')
@@ -117,7 +148,12 @@ export class PostsController {
     @Param('commentId') commentId: string,
     @Body() body: ResolveCommentDto
   ) {
-    return this._postsService.resolveComment(org.id, commentId, body.resolved, profile?.id);
+    return this._postsService.resolveComment(
+      org.id,
+      commentId,
+      body.resolved,
+      profile?.id
+    );
   }
 
   @Post('/:id/review-comments')
@@ -196,7 +232,8 @@ export class PostsController {
   ) {
     await this.assertPostScope(org.id, id, profile?.id);
     const links = await this._reviewLinksService.listForPost(id, org.id);
-    if (!links.some((link) => link.id === linkId)) throw new HttpException('Review link not found', 404);
+    if (!links.some((link) => link.id === linkId))
+      throw new HttpException('Review link not found', 404);
     return this._reviewLinksService.revoke(linkId, org.id);
   }
 
@@ -207,7 +244,10 @@ export class PostsController {
     @Param('id') id: string
   ) {
     const scope = await this._postsService.getPostProfileScope(org.id, id);
-    if (!scope || (getOrgRole(org) === 'USER' && scope.profileId !== profile?.id)) {
+    if (
+      !scope ||
+      (getOrgRole(org) === 'USER' && scope.profileId !== profile?.id)
+    ) {
       throw new HttpException('Post not found', 404);
     }
     return { comments: await this._postsService.getComments(id) };
@@ -263,7 +303,13 @@ export class PostsController {
     @GetOrgFromRequest() org: Organization,
     @GetProfileFromRequest() profile: Profile | null
   ) {
-    return { date: await this._postsService.findFreeDateTime(org.id, undefined, profile?.id) };
+    return {
+      date: await this._postsService.findFreeDateTime(
+        org.id,
+        undefined,
+        profile?.id
+      ),
+    };
   }
 
   @Get('/find-slot/:id')
@@ -272,7 +318,9 @@ export class PostsController {
     @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id?: string
   ) {
-    return { date: await this._postsService.findFreeDateTime(org.id, id, profile?.id) };
+    return {
+      date: await this._postsService.findFreeDateTime(org.id, id, profile?.id),
+    };
   }
 
   @Get('/list')
@@ -381,7 +429,13 @@ export class PostsController {
     }
 
     const body = await this._postsService.mapTypeToPost(rawBody, org.id);
-    return this._postsService.createPost(org.id, body, 'WEB', false, profile?.id);
+    return this._postsService.createPost(
+      org.id,
+      body,
+      'WEB',
+      false,
+      profile?.id
+    );
   }
 
   @Post('/generator/draft')
@@ -403,7 +457,11 @@ export class PostsController {
     @Res({ passthrough: false }) res: Response
   ) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    const stream = await this._agentGraphService.start(org.id, body, profile?.id);
+    const stream = await this._agentGraphService.start(
+      org.id,
+      body,
+      profile?.id
+    );
     try {
       for await (const event of stream) {
         res.write(JSON.stringify(event) + '\n');
@@ -441,7 +499,14 @@ export class PostsController {
     @Body('action') action: 'schedule' | 'update' = 'update',
     @Body('republish') republish = false
   ) {
-    return this._postsService.changeDate(org.id, id, date, action, republish, profile?.id);
+    return this._postsService.changeDate(
+      org.id,
+      id,
+      date,
+      action,
+      republish,
+      profile?.id
+    );
   }
 
   @Post('/separate-posts')
@@ -457,10 +522,14 @@ export class PostsController {
       profile?.id
     );
   }
-  private async assertPostScope(orgId: string, postId: string, profileId?: string) {
+  private async assertPostScope(
+    orgId: string,
+    postId: string,
+    profileId?: string
+  ) {
     if (!profileId) return;
     const scope = await this._postsService.getPostProfileScope(orgId, postId);
-    if (!scope || scope.profileId !== profileId) throw new HttpException('Post not found', 404);
+    if (!scope || scope.profileId !== profileId)
+      throw new HttpException('Post not found', 404);
   }
-
 }

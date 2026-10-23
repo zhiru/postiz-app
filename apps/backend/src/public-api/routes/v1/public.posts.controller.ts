@@ -164,6 +164,7 @@ const readSchema: any = {
         'SCHEDULED',
         'PROCESSING',
         'PUBLISHED',
+        'REMOTE_DELETED',
         'FAILED',
         'AWAITING_REMOTE_CONFIRMATION',
         'SCHEDULE_MISSING',
@@ -176,7 +177,15 @@ const readSchema: any = {
     remoteDeletion: {
       type: 'object',
       properties: {
-        supported: { type: 'boolean', enum: [false] },
+        supported: {
+          type: 'boolean',
+          description:
+            'Provider capability; permission/ownership are checked before deletion.',
+        },
+        status: {
+          type: 'string',
+          enum: ['not_requested', 'deleted', 'unknown'],
+        },
         reason: { type: 'string' },
       },
     },
@@ -270,6 +279,44 @@ export class PublicPostsController {
       zone,
       commentsPage === undefined ? 1 : Number(commentsPage)
     );
+  }
+  @Get(':id/remote-deletion')
+  @ApiOperation({
+    summary: 'Read remote deletion capability and durable result',
+    description:
+      'Returns supported, version, remoteId and status not_requested/deleted/unknown. Provider capability is not proof that the connected token has permission.',
+  })
+  getRemoteDeletion(
+    @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() profile: string | undefined,
+    @Param('id') id: string
+  ) {
+    return this.management.remoteDeletionInfo(org.id, profile, id);
+  }
+  @Post(':id/delete-remote')
+  @ApiOperation({
+    summary: 'Permanently delete the published media from its network',
+    description:
+      'Separate from local deletion. Requires the current version and exact remote ID after explicit confirmation. Facebook Login Instagram only with instagram_manage_contents. Non-ad media and whole carousels only. Keeps local history. An unknown result must be reconciled manually, never blindly retried.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['version', 'confirmRemoteId'],
+      properties: {
+        version: { type: 'string', format: 'date-time' },
+        confirmRemoteId: { type: 'string' },
+      },
+    },
+  })
+  deleteRemote(
+    @GetOrgFromRequest() org: Organization,
+    @GetPublicApiProfileId() profile: string | undefined,
+    @Param('id') id: string,
+    @Body() body: { version: string; confirmRemoteId: string }
+  ) {
+    return this.management.deleteRemote(org.id, profile, id, body);
   }
   @Get(':id/status')
   @ApiOkResponse({ schema: readSchema })

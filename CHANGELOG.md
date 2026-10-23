@@ -7,6 +7,13 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Cards: rascunhos abrem edição por clique/teclado, ações em três pontos e prévia em modal de tela inteira.
+- Instagram via Facebook Login: exclusão remota explícita por painel/API/MCP, com permissão instagram_manage_contents, verificação de dono, confirmação por ID/versão e recibo contra reenvio após resultado incerto. Histórico local preservado.
+
+- Calendário/listagem atualizam ao retornar à aba e consultam novidades a cada 15 segundos enquanto visíveis, incluindo envios criados pelo MCP.
+
+- NeuralTalk: conexão padrão criptografada por perfil, reutilização de canais existentes e troca/remoção do padrão sem alterar caixas já conectadas.
+
 - MCP: transferência real de mídia por `uploadMediaTool` ou sessão HTTP temporária, com manifesto SHA-256, isolamento, recibo idempotente e confirmação de processamento. Inclui cliente Node executável que envia bytes locais e cria apenas rascunho com carrossel e collabs.
 
 - API/MCP: leitura por ID, edição parcial com versão, prévia de espaçamento, validação, data/status e lote idempotente; cancelamento confirmado e bloqueio concorrente da fila, sem republicar posts existentes.

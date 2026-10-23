@@ -1,3 +1,4 @@
+import { remoteDeletePostSchema } from '@gitroom/nestjs-libraries/dtos/posts/manage.post.dto';
 import { createHash } from 'crypto';
 import {
   BadRequestException,
@@ -555,12 +556,16 @@ export class PostsService {
     profileId?: string
   ) {
     return minifyPosts({
-      posts: await this._postRepository.getPosts(
+      posts: await this.withRemoteDeletion(
         orgId,
-        query,
-        false,
         profileId,
-        true
+        await this._postRepository.getPosts(
+          orgId,
+          query,
+          false,
+          profileId,
+          true
+        )
       ),
     });
   }
@@ -570,9 +575,15 @@ export class PostsService {
     query: GetPostsListDto,
     profileId?: string
   ) {
-    return minifyPostsList(
-      await this._postRepository.getPostsList(orgId, query, profileId)
+    const result = await this._postRepository.getPostsList(
+      orgId,
+      query,
+      profileId
     );
+    return minifyPostsList({
+      ...result,
+      posts: await this.withRemoteDeletion(orgId, profileId, result.posts),
+    });
   }
 
   async updateMedia(id: string, imagesList: any[], convertToJPEG = false) {
@@ -961,6 +972,178 @@ export class PostsService {
           totalRuns: runPlug.totalRuns,
         };
       });
+  }
+
+  private async withRemoteDeletion<
+    T extends { id: string; releaseId?: string | null }
+  >(org: string, profile: string | undefined, posts: T[]) {
+    const deleted = await this._postRepository.remoteDeletedPostIds(
+      org,
+      profile,
+      posts
+    );
+    return posts.map((post) => ({
+      ...post,
+      remoteDeleted: deleted.has(post.id),
+    }));
+  }
+
+  supportsRemoteDeletion(identifier: string) {
+    const provider = this._integrationManager.getSocialIntegration(identifier);
+    return Boolean(
+      provider?.deletePublishedPost && provider?.checkRemoteDeletion
+    );
+  }
+
+  async getRemoteDeletionInfo(
+    org: string,
+    profile: string | undefined,
+    id: string
+  ) {
+    const [post] = await this._postRepository.getManagedPost(org, profile, id);
+    if (!post) throw new NotFoundException('Post not found');
+    const receiptId = `remote-delete:${org}:${post.profileId || ''}:${
+      post.id
+    }:${post.releaseId}`;
+    const receipt = await this._postRepository.getRemoteDeletionReceipt(
+      receiptId,
+      org,
+      post.profileId || undefined
+    );
+    return {
+      id,
+      version: post.updatedAt.toISOString(),
+      remoteId: post.releaseId,
+      supported: this.supportsRemoteDeletion(
+        post.integration.providerIdentifier
+      ),
+      status: receipt
+        ? receipt.result
+          ? JSON.parse(receipt.result).status
+          : 'unknown'
+        : 'not_requested',
+    };
+  }
+
+  async deleteRemotePost(
+    org: string,
+    profile: string | undefined,
+    id: string,
+    input: { version: string; confirmRemoteId: string }
+  ) {
+    const parsed = remoteDeletePostSchema.safeParse(input);
+    if (!parsed.success)
+      throw new BadRequestException({
+        code: 'INVALID_INPUT',
+        message: 'Supply version and exact numeric confirmRemoteId.',
+      });
+    const rows = await this._postRepository.getManagedPost(org, profile, id);
+    const post = rows[0];
+    if (!post) throw new HttpException('Post not found', 404);
+    if (
+      !input ||
+      input.version !== post.updatedAt.toISOString() ||
+      !post.releaseId ||
+      input.confirmRemoteId !== post.releaseId ||
+      post.state !== 'PUBLISHED'
+    )
+      throw new HttpException(
+        {
+          code: 'REMOTE_DELETE_CONFIRMATION_REQUIRED',
+          message:
+            'Read the latest published post and confirm its version and exact remote ID.',
+        },
+        409
+      );
+    let settings: any, images: any;
+    try {
+      settings = JSON.parse(post.settings || '{}');
+      images = JSON.parse(post.image || '[]');
+    } catch {
+      throw new BadRequestException('Stored media metadata is invalid.');
+    }
+    if (
+      ['story', 'stories'].includes(String(settings.post_type).toLowerCase()) &&
+      Array.isArray(images) &&
+      images.length > 1
+    )
+      throw new HttpException(
+        {
+          code: 'MULTIPLE_STORY_IDS_UNAVAILABLE',
+          message:
+            'This story batch does not retain every remote media ID. Delete individual stories in Instagram.',
+        },
+        422
+      );
+    const channel = await this._integrationService.getIntegrationById(
+      org,
+      post.integrationId
+    );
+    if (
+      !channel ||
+      channel.profileId !== post.profileId ||
+      channel.deletedAt ||
+      channel.disabled
+    )
+      throw new HttpException('Connected channel not available', 412);
+    const provider = this._integrationManager.getSocialIntegration(
+      channel.providerIdentifier
+    );
+    if (!provider.deletePublishedPost || !provider.checkRemoteDeletion)
+      throw new HttpException(
+        {
+          code: 'REMOTE_DELETE_UNSUPPORTED',
+          message: 'Remote deletion is not supported by this connection.',
+        },
+        422
+      );
+    const receiptId = `remote-delete:${org}:${post.profileId || ''}:${
+      post.id
+    }:${post.releaseId}`;
+    const previous = await this._postRepository.getRemoteDeletionReceipt(
+      receiptId,
+      org,
+      post.profileId || undefined
+    );
+    if (previous)
+      return previous.result
+        ? JSON.parse(previous.result)
+        : { status: 'unknown', localDeleted: false, remoteId: post.releaseId };
+    const token = decryptIntegrationToken(this._encryption, channel.token);
+    await provider.checkRemoteDeletion(
+      channel.internalId,
+      token,
+      post.releaseId
+    );
+    const receipt = await this._postRepository.reservePostOperation(
+      receiptId,
+      org,
+      post.profileId || undefined,
+      post.releaseId
+    );
+    if (!receipt.claimed)
+      return receipt.result
+        ? JSON.parse(receipt.result)
+        : { status: 'unknown', localDeleted: false, remoteId: post.releaseId };
+    let result;
+    try {
+      await provider.deletePublishedPost(token, post.releaseId);
+      result = {
+        status: 'deleted',
+        remoteId: post.releaseId,
+        localDeleted: false,
+      };
+    } catch {
+      result = {
+        status: 'unknown',
+        remoteId: post.releaseId,
+        localDeleted: false,
+        message:
+          'Deletion was not confirmed. Check Instagram before retrying; this operation will not be resent automatically.',
+      };
+    }
+    await this._postRepository.completePostOperation(receiptId, result);
+    return result;
   }
 
   async deletePost(orgId: string, group: string, profileId?: string) {
@@ -1473,7 +1656,10 @@ export class PostsService {
       );
       if (!channel || (profileId && channel.profileId !== profileId))
         throw new BadRequestException('Channel not found');
-      this.assertRecurringPostsSupported(channel.providerIdentifier, body.inter);
+      this.assertRecurringPostsSupported(
+        channel.providerIdentifier,
+        body.inter
+      );
       channels.set(post.integration.id, channel);
     }
     const postList = [];
