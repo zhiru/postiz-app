@@ -266,24 +266,10 @@ export class InstagramStandaloneProvider
   }
 
   override async checkValidity(
-    [firstPost]: Array<ValidityMedia[]>,
+    media: Array<ValidityMedia[]>,
     settings: any
   ): Promise<string | true> {
-    if (!firstPost?.length) {
-      return 'Should have at least one media';
-    }
-    if (this.assetBoolean(settings?.is_trial_reel)) {
-      if ((firstPost?.length ?? 0) > 1) {
-        return 'Trial Reels can only have one video';
-      }
-      const hasVideo = firstPost?.some(
-        (f) => (f?.path?.indexOf?.('mp4') ?? -1) > -1
-      );
-      if (!hasVideo) {
-        return 'Trial Reels must be a video';
-      }
-    }
-    return true;
+    return instagramProvider.checkValidity(media, settings);
   }
 
   async postPending(

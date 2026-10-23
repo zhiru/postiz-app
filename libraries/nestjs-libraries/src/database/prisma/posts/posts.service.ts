@@ -1078,6 +1078,10 @@ export class PostsService {
       const workflowName = selectPostWorkflowVersion({
         integrationId: target.id,
         providerIdentifier: target.providerIdentifier,
+        requiresCredentialFreeWorkflow:
+          this._integrationManager.getSocialIntegration(
+            target.providerIdentifier
+          )?.requiresCredentialFreeWorkflow,
       });
       const started = await this._temporalService.client
         .getRawClient()
@@ -1120,6 +1124,33 @@ export class PostsService {
     }
   }
 
+  private recurrenceError(
+    providerIdentifier: string,
+    intervalInDays?: number | null
+  ) {
+    if (
+      intervalInDays &&
+      this._integrationManager.getSocialIntegration(providerIdentifier)
+        ?.supportsRecurringPosts === false
+    ) {
+      return {
+        field: 'intervalInDays',
+        code: 'RECURRENCE_NOT_SUPPORTED',
+        message:
+          'This channel does not support recurring posts. Choose a single date.',
+      };
+    }
+    return undefined;
+  }
+
+  private assertRecurringPostsSupported(
+    providerIdentifier: string,
+    intervalInDays?: number | null
+  ) {
+    const error = this.recurrenceError(providerIdentifier, intervalInDays);
+    if (error) throw new BadRequestException(error);
+  }
+
   async validatePosts(
     orgId: string,
     posts: Array<{
@@ -1129,6 +1160,7 @@ export class PostsService {
         image?: Array<{ path: string; thumbnail?: string }>;
       }>;
       settings?: any;
+      intervalInDays?: number | null;
     }>
   ) {
     return Promise.all(
@@ -1211,6 +1243,16 @@ export class PostsService {
           fieldErrors = collect(validationErrors);
           settingsError = this.firstValidationError(validationErrors);
           valid = validationErrors.length === 0;
+        }
+
+        const recurrenceError = this.recurrenceError(
+          integration.providerIdentifier,
+          post.intervalInDays
+        );
+        if (recurrenceError) {
+          fieldErrors.push(recurrenceError);
+          settingsError ||= recurrenceError.message;
+          valid = false;
         }
 
         // Provider-specific media validation (the old client `checkValidity`).
@@ -1431,6 +1473,7 @@ export class PostsService {
       );
       if (!channel || (profileId && channel.profileId !== profileId))
         throw new BadRequestException('Channel not found');
+      this.assertRecurringPostsSupported(channel.providerIdentifier, body.inter);
       channels.set(post.integration.id, channel);
     }
     const postList = [];
@@ -1621,6 +1664,7 @@ export class PostsService {
       {
         integration: { id: integration.id },
         settings: mergedSettings,
+        intervalInDays: root.intervalInDays,
         value: value.map((p) => ({ content: p.content, image: p.image })),
       },
     ]);
@@ -1838,6 +1882,12 @@ export class PostsService {
           throw new BadRequestException(
             'Resolve the previous publication result first.'
           );
+        if (status === 'schedule') {
+          this.assertRecurringPostsSupported(
+            post.integration.providerIdentifier,
+            post.intervalInDays
+          );
+        }
         const expectedVersion = version ?? post.updatedAt.toISOString();
         if (new Date(expectedVersion).getTime() !== post.updatedAt.getTime())
           throw new HttpException(
@@ -1934,6 +1984,16 @@ export class PostsService {
 
         if (action === 'schedule' && republish !== true) {
           this.guardAgainstRepublish(getPostById, 'changeDate');
+        }
+
+        if (
+          action === 'schedule' ||
+          (action === 'update' && getPostById.state === 'QUEUE')
+        ) {
+          this.assertRecurringPostsSupported(
+            getPostById.integration.providerIdentifier,
+            getPostById.intervalInDays
+          );
         }
 
         // schedule: Set status to QUEUE and change date (reschedule the post)

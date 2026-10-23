@@ -57,9 +57,12 @@ const buildService = () => {
       getWorkflowHandle: jest.fn(),
     },
   };
+  const integrationManager = {
+    getSocialIntegration: jest.fn().mockReturnValue({}),
+  };
   const service = new PostsService(
     repository,
-    null as any,
+    integrationManager as any,
     integrationService,
     null as any,
     null as any,
@@ -72,7 +75,7 @@ const buildService = () => {
     {} as any
   );
 
-  return { service, start, repository };
+  return { service, start, repository, integrationManager };
 };
 
 describe('PostsService - selecao do workflow de publicacao', () => {
@@ -142,6 +145,29 @@ describe('PostsService - selecao do workflow de publicacao', () => {
     expect(start).toHaveBeenCalledWith(
       'postWorkflowV113',
       expect.objectContaining({ workflowId: 'post_post-default' })
+    );
+  });
+  it('selects credential-free history from the provider capability without a rollout gate', async () => {
+    delete process.env.POST_WORKFLOW_V112_INTEGRATION_IDS;
+    delete process.env.POST_WORKFLOW_V112_PROVIDERS;
+    delete process.env.POST_WORKFLOW_V112_ALL;
+    const { service, start, integrationManager } = buildService();
+    integrationManager.getSocialIntegration.mockReturnValue({
+      requiresCredentialFreeWorkflow: true,
+    });
+    await service.startWorkflow(
+      'neuraltalk',
+      'post-message',
+      'org-1',
+      'QUEUE',
+      {
+        id: 'messaging-channel',
+        providerIdentifier: 'neuraltalk',
+      }
+    );
+    expect(start).toHaveBeenCalledWith(
+      'postWorkflowV114',
+      expect.objectContaining({ workflowId: 'post_post-message' })
     );
   });
 });

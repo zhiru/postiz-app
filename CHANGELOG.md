@@ -49,6 +49,9 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ### Corrigido
 
+- Instagram com login direto reutiliza a mesma validação de mídias e collabs da integração padrão.
+- Registro do aceite de espaçamento concluído na PR #52 e dos limites de paridade do painel.
+
 - Webhooks do Instagram solicitam reentrega quando o Temporal não aceita uma automação de comentário ou story. A recuperação reaproveita a execução e a identidade do workflow, preservando a proteção contra envios repetidos.
 - Registro de provedores mantém um único worker por fila e corrige reinícios do orchestrator causados pelo Tumblr duplicado.
 
@@ -57,6 +60,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 - Reconexão preserva o refresh token existente quando o provedor não devolve outro e limita a atualização de tokens compartilhados à organização e ao perfil corretos.
 
 ### Adicionado
+
+- Canal NeuralTalk no editor: conexão por conta/caixa, busca e seleção de múltiplos contatos/grupos, texto e mídia no envio imediato ou agendado, recibos contra repetição e confirmação de resultado.
 
 - Relay opcional de webhooks do Instagram preserva o recebimento no Chatwoot e encaminha apenas contas autorizadas ao Postiz, com fila persistente, tentativas automáticas e recuperação de entregas pendentes.
 

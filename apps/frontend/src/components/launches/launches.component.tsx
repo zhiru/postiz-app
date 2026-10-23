@@ -3,6 +3,7 @@
 import {
   AddProviderButton,
   CustomVariables,
+  useProviderConnectionModal,
 } from '@gitroom/frontend/components/launches/add.provider.component';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import SafeImage from '@gitroom/react/helpers/safe.image';
@@ -543,6 +544,9 @@ export const LaunchesComponent = () => {
     },
     []
   );
+  const openConnection = useProviderConnectionModal(() => {
+    void update(false);
+  });
   const refreshChannel = useCallback(
     (
         integration: Integration & {
@@ -552,6 +556,7 @@ export const LaunchesComponent = () => {
         }
       ) =>
       async () => {
+        if (openConnection(integration.identifier, integration.name)) return;
         // Custom-fields providers (Bluesky, etc.) have no OAuth URL to redirect
         // to: reconnect by re-entering the credentials, like the menu does.
         if (integration.isCustomFields) {
@@ -582,7 +587,7 @@ export const LaunchesComponent = () => {
         ).json();
         window.location.href = url;
       },
-    []
+    [openConnection]
   );
   useEffect(() => {
     if (typeof window === 'undefined') {

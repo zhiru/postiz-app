@@ -1,5 +1,11 @@
 import { MediaTransferService } from './media/media.transfer.service';
 import { MediaTransferRepository } from './media/media.transfer.repository';
+import {
+  NeuralTalkProvider,
+  NEURALTALK_DELIVERY_STORE,
+} from '../../integrations/social/neuraltalk.provider';
+import { NeuralTalkConnectionService } from '../../integrations/neuraltalk.connection.service';
+import { NeuralTalkDeliveryService } from '../../integrations/neuraltalk.delivery.service';
 import { PostManagementService } from './posts/post.management.service';
 import { AutomationDeliveryService } from './flows/automation-delivery.service';
 import { Global, Module } from '@nestjs/common';
@@ -136,6 +142,10 @@ import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/p
     AgenciesService,
     AgenciesRepository,
     IntegrationManager,
+    NeuralTalkProvider,
+    NeuralTalkConnectionService,
+    NeuralTalkDeliveryService,
+    { provide: NEURALTALK_DELIVERY_STORE, useExisting: NeuralTalkDeliveryService },
     RefreshIntegrationService,
     MetaSystemUserService,
     ExtractContentService,

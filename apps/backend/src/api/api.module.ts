@@ -1,5 +1,6 @@
 import { MediaTransferController } from './routes/media.transfer.controller';
 import { MediaTransferInterceptor } from '@gitroom/nestjs-libraries/upload/media.transfer.interceptor';
+import { NeuralTalkIntegrationsController } from './routes/neuraltalk.integrations.controller';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AuthController } from '@gitroom/backend/api/routes/auth.controller';
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
@@ -100,6 +101,7 @@ const authenticatedController = [
   AiWebSearchController,
   ProfilesController,
   ZernioIntegrationsController,
+  NeuralTalkIntegrationsController,
   OAuthAppController,
   ApprovedAppsController,
   OAuthAuthorizedController,

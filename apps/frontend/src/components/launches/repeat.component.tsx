@@ -6,7 +6,10 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useClickOutside } from '@mantine/hooks';
 import { isUSCitizen } from '@gitroom/frontend/components/launches/helpers/isuscitizen.utils';
 import clsx from 'clsx';
-import { RepeatIcon, DropdownArrowIcon } from '@gitroom/frontend/components/ui/icons';
+import {
+  RepeatIcon,
+  DropdownArrowIcon,
+} from '@gitroom/frontend/components/ui/icons';
 const getList = (t: (key: string, fallback: string) => string) => [
   {
     value: 1,
@@ -49,10 +52,17 @@ const getList = (t: (key: string, fallback: string) => string) => [
     label: t('cancel', 'Cancel'),
   },
 ];
+export const isPostRecurrenceBlocked = (
+  repeat: number | null | undefined,
+  supportsRecurringPosts: boolean
+) => !!repeat && !supportsRecurringPosts;
+
 export const RepeatComponent: FC<{
   repeat: number | null;
   onChange: (newVal: number) => void;
   list?: boolean;
+  supportsRecurringPosts?: boolean;
+  unavailableMessage?: string;
 }> = (props) => {
   const { repeat } = props;
   const t = useT();
@@ -72,6 +82,29 @@ export const RepeatComponent: FC<{
     }
     return list.find((p) => p.value === repeat)?.label;
   }, [repeat, list]);
+
+  if (props.supportsRecurringPosts === false) {
+    return (
+      <div className="flex max-w-[340px] flex-col gap-2">
+        <p role="status" className="text-xs text-textColor/70">
+          {props.unavailableMessage ||
+            t(
+              'post_recurrence_unavailable',
+              'A selected channel does not support recurring posts. Schedule a single delivery or send now.'
+            )}
+        </p>
+        {isPostRecurrenceBlocked(repeat, false) && (
+          <button
+            type="button"
+            className="self-start rounded-lg border border-newTableBorder px-3 py-1 text-sm focus-visible:ring-2 focus-visible:ring-btnPrimary"
+            onClick={() => props.onChange(0)}
+          >
+            {t('do_not_repeat', 'Do Not Repeat')}
+          </button>
+        )}
+      </div>
+    );
+  }
 
   if (props.list) {
     // the radio list starts with "do not repeat", the dropdown ends with cancel
@@ -114,7 +147,7 @@ export const RepeatComponent: FC<{
       ref={ref}
       className={clsx(
         'border rounded-[8px] justify-center flex items-center relative h-[44px] text-[15px] font-[600] select-none',
-        isOpen ? 'border-[#612BD3]' : 'border-newTextColor/10',
+        isOpen ? 'border-[#612BD3]' : 'border-newTextColor/10'
       )}
     >
       <div
@@ -126,7 +159,10 @@ export const RepeatComponent: FC<{
         </div>
         <div className="cursor-pointer">
           {repeat
-            ? `${t('repeat_post_every_label', 'Repeat Post Every')} ${everyLabel}`
+            ? `${t(
+                'repeat_post_every_label',
+                'Repeat Post Every'
+              )} ${everyLabel}`
             : t('repeat_post_every', 'Repeat Post Every...')}
         </div>
         <div className="cursor-pointer">
