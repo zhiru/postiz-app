@@ -67,6 +67,7 @@ export class PostsRepository {
       delay: true,
       state: true,
       publishDate: true,
+      intervalInDays: true,
       updatedAt: true,
       releaseId: true,
       releaseURL: true,

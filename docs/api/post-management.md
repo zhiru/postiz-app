@@ -116,4 +116,6 @@ Excluir do Postiz não garante remoção na rede social. A API/MCP de exclusão 
 
 Aplicar somente migração aditiva, gerar Prisma e publicar backend/orchestrator com ffmpeg/ffprobe após regressões. Ver [operação e migração](../operations/post-management-release.md). Workflows existentes não foram alterados.
 
-Aceite de produção pendente até release: `cmvk9cw9i000mmoftkord2u7z` e `cmvk9cwa1000nmoftyvz7ak2c`. Ambos foram conferidos como DRAFT na versão publicada sem as novas rotas. Fazer GET → PATCH dryRun → revisar → PATCH com hash → GET; comparar todos os campos persistidos, exceto conteúdo/updatedAt. Não executar status=schedule, action=schedule, POST de criação ou publicação durante esse aceite.
+Aceite concluído em produção em 23/10/2026, release da PR #52 (`1db84642f`): `cmvk9cw9i000mmoftkord2u7z` e `cmvk9cwa1000nmoftyvz7ak2c`. Executado GET → PATCH dryRun → revisão → PATCH com versão/hash → GET. Somente conteúdo/updatedAt mudaram; ambos continuam DRAFT_SAVED, queueActive:false. Mídias, ordem, configurações, canal e horário preservados. Nenhum post foi criado ou publicado. Evidência: https://github.com/zhiru/postiz-app/pull/52#issuecomment-6364865952.
+
+A paridade do painel ainda é parcial: os caminhos legados de salvamento/data não recebem a versão lida pelo cliente. O painel aceita rascunhos incompletos; a edição nova da API/MCP exige validação completa. Esses limites não devem ser anunciados como paridade integral.

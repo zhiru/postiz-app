@@ -39,3 +39,55 @@ describe('InstagramStandaloneProvider Graph API', () => {
     expect(result.accessToken).toBe('NEW_TOKEN');
   });
 });
+
+describe('InstagramStandaloneProvider media validation', () => {
+  const provider = new InstagramStandaloneProvider();
+
+  it('rejects invalid Stories and collaborator settings before publishing', async () => {
+    await expect(
+      provider.checkValidity([[{ path: 'a.jpg' }, { path: 'b.jpg' }]], {
+        post_type: 'story',
+      })
+    ).resolves.toMatch(/one media/i);
+    await expect(
+      provider.checkValidity([[{ path: 'a.jpg' }]], {
+        post_type: 'story',
+        collaborators: [{ label: '@partner' }],
+      })
+    ).resolves.toMatch(/collaborators/i);
+  });
+
+  it('applies feed dimensions and Reel limits while accepting valid media', async () => {
+    const image = {
+      path: 'a.jpg',
+      content_type: 'image/jpeg',
+      width: 1080,
+      height: 1350,
+    };
+    await expect(
+      provider.checkValidity([[image]], { post_type: 'post' })
+    ).resolves.toBe(true);
+    await expect(
+      provider.checkValidity([[{ ...image, height: 1920 }]], {
+        post_type: 'post',
+      })
+    ).resolves.toMatch(/aspect ratio/i);
+    await expect(
+      provider.checkValidity(
+        [
+          [
+            {
+              path: 'a.mp4',
+              content_type: 'video/mp4',
+              width: 1080,
+              height: 1920,
+              video_codec: 'h264',
+              duration_seconds: 901,
+            },
+          ],
+        ],
+        { post_type: 'post' }
+      )
+    ).resolves.toMatch(/Reels duration/i);
+  });
+});

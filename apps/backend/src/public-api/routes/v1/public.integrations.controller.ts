@@ -444,7 +444,7 @@ export class PublicIntegrationsController {
     // readable 400 (see PostValidationExceptionFilter).
     const validation = await this._postsService.validatePosts(
       org.id,
-      body.posts
+      body.posts.map((post) => ({ ...post, intervalInDays: body.inter }))
     );
 
     const fail = (item: (typeof validation)[number], error: string) => {

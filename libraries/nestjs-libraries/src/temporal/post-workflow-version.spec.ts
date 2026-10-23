@@ -10,6 +10,22 @@ describe('selectPostWorkflowVersion', () => {
     expect(selectPostWorkflowVersion(target, {})).toBe('postWorkflowV113');
   });
 
+  it('uses V114 without rollout flags when the provider requires credential-free history', () => {
+    const credentialFreeTarget = {
+      ...target,
+      requiresCredentialFreeWorkflow: true,
+    };
+    expect(selectPostWorkflowVersion(credentialFreeTarget, {})).toBe(
+      'postWorkflowV114'
+    );
+    expect(
+      selectPostWorkflowVersion(
+        { ...credentialFreeTarget, requiresCredentialFreeWorkflow: false },
+        {}
+      )
+    ).toBe('postWorkflowV113');
+  });
+
   it('ativa V114 por integration id exato', () => {
     expect(
       selectPostWorkflowVersion(target, {

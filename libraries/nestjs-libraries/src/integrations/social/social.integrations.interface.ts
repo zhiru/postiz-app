@@ -257,6 +257,8 @@ export interface SocialProvider
   // do stub como falha real e desconectar (falso positivo); a renovacao
   // acontece via MetaSystemUserService (System User token) ou no post-time.
   noNativeRefresh?: boolean;
+  requiresCredentialFreeWorkflow?: boolean;
+  supportsRecurringPosts?: boolean;
   dto?: any;
   maxLength: (additionalSettings?: any, settings?: any) => number;
   checkValidity(

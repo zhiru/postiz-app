@@ -324,7 +324,13 @@ export class PostsController {
     @GetOrgFromRequest() org: Organization,
     @Body() rawBody: any
   ) {
-    return this._postsService.validatePosts(org.id, rawBody?.posts || []);
+    return this._postsService.validatePosts(
+      org.id,
+      (rawBody?.posts || []).map((post: any) => ({
+        ...post,
+        intervalInDays: rawBody?.inter,
+      }))
+    );
   }
 
   @Post('/')
@@ -337,7 +343,10 @@ export class PostsController {
     // Server-side validation — never trust the client to have validated.
     const validation = await this._postsService.validatePosts(
       org.id,
-      rawBody?.posts || []
+      (rawBody?.posts || []).map((post: any) => ({
+        ...post,
+        intervalInDays: rawBody?.inter,
+      }))
     );
 
     const fail = (item: (typeof validation)[number], error: string) => {

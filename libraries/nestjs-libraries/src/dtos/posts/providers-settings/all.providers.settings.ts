@@ -1,3 +1,4 @@
+import { NeuralTalkDto } from './neuraltalk.dto';
 import { RedditSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/reddit.dto';
 import { PinterestSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/pinterest.dto';
 import { YoutubeSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/youtube.settings.dto';
@@ -28,6 +29,7 @@ import { TumblrDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settin
 
 export type ProviderExtension<T extends string, M> = { __type: T } & M;
 export type AllProvidersSettings =
+  | ProviderExtension<'neuraltalk', NeuralTalkDto>
   | ProviderExtension<'reddit', RedditSettingsDto>
   | ProviderExtension<'lemmy', LemmySettingsDto>
   | ProviderExtension<'youtube', YoutubeSettingsDto>
@@ -81,6 +83,7 @@ type None = NonNullable<unknown>;
 
 export const allProviders = (setEmpty?: any) => {
   return [
+    { value: NeuralTalkDto, name: 'neuraltalk' },
     { value: RedditSettingsDto, name: 'reddit' },
     { value: LemmySettingsDto, name: 'lemmy' },
     { value: YoutubeSettingsDto, name: 'youtube' },

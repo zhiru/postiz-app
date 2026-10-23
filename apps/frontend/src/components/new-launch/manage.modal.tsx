@@ -28,7 +28,10 @@ import {
   DatePickerPanel,
 } from '@gitroom/frontend/components/launches/helpers/date.picker';
 import { useShallow } from 'zustand/react/shallow';
-import { RepeatComponent } from '@gitroom/frontend/components/launches/repeat.component';
+import {
+  RepeatComponent,
+  isPostRecurrenceBlocked,
+} from '@gitroom/frontend/components/launches/repeat.component';
 import { TagsComponent } from '@gitroom/frontend/components/launches/tags.component';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
@@ -129,6 +132,22 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
       locked: state.locked,
       activateExitButton: state.activateExitButton,
     }))
+  );
+  const recurringUnsupported = selectedIntegrations.filter(
+    ({ integration }) =>
+      Providers.find(
+        (provider) => provider.identifier === integration.identifier
+      )?.supportsRecurringPosts === false
+  );
+  const supportsRecurringPosts = recurringUnsupported.length === 0;
+  const recurrenceUnavailableMessage = t(
+    'post_recurrence_unavailable_channels',
+    '{{channels}} does not support recurring posts. Remove the recurrence to save, schedule a single delivery or send now.',
+    {
+      channels: recurringUnsupported
+        .map(({ integration }) => integration.name)
+        .join(', '),
+    }
   );
   // the other channels of an existing post show and move only their own date
   const channelDate = channelDates[current];
@@ -321,6 +340,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
 
   const schedule = useCallback(
     (type: 'draft' | 'now' | 'schedule' | 'update') => async () => {
+      if (isPostRecurrenceBlocked(repeater, supportsRecurringPosts)) {
+        toaster.show(recurrenceUnavailableMessage, 'warning');
+        return;
+      }
       if (existingData.posts.some((post) => post.importedFromPlatform)) {
         toaster.show(
           t(
@@ -822,6 +845,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
     [
       ref,
       repeater,
+      supportsRecurringPosts,
+      recurrenceUnavailableMessage,
       tags,
       date,
       channelDates,
@@ -1136,7 +1161,12 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
             )}
 
             {!dummy && (
-              <RepeatComponent repeat={repeater} onChange={setRepeater} />
+              <RepeatComponent
+                repeat={repeater}
+                onChange={setRepeater}
+                supportsRecurringPosts={supportsRecurringPosts}
+                unavailableMessage={recurrenceUnavailableMessage}
+              />
             )}
           </div>
           <div className="pe-[20px] flex items-center justify-end gap-[8px]">
@@ -1363,6 +1393,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
           <RepeatComponent
             repeat={repeater}
             onChange={setRepeater}
+            supportsRecurringPosts={supportsRecurringPosts}
+            unavailableMessage={recurrenceUnavailableMessage}
             list={true}
           />
         </BottomSheet>

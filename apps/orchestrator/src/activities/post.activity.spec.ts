@@ -335,4 +335,24 @@ describe('PostActivity V114', () => {
       expect.objectContaining({ workflowId: 'post_post-1' })
     );
   });
+  it('recovers credential-free providers through V114 without rollout flags', async () => {
+    const { activity, postService, provider, signalWithStart } =
+      buildActivity();
+    Object.assign(provider, { requiresCredentialFreeWorkflow: true });
+    postService.searchForMissingThreeHoursPosts.mockResolvedValue([
+      {
+        id: 'post-message',
+        organizationId: 'org-1',
+        integration: {
+          id: 'messaging-channel',
+          providerIdentifier: 'neuraltalk',
+        },
+      },
+    ] as any);
+    await activity.searchForMissingThreeHoursPosts();
+    expect(signalWithStart).toHaveBeenCalledWith(
+      'postWorkflowV114',
+      expect.objectContaining({ workflowId: 'post_post-message' })
+    );
+  });
 });

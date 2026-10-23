@@ -366,7 +366,12 @@ export class PostManagementService {
     }));
     const errors: { field: string; code: string; message: string }[] = [];
     const [validation] = await this.posts.validatePosts(org, [
-      { integration: { id: root.integrationId }, settings, value },
+      {
+        integration: { id: root.integrationId },
+        settings,
+        value,
+        intervalInDays: root.intervalInDays,
+      },
     ]);
     if (!validation.valid)
       errors.push(

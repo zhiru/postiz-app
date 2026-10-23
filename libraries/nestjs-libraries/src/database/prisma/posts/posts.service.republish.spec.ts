@@ -720,3 +720,103 @@ it('refreshes execution media through the scoped resolver, including original pa
     alt: 'Preserve',
   });
 });
+
+
+describe('channel recurrence capability', () => {
+  const restrictedService = () => {
+    const context = buildService();
+    const { service, repository } = context;
+    const post = {
+      ...publishedPost,
+      state: 'DRAFT',
+      intervalInDays: 7,
+      updatedAt: new Date('2026-10-23T00:00:00Z'),
+      publishDate: new Date('2099-01-01T12:00:00Z'),
+      integration: { id: 'int-1', providerIdentifier: 'single-delivery' },
+    };
+    repository.getPostById.mockResolvedValue(post as any);
+    (service as any)._integrationService.getIntegrationById.mockResolvedValue({
+      ...post.integration,
+      profileId: 'profile-1',
+    });
+    (service as any)._integrationManager.getSocialIntegration.mockReturnValue({
+      supportsRecurringPosts: false,
+      checkValidity: jest.fn().mockResolvedValue(true),
+      maxLength: () => 4096,
+    });
+    return { ...context, post };
+  };
+
+  it.each([
+    ['draft', CreationMethod.WEB],
+    ['schedule', CreationMethod.API],
+    ['now', CreationMethod.MCP],
+  ])('rejects recurring %s from %s before writing or scheduling', async (type, source) => {
+    const { service, repository } = restrictedService();
+    await expect(
+      service.createPost(
+        'org-1',
+        makeBody({ type, inter: 7 }) as any,
+        source as CreationMethod,
+        false,
+        'profile-1'
+      )
+    ).rejects.toMatchObject({
+      response: { code: 'RECURRENCE_NOT_SUPPORTED', field: 'intervalInDays' },
+    });
+    expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+    expect(service.startWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('preserves recurrence on providers that do not disable it', async () => {
+    const { service, repository } = buildService();
+    repository.getPostById.mockResolvedValue({ ...publishedPost, state: 'DRAFT' } as any);
+    await service.createPost(
+      'org-1', makeBody({ inter: 7 }) as any, CreationMethod.WEB, false, 'profile-1'
+    );
+    expect(repository.createOrUpdatePost).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports recurrence as a field error without executing a post', async () => {
+    const { service, repository } = restrictedService();
+    const [result] = await service.validatePosts('org-1', [
+      { ...makeBody().posts[0], intervalInDays: 7 },
+    ]);
+    expect(result).toMatchObject({
+      valid: false,
+      fieldErrors: [{ field: 'intervalInDays', code: 'RECURRENCE_NOT_SUPPORTED' }],
+    });
+    expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+    expect(service.startWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('does not activate a saved recurring draft through a status change', async () => {
+    const { service, repository } = restrictedService();
+    await expect(
+      service.changePostStatus('org-1', 'post-1', 'schedule', 'profile-1')
+    ).rejects.toMatchObject({ response: { code: 'RECURRENCE_NOT_SUPPORTED' } });
+    expect(repository.patchManagedPost).not.toHaveBeenCalled();
+    expect(service.startWorkflow).not.toHaveBeenCalled();
+    expect(repository.releasePostQueueLock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['schedule', 'update'] as const)(
+    'does not activate or restart recurrence when changing a queued date with %s',
+    async (action) => {
+      const { service, repository, post } = restrictedService();
+      repository.getPostById.mockResolvedValue({ ...post, state: 'QUEUE' } as any);
+      await expect(
+        service.changeDate('org-1', 'post-1', '2099-01-02T12:00:00Z', action, false, 'profile-1')
+      ).rejects.toMatchObject({ response: { code: 'RECURRENCE_NOT_SUPPORTED' } });
+      expect(repository.changeDate).not.toHaveBeenCalled();
+      expect(service.startWorkflow).not.toHaveBeenCalled();
+    }
+  );
+
+  it('allows a draft date-only change without activating its saved recurrence', async () => {
+    const { service, repository } = restrictedService();
+    await service.changeDate('org-1', 'post-1', '2099-01-02T12:00:00Z', 'update', false, 'profile-1');
+    expect(repository.changeDate).toHaveBeenCalledTimes(1);
+    expect(service.startWorkflow).not.toHaveBeenCalled();
+  });
+});

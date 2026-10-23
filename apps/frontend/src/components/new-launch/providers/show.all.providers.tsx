@@ -41,11 +41,18 @@ import WhopProvider from '@gitroom/frontend/components/new-launch/providers/whop
 import MeweProvider from '@gitroom/frontend/components/new-launch/providers/mewe/mewe.provider';
 import TumblrProvider from '@gitroom/frontend/components/new-launch/providers/tumblr/tumblr.provider';
 
+import NeuralTalkProvider from './neuraltalk/neuraltalk.provider';
+
 export const Empty: FC = () => {
   return null;
 };
 
 export const Providers = [
+  {
+    identifier: 'neuraltalk',
+    component: NeuralTalkProvider,
+    supportsRecurringPosts: false,
+  },
   {
     identifier: 'devto',
     component: DevtoProvider,
