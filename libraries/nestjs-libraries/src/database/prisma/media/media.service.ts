@@ -1,5 +1,7 @@
 import sharp from 'sharp';
-import { createReadStream } from 'fs';
+import { createReadStream, createWriteStream } from 'fs';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { mkdtemp, rm, stat } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -66,7 +68,10 @@ export interface MediaDeleteResult {
   failed: { id: string; name: string }[];
 }
 import { TemporalService } from 'nestjs-temporal-core';
-import { TypedSearchAttributes } from '@temporalio/common';
+import {
+  TypedSearchAttributes,
+  WorkflowIdReusePolicy,
+} from '@temporalio/common';
 import { organizationId } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { MediaProcessorJob } from '@gitroom/nestjs-libraries/upload/media.processor.interface';
@@ -77,9 +82,13 @@ import {
 } from '@gitroom/helpers/utils/valid.url.path';
 import { randomBytes } from 'crypto';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
-import { ssrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import {
+  ssrfSafeDispatcher,
+  ssrfSafeFetch,
+} from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import {
   getMaxSize,
+  maxSizeStream,
   uploadStreamToStorage,
 } from '@gitroom/nestjs-libraries/upload/custom.upload.validation';
 
@@ -550,6 +559,120 @@ export class MediaService {
     return { ...metadata, path: media.path };
   }
 
+  // Invoked only with a path/name returned by our storage adapter. Decoding
+  // completes before a transfer receipt can make the new media publishable.
+  async validateUploadedMedia(
+    fileName: string,
+    filePath: string,
+    mimeType: string
+  ) {
+    let input = this.storage.localFilePath?.(filePath);
+    let temporary: string | undefined;
+    try {
+      if (!input) {
+        const url = this.storage.signDownloadUrl
+          ? await this.storage.signDownloadUrl(fileName)
+          : filePath;
+        const response = await ssrfSafeFetch(url, {
+          redirect: 'error',
+          signal: AbortSignal.timeout(120000),
+        });
+        if (!response.ok || !response.body)
+          throw new Error('Stored upload is unavailable.');
+        temporary = await mkdtemp(join(tmpdir(), 'postiz-inspect-'));
+        input = join(temporary, 'source');
+        await pipeline(
+          Readable.fromWeb(response.body as any),
+          maxSizeStream(getMaxSize(mimeType)),
+          createWriteStream(input)
+        );
+      }
+      try {
+        if (mimeType.startsWith('image/')) {
+          // Resize only the discarded inspection result, never the original.
+          // This forces pixel decoding with bounded output memory.
+          await sharp(input, { limitInputPixels: 40000000, failOn: 'warning' })
+            .resize(1, 1, { fit: 'inside' })
+            .raw()
+            .toBuffer();
+        } else {
+          const { stdout, stderr } = await promisify(execFile)(
+            'ffprobe',
+            [
+              '-v',
+              'error',
+              '-protocol_whitelist',
+              'file,pipe',
+              '-count_packets',
+              '-show_entries',
+              'stream=codec_type,width,height,nb_read_packets:format=duration',
+              '-of',
+              'json',
+              input,
+            ],
+            { timeout: 120000, maxBuffer: 65536 }
+          );
+          const info = JSON.parse(stdout);
+          const video = info.streams?.find(
+            (stream: any) => stream.codec_type === 'video'
+          );
+          if (
+            stderr.trim() ||
+            !(
+              video?.width > 0 &&
+              video?.height > 0 &&
+              Number(video?.nb_read_packets) > 0 &&
+              Number(info.format?.duration) > 0
+            )
+          )
+            throw new Error('Invalid video.');
+        }
+      } catch {
+        throw new BadRequestException(
+          'The uploaded media cannot be decoded or exceeds inspection limits.'
+        );
+      }
+    } finally {
+      if (temporary) await rm(temporary, { recursive: true, force: true });
+    }
+  }
+
+  // Repair the commit-to-workflow gap using the existing stable workflow id.
+  // Reads/replays never create another media record or publish a post.
+  async ensureUploadedMediaProcessing(
+    org: string,
+    id: string,
+    profileId?: string
+  ) {
+    const media = await this.getMediaStatus(org, id, profileId);
+    if (media.status !== 'processing') return;
+    const client = this._temporalService.client.getRawClient();
+    const localMov =
+      !this.processor &&
+      this.storage.localFilePath &&
+      extname(media.name).toLowerCase() === '.mov';
+    if (!client || (!localMov && !this.processor)) {
+      await this.prepareSavedMedia(org, media);
+      return;
+    }
+    const workflowId = localMov
+      ? `media_local_${media.id}`
+      : `media_${media.id}`;
+    try {
+      const description = await client.workflow
+        .getHandle(workflowId)
+        .describe();
+      if (description.status.name === 'RUNNING') return;
+      // A finished workflow must not be restarted by a status read.
+      const latest = await this.getMediaStatus(org, id, profileId);
+      if (latest.status !== 'processing') return;
+      throw new Error('Media preparation requires reconciliation.');
+    } catch (error) {
+      if ((error as Error).name !== 'WorkflowNotFoundError') throw error;
+    }
+    await this.prepareSavedMedia(org, media);
+  }
+
   async prepareLocalMedia(mediaId: string) {
     const media = await this._mediaRepository.getMediaById(mediaId);
     if (!media || media.status !== 'processing') return;
@@ -642,9 +765,8 @@ export class MediaService {
       typeof file.base64 !== 'string' ||
       !file.base64.length ||
       file.base64.length > 6 * 1024 * 1024 ||
-      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
-        file.base64
-      )
+      file.base64.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(file.base64)
     ) {
       throw new BadRequestException(
         'Use a valid base64 file reference up to 4.5 MB, or uploadLinkTool for larger files. Server/local filesystem paths are not accepted.'
@@ -713,6 +835,21 @@ export class MediaService {
       originalName,
       profileId
     );
+    return this.prepareSavedMedia(org, media);
+  }
+
+  // Reuse normalization for a media row saved atomically with an upload receipt.
+  async prepareSavedMedia<
+    T extends {
+      id: string;
+      name: string;
+      path: string;
+      status: string;
+      originalPath?: string | null;
+    }
+  >(org: string, media: T) {
+    const fileName = media.name;
+    const filePath = media.path;
     const client = this._temporalService.client.getRawClient();
     if (
       !this.processor &&
@@ -720,14 +857,19 @@ export class MediaService {
       extname(fileName).toLowerCase() === '.mov' &&
       client
     ) {
-      await this._mediaRepository.startProcessing(org, media.id, filePath);
+      if (media.status !== 'processing')
+        await this._mediaRepository.startProcessing(org, media.id, filePath);
       try {
         await client.workflow.start('prepareLocalMediaWorkflowV1', {
           workflowId: `media_local_${media.id}`,
+          workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
           taskQueue: 'main',
           args: [{ mediaId: media.id }],
         });
-      } catch {
+      } catch (error) {
+        if ((error as Error).name === 'WorkflowExecutionAlreadyStartedError')
+          return { ...media, status: 'processing' };
+        if (media.status === 'processing') throw error;
         await this._mediaRepository.finishProcessing(org, media.id, {
           error: 'Could not start local MOV preparation.',
         });
@@ -747,13 +889,17 @@ export class MediaService {
         });
         return { ...media, status: 'failed' };
       }
-      return media;
+      return media.status === 'processing'
+        ? this.releaseUnprocessed(org, media.id, fileName)
+        : media;
     }
 
-    await this._mediaRepository.startProcessing(org, media.id, filePath);
+    if (media.status !== 'processing')
+      await this._mediaRepository.startProcessing(org, media.id, filePath);
     try {
       await client.workflow.start('processMediaWorkflow', {
         workflowId: `media_${media.id}`,
+        workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
         taskQueue: 'main',
         args: [{ mediaId: media.id }],
         typedSearchAttributes: new TypedSearchAttributes([
@@ -764,6 +910,9 @@ export class MediaService {
         ]),
       });
     } catch (err) {
+      if ((err as Error).name === 'WorkflowExecutionAlreadyStartedError')
+        return { ...media, status: 'processing' };
+      if (media.status === 'processing') throw err;
       // no workflow means nothing will ever flip the status
       return this.releaseUnprocessed(org, media.id, media.name);
     }

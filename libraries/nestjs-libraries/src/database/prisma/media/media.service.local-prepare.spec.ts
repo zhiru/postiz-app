@@ -52,6 +52,7 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { execFile } from 'child_process';
 import { createHash } from 'crypto';
+import sharp from 'sharp';
 const mockStorage: any = {
   localFilePath: jest.fn(),
   uploadStream: jest.fn(),
@@ -86,6 +87,107 @@ const setup = () => {
   };
 };
 describe('local MOV preparation', () => {
+  it('decodes image bytes before accepting a media upload', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'postiz-test-inspect-'));
+    try {
+      const source = join(folder, 'image.png');
+      const { service } = setup();
+      mockStorage.localFilePath.mockReturnValue(source);
+      await writeFile(
+        source,
+        Buffer.from(
+          '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489',
+          'hex'
+        )
+      );
+      await expect(
+        service.validateUploadedMedia('image.png', 'stored-path', 'image/png')
+      ).rejects.toThrow(/decoded/);
+      await sharp({
+        create: { width: 8, height: 8, channels: 3, background: '#fff' },
+      })
+        .png()
+        .toFile(source);
+      await expect(
+        service.validateUploadedMedia('image.png', 'stored-path', 'image/png')
+      ).resolves.toBeUndefined();
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+  it('reconciles a committed upload once using a stable non-reusable workflow id', async () => {
+    const { repo, service } = setup();
+    repo.getMediaStatus.mockResolvedValue({
+      id: 'm1',
+      name: 'original.mov',
+      path: 'stored-path',
+      status: 'processing',
+    } as any);
+    const missing = Object.assign(new Error('missing'), {
+      name: 'WorkflowNotFoundError',
+    });
+    const describe = jest
+      .fn()
+      .mockRejectedValueOnce(missing)
+      .mockResolvedValue({ status: { name: 'RUNNING' } });
+    const start = jest.fn();
+    (service as any)._temporalService = {
+      client: {
+        getRawClient: () => ({
+          workflow: { getHandle: () => ({ describe }), start },
+        }),
+      },
+    };
+    await service.ensureUploadedMediaProcessing('o1', 'm1', 'p1');
+    await service.ensureUploadedMediaProcessing('o1', 'm1', 'p1');
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledWith(
+      'prepareLocalMediaWorkflowV1',
+      expect.objectContaining({
+        workflowId: 'media_local_m1',
+        workflowIdReusePolicy: 'REJECT_DUPLICATE',
+        args: [{ mediaId: 'm1' }],
+      })
+    );
+    expect(repo.startProcessing).not.toHaveBeenCalled();
+  });
+  it('does not restart a finished workflow or regress a concurrently ready media', async () => {
+    const { repo, service } = setup();
+    repo.getMediaStatus.mockResolvedValue({
+      id: 'm1',
+      name: 'original.mov',
+      path: 'stored-path',
+      status: 'processing',
+    } as any);
+    const start = jest
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error('already exists'), {
+          name: 'WorkflowExecutionAlreadyStartedError',
+        })
+      );
+    const describe = jest
+      .fn()
+      .mockResolvedValueOnce({ status: { name: 'COMPLETED' } })
+      .mockRejectedValue(
+        Object.assign(new Error('missing'), { name: 'WorkflowNotFoundError' })
+      );
+    (service as any)._temporalService = {
+      client: {
+        getRawClient: () => ({
+          workflow: { getHandle: () => ({ describe }), start },
+        }),
+      },
+    };
+    await expect(
+      service.ensureUploadedMediaProcessing('o1', 'm1', 'p1')
+    ).rejects.toThrow(/reconciliation/);
+    expect(start).not.toHaveBeenCalled();
+    await expect(
+      service.ensureUploadedMediaProcessing('o1', 'm1', 'p1')
+    ).resolves.toBeUndefined();
+    expect(repo.startProcessing).not.toHaveBeenCalled();
+  });
   it('produces H264 MP4 and keeps the original bytes', async () => {
     const folder = await mkdtemp(join(tmpdir(), 'postiz-test-mov-'));
     try {

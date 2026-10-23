@@ -1,4 +1,9 @@
 import {
+  UploadMediaTool,
+  PrepareMediaUploadTool,
+  CompleteMediaUploadTool,
+} from './media.transfer.tools';
+import {
   GetPostTool,
   UpdatePostTool,
   ValidatePostTool,
@@ -48,6 +53,9 @@ export const toolList = [
   BulkUpdatePostsTool,
   GetPostExecutionTool,
   UploadFileTool,
+  UploadMediaTool,
+  PrepareMediaUploadTool,
+  CompleteMediaUploadTool,
   IntegrationListTool,
   GroupListTool,
   IntegrationValidationTool,

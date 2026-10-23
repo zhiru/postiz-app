@@ -1,3 +1,5 @@
+import { MediaTransferController } from './routes/media.transfer.controller';
+import { MediaTransferInterceptor } from '@gitroom/nestjs-libraries/upload/media.transfer.interceptor';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AuthController } from '@gitroom/backend/api/routes/auth.controller';
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
@@ -114,6 +116,7 @@ const authenticatedController = [
         RootController,
         OAuthController,
         MediaWidgetController,
+        MediaTransferController,
         ClippingWidgetController,
       ]
     : [
@@ -128,6 +131,7 @@ const authenticatedController = [
         IgWebhookController,
         OAuthController,
         MediaWidgetController,
+        MediaTransferController,
         ClippingWidgetController,
         ...authenticatedController,
       ],
@@ -141,6 +145,7 @@ const authenticatedController = [
     ExtractContentService,
     AuthMiddleware,
     UploadWidgetAuthMiddleware,
+    MediaTransferInterceptor,
     PoliciesGuard,
     PermissionsService,
     CodesService,

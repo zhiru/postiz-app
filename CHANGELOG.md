@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- MCP: transferência real de mídia por `uploadMediaTool` ou sessão HTTP temporária, com manifesto SHA-256, isolamento, recibo idempotente e confirmação de processamento. Inclui cliente Node executável que envia bytes locais e cria apenas rascunho com carrossel e collabs.
+
 - API/MCP: leitura por ID, edição parcial com versão, prévia de espaçamento, validação, data/status e lote idempotente; cancelamento confirmado e bloqueio concorrente da fila, sem republicar posts existentes.
 - Upload MCP por bytes ou ticket privado; preparação MOV→MP4 preserva o original e bloqueia publicação até concluir. Resultados de execução e exclusão local são explícitos; collabs sem confirmação remota permanecem desconhecidos.
 
