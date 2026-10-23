@@ -41,14 +41,14 @@ export const useProviderConnectionModal = (update?: () => void) => {
       modal.openModal({
         title: title || identifier,
         withCloseButton: true,
-        children: (
+        children: (close) => (
           <ConnectionModal
             onComplete={() => {
               modal.closeAll();
               void mutate('/integrations/list');
               update?.();
             }}
-            onCancel={() => modal.closeCurrent()}
+            onCancel={close}
           />
         ),
       });
