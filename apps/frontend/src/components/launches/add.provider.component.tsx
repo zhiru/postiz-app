@@ -17,11 +17,46 @@ import { yupResolver } from '@hookform/resolvers/yup';
 import { web3List } from '@gitroom/frontend/components/launches/web3/web3.list';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import clsx from 'clsx';
+import { useSWRConfig } from 'swr';
 import copy from 'copy-to-clipboard';
 import { capitalize } from 'lodash';
 import { ReusableAccountModal } from './reusable-account-modal';
 import { ZernioAccountModal } from '@gitroom/frontend/components/launches/zernio/zernio-account-modal';
 import { ZernioInviteModal } from '@gitroom/frontend/components/launches/zernio/zernio-invite-modal';
+import { NeuralTalkAccountModal } from './neuraltalk-account-modal';
+
+const connectionModals: Record<
+  string,
+  FC<{ onComplete: () => void; onCancel: () => void }>
+> = {
+  neuraltalk: NeuralTalkAccountModal,
+};
+export const useProviderConnectionModal = (update?: () => void) => {
+  const modal = useModals();
+  const { mutate } = useSWRConfig();
+  return useCallback(
+    (identifier: string, title?: string) => {
+      const ConnectionModal = connectionModals[identifier];
+      if (!ConnectionModal) return false;
+      modal.openModal({
+        title: title || identifier,
+        withCloseButton: true,
+        children: (
+          <ConnectionModal
+            onComplete={() => {
+              modal.closeAll();
+              void mutate('/integrations/list');
+              update?.();
+            }}
+            onCancel={() => modal.closeCurrent()}
+          />
+        ),
+      });
+      return true;
+    },
+    [modal, mutate, update]
+  );
+};
 const resolver = classValidatorResolver(ApiKeyDto);
 
 export const useAddProvider = (update?: () => void, invite?: boolean) => {
@@ -421,6 +456,7 @@ export const AddProviderComponent: FC<{
   isMobile?: boolean;
 }> = (props) => {
   const { update, social, article, onboarding, isMobile } = props;
+  const openConnection = useProviderConnectionModal(update);
   const { isGeneral, extensionId } = useVariables();
   const toaster = useToaster();
   const router = useRouter();
@@ -443,6 +479,14 @@ export const AddProviderComponent: FC<{
         }>
       ) =>
       async () => {
+        if (
+          !invite &&
+          openConnection(
+            identifier,
+            social.find((item) => item.identifier === identifier)?.name
+          )
+        )
+          return;
         if (invite && identifier === 'zernio') {
           modal.openModal({
             title: t('zernio_invite_link', 'Zernio - Invite Link'),
@@ -755,7 +799,7 @@ export const AddProviderComponent: FC<{
         }
         await gotoIntegration();
       },
-    [onboarding]
+    [onboarding, openConnection]
   );
 
   const t = useT();
@@ -778,6 +822,7 @@ export const AddProviderComponent: FC<{
               }
 
               return (
+                !connectionModals[item.identifier] &&
                 !item.isExternal &&
                 !item.isWeb3 &&
                 !item.isChromeExtension &&

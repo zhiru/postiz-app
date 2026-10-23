@@ -2,6 +2,7 @@
 
 import { FC, useCallback, useMemo } from 'react';
 import useSWR from 'swr';
+import { useProviderConnectionModal } from '@gitroom/frontend/components/launches/add.provider.component';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
@@ -35,8 +36,10 @@ export const ProblemsComponent: FC = () => {
   );
   const { data, isLoading, error } = useSWR('status-problems', load);
 
+  const openConnection = useProviderConnectionModal();
   const reconnect = useCallback(
     (identifier: string, internalId: string) => async () => {
+      if (openConnection(identifier)) return;
       const { url } = await (
         await fetch(
           `/integrations/social/${identifier}?refresh=${internalId}`,
@@ -45,7 +48,7 @@ export const ProblemsComponent: FC = () => {
       ).json();
       window.location.href = url;
     },
-    [fetch]
+    [fetch, openConnection]
   );
 
   // Dedup: um canal caído gera N posts em erro — agrupa por canal. Guarda o id

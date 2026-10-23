@@ -6,6 +6,7 @@ export type PostWorkflowName =
 type PostWorkflowTarget = {
   integrationId: string;
   providerIdentifier: string;
+  requiresCredentialFreeWorkflow?: boolean;
 };
 
 type PostWorkflowGateEnvironment = {
@@ -31,6 +32,8 @@ export const selectPostWorkflowVersion = (
   if (target.providerIdentifier.startsWith('zernio-')) {
     return 'postWorkflowV102';
   }
+
+  if (target.requiresCredentialFreeWorkflow) return 'postWorkflowV114';
 
   const enabledForAll = env.POST_WORKFLOW_V112_ALL === 'true';
   const enabledIntegrations = csvSet(env.POST_WORKFLOW_V112_INTEGRATION_IDS);

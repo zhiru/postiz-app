@@ -1,3 +1,4 @@
+import { useProviderConnectionModal } from '@gitroom/frontend/components/launches/add.provider.component';
 import { FC, useCallback, useMemo, useState } from 'react';
 import { Integration } from '@prisma/client';
 import useSWR from 'swr';
@@ -196,6 +197,7 @@ export const RenderAnalytics: FC<{
     revalidateOnMount: true,
   });
 
+  const openConnection = useProviderConnectionModal();
   const refreshChannel = useCallback(
     (
         integrationData: Integration & {
@@ -203,6 +205,8 @@ export const RenderAnalytics: FC<{
         }
       ) =>
       async () => {
+        if (openConnection(integrationData.identifier, integrationData.name))
+          return;
         const { url } = await (
           await fetch(
             `/integrations/social/${integrationData.identifier}?refresh=${integrationData.internalId}`,
@@ -213,7 +217,7 @@ export const RenderAnalytics: FC<{
         ).json();
         window.location.href = url;
       },
-    []
+    [openConnection]
   );
 
   const t = useT();

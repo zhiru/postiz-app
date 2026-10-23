@@ -1,3 +1,4 @@
+import { NeuralTalkProvider } from './social/neuraltalk.provider';
 import { TumblrProvider } from '@gitroom/nestjs-libraries/integrations/social/tumblr.provider';
 import 'reflect-metadata';
 
@@ -54,6 +55,7 @@ import { ZernioGoogleBusinessProvider } from '@gitroom/nestjs-libraries/integrat
 import { ZernioSnapchatProvider } from '@gitroom/nestjs-libraries/integrations/social/zernio-snapchat.provider';
 
 export const socialIntegrationList: Array<SocialAbstract & SocialProvider> = [
+  new NeuralTalkProvider(),
   new TumblrProvider(),
   new XProvider(),
   new LinkedinProvider(),
@@ -209,7 +211,10 @@ export class IntegrationManager {
       .map(([from]) => from);
   }
 
-  constructor(@Optional() private _credentialService?: CredentialService) {}
+  constructor(
+    @Optional() private _credentialService?: CredentialService,
+    @Optional() private _neuraltalkProvider?: NeuralTalkProvider
+  ) {}
 
   async getProviderCredentials(
     provider: string,
@@ -355,6 +360,9 @@ export class IntegrationManager {
     return socialIntegrationList.map((p) => p.identifier);
   }
   getSocialIntegration(integration: string): SocialProvider {
+    if (this._neuraltalkProvider?.identifier === integration) {
+      return this._neuraltalkProvider;
+    }
     return socialIntegrationList.find((i) => i.identifier === integration)!;
   }
 }

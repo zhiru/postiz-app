@@ -111,37 +111,7 @@ export class PostActivity {
 
   @ActivityMethod()
   async searchForMissingThreeHoursPosts() {
-    const list = await this._postService.searchForMissingThreeHoursPosts();
-    for (const post of list) {
-      await this._temporalService.client
-        .getRawClient()
-        .workflow.signalWithStart('postWorkflowV113', {
-          workflowId: `post_${post.id}`,
-          taskQueue: 'main',
-          signal: 'poke',
-          workflowIdConflictPolicy: 'USE_EXISTING',
-          signalArgs: [],
-          args: [
-            {
-              taskQueue: post.integration.providerIdentifier
-                .split('-')[0]
-                .toLowerCase(),
-              postId: post.id,
-              organizationId: post.organizationId,
-            },
-          ],
-          typedSearchAttributes: new TypedSearchAttributes([
-            {
-              key: postIdSearchParam,
-              value: post.id,
-            },
-            {
-              key: organizationId,
-              value: post.organizationId,
-            },
-          ]),
-        });
-    }
+    return this.searchForMissingThreeHoursPostsForkV114();
   }
 
   @ActivityMethod()
@@ -629,6 +599,10 @@ export class PostActivity {
       const workflowName = selectPostWorkflowVersion({
         integrationId: post.integration.id,
         providerIdentifier: post.integration.providerIdentifier,
+        requiresCredentialFreeWorkflow:
+          this._integrationManager.getSocialIntegration(
+            post.integration.providerIdentifier
+          )?.requiresCredentialFreeWorkflow,
       });
       await this._temporalService.client
         .getRawClient()
