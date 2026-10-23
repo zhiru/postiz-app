@@ -1,11 +1,14 @@
 'use client';
 
+import { createPortal } from 'react-dom';
+
 import React, {
   FC,
   Fragment,
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   RefObject,
   useMemo,
@@ -1523,105 +1526,200 @@ export const CalendarItem: FC<{
       setDeletingRemote(false);
     }
   };
-  const openActions = () =>
-    modals.openModal({
-      id: `post-actions-${post.id}`,
-      title: t('post_actions', 'Post actions'),
-      size: 320,
-      withCloseButton: true,
-      children: (close) => (
-        <div
-          className="flex max-h-[70vh] flex-col overflow-y-auto"
-          onClick={close}
-        >
-          {editable && (
-            <button
-              type="button"
-              className="p-2 text-start hover:bg-newColColor"
-              onClick={editPost}
-            >
-              {t('edit_post', 'Edit post')}
-            </button>
-          )}
-          {canWrite && !post.importedFromPlatform && (
-            <button
-              type="button"
-              className="p-2 text-start hover:bg-newColColor"
-              onClick={duplicatePost}
-            >
-              {t('duplicate_post', 'Duplicate post')}
-            </button>
-          )}
+  const [actionPosition, setActionPosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const actionButton = useRef<HTMLButtonElement>(null);
+  const actionPopup = useRef<HTMLDivElement>(null);
+  const openActions = () => {
+    if (actionPosition) {
+      setActionPosition(null);
+      return;
+    }
+    const rect = actionButton.current?.getBoundingClientRect();
+    if (rect)
+      setActionPosition({
+        x: Math.max(8, Math.min(rect.right - 232, window.innerWidth - 240)),
+        y: rect.bottom + 4,
+      });
+  };
+  useLayoutEffect(() => {
+    if (!actionPosition || !actionPopup.current) return;
+    const rect = actionPopup.current.getBoundingClientRect();
+    if (rect.bottom > window.innerHeight - 8) {
+      setActionPosition({
+        ...actionPosition,
+        y: Math.max(8, window.innerHeight - rect.height - 8),
+      });
+      return;
+    }
+    actionPopup.current.querySelector('button')?.focus();
+  }, [actionPosition]);
+  useEffect(() => {
+    if (!actionPosition) return;
+    const outside = (event: Event) => {
+      const target = event.target as Node;
+      if (
+        !actionPopup.current?.contains(target) &&
+        !actionButton.current?.contains(target)
+      )
+        setActionPosition(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setActionPosition(null);
+        actionButton.current?.focus();
+      }
+    };
+    const resize = () => setActionPosition(null);
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    window.addEventListener('scroll', outside, true);
+    window.addEventListener('resize', resize);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', escape);
+      window.removeEventListener('scroll', outside, true);
+      window.removeEventListener('resize', resize);
+    };
+  }, [actionPosition]);
+  const renderActions = () =>
+    actionPosition &&
+    createPortal(
+      <div
+        ref={actionPopup}
+        id={`post-actions-${post.id}`}
+        role="menu"
+        aria-label={t('post_actions', 'Post actions')}
+        className="fixed z-[10000] flex w-[232px] max-w-[calc(100vw-16px)] max-h-[calc(100vh-16px)] flex-col overflow-y-auto rounded-lg border border-newTableBorder bg-newBgColorInner p-1 text-sm text-textColor shadow-xl"
+        style={{ left: actionPosition.x, top: actionPosition.y }}
+        onClick={(event) => {
+          event.stopPropagation();
+          setActionPosition(null);
+        }}
+        onKeyDown={(event) => {
+          const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
+          if (!keys.includes(event.key)) return;
+          event.preventDefault();
+          const items = Array.from(
+            event.currentTarget.querySelectorAll<HTMLButtonElement>(
+              'button:not(:disabled)'
+            )
+          );
+          const current = items.indexOf(
+            document.activeElement as HTMLButtonElement
+          );
+          const next =
+            event.key === 'Home'
+              ? 0
+              : event.key === 'End'
+              ? items.length - 1
+              : (current +
+                  (event.key === 'ArrowDown' ? 1 : -1) +
+                  items.length) %
+                items.length;
+          items[next]?.focus();
+        }}
+      >
+        {editable && (
           <button
             type="button"
+            role="menuitem"
             className="p-2 text-start hover:bg-newColColor"
-            onClick={preview}
+            onClick={editPost}
           >
-            {t('preview_post', 'Preview post')}
+            {t('edit_post', 'Edit post')}
           </button>
-          {canWrite && (
+        )}
+        {canWrite && !post.importedFromPlatform && (
+          <button
+            type="button"
+            role="menuitem"
+            className="p-2 text-start hover:bg-newColColor"
+            onClick={duplicatePost}
+          >
+            {t('duplicate_post', 'Duplicate post')}
+          </button>
+        )}
+        <button
+          type="button"
+          role="menuitem"
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={preview}
+        >
+          {t('preview_post', 'Preview post')}
+        </button>
+        {canWrite && (
+          <button
+            type="button"
+            role="menuitem"
+            className="p-2 text-start hover:bg-newColColor"
+            onClick={openReviewLinks}
+          >
+            {t('client_review_links', 'Client review links')}
+          </button>
+        )}
+        {post.releaseURL?.startsWith('http') && (
+          <button
+            type="button"
+            role="menuitem"
+            className="p-2 text-start hover:bg-newColColor"
+            onClick={openPost}
+          >
+            {t('posts_sync_view_original', 'View original publication')}
+          </button>
+        )}
+        {post.releaseId &&
+          !(
+            post.integration.providerIdentifier === 'x' && disableXAnalytics
+          ) && (
             <button
               type="button"
+              role="menuitem"
               className="p-2 text-start hover:bg-newColColor"
-              onClick={openReviewLinks}
+              onClick={
+                post.releaseId === 'missing' ? missingRelease : statistics
+              }
             >
-              {t('client_review_links', 'Client review links')}
+              {t('statistics', 'Statistics')}
             </button>
           )}
-          {post.releaseURL?.startsWith('http') && (
-            <button
-              type="button"
-              className="p-2 text-start hover:bg-newColColor"
-              onClick={openPost}
-            >
-              {t('posts_sync_view_original', 'View original publication')}
-            </button>
-          )}
-          {post.releaseId &&
-            !(
-              post.integration.providerIdentifier === 'x' && disableXAnalytics
-            ) && (
-              <button
-                type="button"
-                className="p-2 text-start hover:bg-newColColor"
-                onClick={
-                  post.releaseId === 'missing' ? missingRelease : statistics
-                }
-              >
-                {t('statistics', 'Statistics')}
-              </button>
-            )}
-          {copyDebugJson && (
-            <button
-              type="button"
-              className="p-2 text-start hover:bg-newColColor"
-              onClick={copyDebugJson}
-            >
-              {t('copy_debug_json', 'Copy Debug JSON')}
-            </button>
-          )}
-          {canWrite && state === 'PUBLISHED' && post.releaseId && (
-            <button
-              type="button"
-              disabled={deletingRemote}
-              className="p-2 text-start text-red-500 hover:bg-newColColor disabled:opacity-50"
-              onClick={deleteRemote}
-            >
-              {t('delete_from_network', 'Delete from network')}
-            </button>
-          )}
-          {canWrite && (
-            <button
-              type="button"
-              className="p-2 text-start text-red-500 hover:bg-newColColor"
-              onClick={deletePost}
-            >
-              {t('remove_from_postiz', 'Remove from Mali Posts')}
-            </button>
-          )}
-        </div>
-      ),
-    });
+        {copyDebugJson && (
+          <button
+            type="button"
+            role="menuitem"
+            className="p-2 text-start hover:bg-newColColor"
+            onClick={copyDebugJson}
+          >
+            {t('copy_debug_json', 'Copy Debug JSON')}
+          </button>
+        )}
+        {canWrite && state === 'PUBLISHED' && post.releaseId && (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={deletingRemote}
+            className="p-2 text-start text-red-500 hover:bg-newColColor disabled:opacity-50"
+            onClick={deleteRemote}
+          >
+            {t('delete_from_network', 'Delete from network')}
+          </button>
+        )}
+        {canWrite && (
+          <button
+            type="button"
+            role="menuitem"
+            className="p-2 text-start text-red-500 hover:bg-newColColor"
+            onClick={deletePost}
+          >
+            {t('remove_from_postiz', 'Remove from Mali Posts')}
+          </button>
+        )}
+      </div>,
+      document.body
+    );
   const editable =
     canWrite &&
     !post.importedFromPlatform &&
@@ -1741,7 +1839,10 @@ export const CalendarItem: FC<{
         <button
           type="button"
           aria-label={t('post_actions', 'Post actions')}
-          aria-haspopup="dialog"
+          aria-haspopup="menu"
+          aria-expanded={Boolean(actionPosition)}
+          aria-controls={actionPosition ? `post-actions-${post.id}` : undefined}
+          ref={actionButton}
           onClick={(event) => {
             event.stopPropagation();
             openActions();
@@ -1750,6 +1851,7 @@ export const CalendarItem: FC<{
         >
           ⋯
         </button>
+        {renderActions()}
       </div>
       {reviewStatus && (
         <div
