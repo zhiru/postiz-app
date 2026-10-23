@@ -126,15 +126,37 @@ it('opens drafts for editing through click and keyboard, with one actions button
     1
   );
 });
-it('opens actions in the existing modal layer, keeping the card narrow', () => {
-  render(React.createElement(CalendarItem, props()));
+it('opens an anchored portal menu, executes the chosen action and closes without a modal', () => {
+  const value = props();
+  render(React.createElement(CalendarItem, value));
   fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
-  const options = mockModal.mock.calls[0][0];
-  expect(options.title).toBe('Post actions');
-  const close = jest.fn();
-  render(options.children(close));
-  fireEvent.click(screen.getByRole('button', { name: 'Duplicate post' }));
-  expect(close).toHaveBeenCalled();
+  expect(screen.getByRole('menu').parentElement).toBe(document.body);
+  expect(mockModal).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate post' }));
+  expect(value.duplicatePost).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('menu')).toBeNull();
+});
+it('supports menu keyboard navigation, Escape and outside clicks', () => {
+  render(React.createElement(CalendarItem, props()));
+  const button = screen.getByRole('button', { name: 'Post actions' });
+  fireEvent.click(button);
+  const edit = screen.getByRole('menuitem', { name: 'Edit post' });
+  expect(document.activeElement).toBe(edit);
+  fireEvent.keyDown(edit, { key: 'ArrowDown' });
+  expect(document.activeElement).toBe(
+    screen.getByRole('menuitem', { name: 'Duplicate post' })
+  );
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(document.activeElement).toBe(button);
+  fireEvent.click(button);
+  fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Edit post' }), {
+    key: 'Tab',
+  });
+  expect(screen.queryByRole('menu')).toBeNull();
+  fireEvent.click(button);
+  fireEvent.pointerDown(document.body);
+  expect(screen.queryByRole('menu')).toBeNull();
 });
 it('keeps published posts in a fullscreen preview without opening another tab', () => {
   const value: any = props();

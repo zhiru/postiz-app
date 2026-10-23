@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Menu de ações ancorado nos três pontos, sem modal/backdrop, com portal para evitar cortes, navegação por teclado e execução antes do fechamento. Cancelar conexão fecha o formulário correto.
+
 - Cards: rascunhos abrem edição por clique/teclado, ações em três pontos e prévia em modal de tela inteira.
 - Instagram via Facebook Login: exclusão remota explícita por painel/API/MCP, com permissão instagram_manage_contents, verificação de dono, confirmação por ID/versão e recibo contra reenvio após resultado incerto. Histórico local preservado.
 
