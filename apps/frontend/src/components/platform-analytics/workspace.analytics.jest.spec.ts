@@ -134,6 +134,26 @@ it('shows unknown versus zero, filters before page requests, and never publishes
       (call: any[]) => !call[1]?.method || call[1]?.method === 'GET'
     )
   ).toBe(true);
+  for (const sort of [
+    'comments',
+    'views',
+    'reach',
+    'impressions',
+    'engagement',
+    'published',
+    'reactions',
+  ]) {
+    await act(async () => {
+      fireEvent.change(screen.getByRole('combobox', { name: 'Sort by' }), {
+        target: { value: sort },
+      });
+    });
+    expect(
+      mockFetch.mock.calls.some((call: any[]) =>
+        String(call[0]).includes(`sort=${sort}&`)
+      )
+    ).toBe(true);
+  }
   fireEvent.click(screen.getAllByText('Alpha')[0].closest('button'));
   expect(mockModal).toHaveBeenCalledWith(
     expect.objectContaining({ size: '80vw', height: '80vh', fullScreen: true })

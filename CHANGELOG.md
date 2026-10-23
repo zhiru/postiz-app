@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Fix post insights comment sorting and keep table actions/profile pictures readable in narrow columns.
+
 - Insights por publicação com filtros, ranking, cobertura explícita, distribuição por canal/dia, histórico, CSV e prévia existente; métricas desconhecidas não viram zero.
 - API/MCP de leitura analyticsSummaryTool, analyticsPostsTool e analyticsPostTool, com isolamento por organização/perfil.
 - Snapshots duráveis, coleta de Stories ativos e webhook autenticado, com limites/backoff compartilhados e preservação de métricas parciais/cache anterior; nenhuma mudança nos workflows publicados.
