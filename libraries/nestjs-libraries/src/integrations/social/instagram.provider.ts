@@ -861,7 +861,7 @@ export class InstagramProvider
       id: account.id,
       name: account.name || account.username,
       picture: account.profile_picture_url,
-      access_token: body.access_token,
+      access_token: `${body.access_token}___${accessToken}`,
       username: account.username,
     };
   }
@@ -1019,6 +1019,7 @@ export class InstagramProvider
     integration?: Integration,
     type = 'graph.facebook.com'
   ): Promise<AnalyticsData[]> {
+    accessToken = accessToken.split('___')[0];
     const until = dayjs().endOf('day').unix();
     const since = dayjs().subtract(date, 'day').unix();
 
@@ -1067,6 +1068,7 @@ export class InstagramProvider
   }
 
   music(accessToken: string, data: { q: string }) {
+    accessToken = accessToken.split('___')[0];
     return this.fetch(
       `https://graph.facebook.com/${META_GRAPH_API_VERSION}/music/search?q=${encodeURIComponent(
         data.q
@@ -1496,6 +1498,7 @@ export class InstagramProvider
     mediaType?: string;
     isAd?: boolean;
   }> {
+    accessToken = accessToken.split('___')[0];
     // boost_eligibility_info so existe em "Instagram API with Facebook Login"
     // (host graph.facebook.com). "Instagram API with Instagram Login"
     // (host graph.instagram.com / standalone) NAO expoe esse campo —

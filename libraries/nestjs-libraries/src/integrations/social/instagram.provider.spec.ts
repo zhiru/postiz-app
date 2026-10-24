@@ -1133,7 +1133,7 @@ describe('InstagramProvider account selection identity', () => {
       name: 'Account',
       username: 'account',
       picture: 'avatar',
-      access_token: 'PAGE',
+      access_token: 'PAGE___USER',
     });
     expect(request).toHaveBeenCalledTimes(1);
     expect(request.mock.calls[0][1].signal).toBeDefined();
@@ -1178,5 +1178,27 @@ describe('InstagramProvider account selection identity', () => {
     await expect(
       new InstagramProvider().fetchPageInformation('USER', selection)
     ).rejects.toMatchObject({ status });
+  });
+});
+
+
+describe('InstagramProvider combined credentials', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each(['PAGE', 'PAGE___USER'])('uses only the Page token for analytics, music and metadata: %s', async (token) => {
+    const provider = new InstagramProvider();
+    const response = { ok: true, json: async () => ({ data: [], id: '123', media_type: 'IMAGE' }) } as Response;
+    const analytics = jest.spyOn(provider as any, 'analyticsFetch').mockResolvedValue(response);
+    const music = jest.spyOn(provider, 'fetch').mockResolvedValue(response);
+    const metadata = jest.spyOn(global, 'fetch').mockResolvedValue(response);
+    await provider.analytics('123', token, 7);
+    await provider.music(token, { q: 'track' });
+    await provider.getMediaMetadata('123', token);
+    for (const call of [...analytics.mock.calls, ...music.mock.calls, ...metadata.mock.calls]) {
+      expect(new URL(String(call[0])).searchParams.get('access_token')).toBe('PAGE');
+    }
+    expect(analytics).toHaveBeenCalledTimes(2);
+    expect(music).toHaveBeenCalledTimes(1);
+    expect(metadata).toHaveBeenCalledTimes(1);
   });
 });

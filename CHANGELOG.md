@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Preserve the Facebook user token when selecting or reconnecting an Instagram account, so granted media deletion permission remains usable.
+
 - Route Story metric callbacks only to Postiz while preserving NeuralTalk messages/comments; add caption/link copy and date editor shortcuts to post menus, with provider-aware remote deletion visibility and Portuguese labels.
 
 - Fix post insights comment sorting and keep table actions/profile pictures readable in narrow columns.
