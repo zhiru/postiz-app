@@ -89,3 +89,8 @@ The shared Chat NeuralTalk Meta app had valid insights scopes on all four connec
 The app dashboard still reports Standard Access, with no Advanced Access review requested, for `instagram_manage_insights`, `pages_manage_metadata` and `instagram_manage_contents`. A granted token scope does not prove Advanced Access or live webhook delivery for external accounts. The connected tokens do not include `instagram_manage_contents` or the second Facebook User token required by the existing deletion implementation. Reconnect only after the needed approval/access is available; do not test with a real deletion.
 
 Published Instagram captions are not editable by the existing API: the documented media update operation controls comments, not the caption. Draft/queued captions and media remain editable through the current editor/API/MCP. Remote deletion supports non-ad posts, whole carousels, Reels and individual Stories only when the provider/access preconditions pass. Local removal is a separate operation. Calendar menus use server-provided `remoteDeletionSupported` capability, hide unavailable/already completed remote actions, and preserve read-only users' restrictions. Capability is not proof that the connected token has every required permission.
+
+
+### Instagram reconnection and deletion credentials
+
+Facebook Login account selection and reconnection retain both Page and user tokens in the existing server-side combined token format. Deletion checks use the user token and require granted `instagram_manage_contents`; Page-only historical connections must reconnect using saved authorization or OAuth. Reconnection alone never deletes media. No credential is returned to the browser or MCP.
