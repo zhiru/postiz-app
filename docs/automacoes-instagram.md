@@ -444,3 +444,39 @@ A mesma configuração pode criar uma automação independente para cada conta (
 A tela inicial apenas abre o configurador, sem gravar rascunhos vazios. Novas automações são salvas pausadas por padrão; marque **Ativar após salvar** quando estiver pronto. Editar uma automação que já está ativa ou pausada preserva seu estado. As automações existentes continuam com suas contas e configurações atuais.
 
 A criação em várias contas valida todos os canais/perfis antes de gravar e cria fluxos/nós/conexões em uma única transação. Uma chave estável de requisição evita recriar o mesmo lote após uma resposta HTTP perdida. O envio continua usando o fluxo e as garantias de deduplicação existentes; a criação/configuração não envia mensagens de teste.
+
+
+## Sequências de mensagens no editor visual (V2)
+
+O editor visual oferece **Sequência de mensagens separadas**, com adesão explícita.
+Pause o fluxo antes de habilitar ou editar essa versão. Fluxos existentes continuam
+no motor original; salvar ou publicar esta funcionalidade não os converte.
+
+Etapas disponíveis: texto com botão de link opcional, imagem, vídeo, resposta
+pública, condição por palavras, atraso e **Aguardar resposta**. A busca encontra
+as etapas; botões também permitem adicioná-las sem arrastar. A prévia percorre o
+grafo e mostra bolhas separadas e os dois caminhos das condições, sem enviar nada.
+Imagem e vídeo usam arquivos prontos da biblioteca, identificados pelo ID;
+texto e mídia são etapas separadas.
+
+Para comentário, monte: gatilho → convite em texto → Aguardar resposta → próximo
+texto/imagem/vídeo. A Meta permite uma primeira resposta privada por comentário;
+ela não abre a janela para mensagens adicionais. Clique em link não conta como
+resposta. Um atraso sozinho também não autoriza novos envios. A espera aceita
+1–72 horas e encerra a execução sem lembrete se não houver resposta. Cada envio
+posterior exige uma interação real recente; usamos margem de 23 horas para a
+janela de atendimento. Em resposta a Story, o timestamp do evento autenticado
+abre essa janela. Eventos antigos, repetidos ou de outra conta não liberam a espera.
+
+O follow-gate de comentários com postback continua no motor original; a versão
+V2 recusa essa combinação em vez de alterar silenciosamente o comportamento.
+A versão V2 não pode ser editada pelo resumo/wizard antigo nem rebaixada por um
+cliente antigo. Nenhuma dessas etapas cria uma conversa livre fora das regras da Meta.
+
+
+Cada bloco do editor tem um menu **⋯** com **Editar etapa**, **Duplicar etapa** e
+**Excluir etapa**. A cópia mantém a configuração e nasce sem conexões; ligue-a
+no ponto desejado antes de salvar. Excluir remove o bloco e as conexões que o
+usavam, sem reconectar os vizinhos automaticamente. O gatilho não pode ser
+copiado nem excluído pelo menu/teclado. Essas ações alteram somente o canvas;
+é preciso salvar para aplicá-las. Em uma sequência V2 ativa, pause antes de editar.

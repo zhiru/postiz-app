@@ -233,7 +233,7 @@ describe('Saving automation configuration preserves activation intent', () => {
   it.each(['ACTIVE', 'PAUSED'])(
     'preserves existing %s state when saving',
     async (status) => {
-      const current = { id: 'flow-1', integrationId: 'ig-1', status };
+      const current = { id: 'flow-1', integrationId: 'ig-1', status, nodes: [{ type: 'TRIGGER', data: '{}' }] };
       const repo = {
         getFlow: jest.fn().mockResolvedValue(current),
         updateFlow: jest.fn(),
@@ -277,6 +277,7 @@ describe('Saving automation configuration preserves activation intent', () => {
           id: 'flow-1',
           integrationId: 'ig-1',
           status: 'DRAFT',
+          nodes: [{ type: 'TRIGGER', data: '{}' }],
         }),
       updateFlow: jest.fn(),
       saveCanvas: jest.fn(),

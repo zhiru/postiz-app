@@ -239,8 +239,7 @@ export class IgWebhookController {
     event: any,
     scope: SignatureScope
   ) {
-    // Only story_mention / story_reply / reaction are handled here. Plain
-    // DMs without a story context are ignored (future feature).
+    // Plain replies may resume opt-in V2 waits; Story triggers and the existing follow gate keep their own paths.
     const senderId = event?.sender?.id;
     const recipientId = event?.recipient?.id;
     if (!senderId || !recipientId) return;
@@ -295,8 +294,35 @@ export class IgWebhookController {
     }
 
     if (!igStoryId) {
-      // Not story-related — ignore silently.
-      return;
+      if (typeof message?.mid !== 'string' || message?.is_deleted) return;
+      const integrations =
+        await this._integrationService.getIntegrationsByInternalId(igAccountId);
+      let retry = false;
+      for (const integration of integrations) {
+        if (
+          !['instagram', 'instagram-standalone'].includes(
+            integration.providerIdentifier
+          ) ||
+          integration.disabled ||
+          integration.deletedAt ||
+          !this.isOrgAllowed(scope, integration.organizationId)
+        )
+          continue;
+        try {
+          const result = await this._flowsService.handleIncomingFlowReply({
+            organizationId: integration.organizationId,
+            integrationId: integration.id,
+            senderId,
+            eventId: message.mid,
+            at: Number(event.timestamp),
+            text: typeof message.text === 'string' ? message.text : '',
+          });
+          if (result.retry) retry = true;
+        } catch {
+          retry = true;
+        }
+      }
+      return { retry };
     }
 
     const igMessageId: string | undefined =
@@ -328,6 +354,7 @@ export class IgWebhookController {
         igStoryId,
         messageText,
         reaction,
+        interactionAt: Number(event.timestamp),
       },
       scope
     );
@@ -343,6 +370,7 @@ export class IgWebhookController {
       igStoryId: string;
       messageText: string;
       reaction?: string;
+      interactionAt?: number;
     },
     scope: SignatureScope
   ) {
@@ -381,6 +409,7 @@ export class IgWebhookController {
         igStoryId: data.igStoryId,
         messageText: data.messageText,
         reaction: data.reaction,
+        interactionAt: data.interactionAt,
       });
       if (result?.retry) shouldRetry = true;
     }

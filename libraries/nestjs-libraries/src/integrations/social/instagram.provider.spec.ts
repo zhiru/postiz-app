@@ -1202,3 +1202,41 @@ describe('InstagramProvider combined credentials', () => {
     expect(metadata).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('InstagramProvider media messages', () => {
+  afterEach(() => jest.restoreAllMocks());
+  it.each(['image', 'video'] as const)(
+    'reuses confirmed message delivery for %s',
+    async (kind) => {
+      const provider = new InstagramProvider();
+      jest
+        .spyOn(provider as any, 'resolvePageMessagesUrl')
+        .mockResolvedValue('https://graph.facebook.com/v25.0/page/messages');
+      const mutation = jest
+        .spyOn(provider as any, 'sendCommentMutation')
+        .mockResolvedValue({ recipient_id: 'u', message_id: 'mid' });
+      await expect(
+        provider.sendMediaDM(
+          'PAGE___USER',
+          'u',
+          kind,
+          'https://cdn.example.com/media.mp4'
+        )
+      ).resolves.toEqual({ recipientId: 'u', messageId: 'mid' });
+      expect(mutation).toHaveBeenCalledWith(
+        'https://graph.facebook.com/v25.0/page/messages',
+        'PAGE___USER',
+        {
+          recipient: { id: 'u' },
+          message: {
+            attachment: {
+              type: kind,
+              payload: { url: 'https://cdn.example.com/media.mp4' },
+            },
+          },
+        },
+        'message_id'
+      );
+    }
+  );
+});

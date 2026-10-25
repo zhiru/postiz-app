@@ -28,6 +28,7 @@ const mockFlowEdgeModel = {
 };
 
 const mockFlowExecutionModel = {
+  upsert: jest.fn(),
   create: jest.fn(),
   update: jest.fn(),
   findMany: jest.fn(),
@@ -263,7 +264,7 @@ describe('FlowsRepository', () => {
         igCommentId: 'comment-1',
         status: FlowExecutionStatus.RUNNING,
       };
-      mockFlowExecutionModel.create.mockResolvedValue(execution);
+      mockFlowExecutionModel.upsert.mockResolvedValue(execution);
 
       const result = await repository.createExecution({
         flowId: 'flow-1',
@@ -273,8 +274,10 @@ describe('FlowsRepository', () => {
         commentText: 'Hello!',
       });
 
-      expect(mockFlowExecutionModel.create).toHaveBeenCalledWith({
-        data: {
+      expect(mockFlowExecutionModel.upsert).toHaveBeenCalledWith({
+        where: { flowId_igCommentId: { flowId: 'flow-1', igCommentId: 'comment-1' } },
+        update: {},
+        create: {
           flowId: 'flow-1',
           igCommentId: 'comment-1',
           igCommenterId: 'user-1',

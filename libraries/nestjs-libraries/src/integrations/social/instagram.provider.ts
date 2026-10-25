@@ -1264,6 +1264,29 @@ export class InstagramProvider
     return { recipientId: result.recipient_id, messageId: result.message_id };
   }
 
+  async sendMediaDM(
+    accessToken: string,
+    recipientId: string,
+    mediaType: 'image' | 'video',
+    url: string,
+    type = 'graph.facebook.com'
+  ) {
+    const endpoint =
+      type === 'graph.instagram.com'
+        ? this.commentMutationUrl(type, 'me/messages')
+        : await this.resolvePageMessagesUrl(accessToken, type);
+    const result = await this.sendCommentMutation(
+      endpoint,
+      accessToken,
+      {
+        recipient: { id: recipientId },
+        message: { attachment: { type: mediaType, payload: { url } } },
+      },
+      'message_id'
+    );
+    return { recipientId: result.recipient_id, messageId: result.message_id };
+  }
+
   private async resolvePageMessagesUrl(
     accessToken: string,
     type = 'graph.facebook.com'

@@ -642,3 +642,62 @@ describe('IgWebhookController', () => {
     });
   });
 });
+
+describe('IG webhook message sequence replies', () => {
+  const setup = () => {
+    const flows = {
+      handleIncomingFlowReply: jest.fn().mockResolvedValue({ retry: false }),
+    };
+    const integrations = {
+      getIntegrationsByInternalId: jest
+        .fn()
+        .mockResolvedValue([
+          integration('i', 'org'),
+          integration('other', 'other-org'),
+        ]),
+    };
+    const controller = new IgWebhookController(
+      flows as any,
+      integrations as any,
+      {} as any,
+      {} as any
+    );
+    return { flows, controller };
+  };
+  it('routes a plain DM only within the verified signature organization scope', async () => {
+    const { controller, flows } = setup();
+    const at = Date.now();
+    await (controller as any).processMessagingEvent(
+      'ig',
+      {
+        sender: { id: 'person' },
+        recipient: { id: 'ig' },
+        timestamp: at,
+        message: { mid: 'reply', text: 'Yes' },
+      },
+      { kind: 'orgs', orgIds: new Set(['org']) }
+    );
+    expect(flows.handleIncomingFlowReply).toHaveBeenCalledTimes(1);
+    expect(flows.handleIncomingFlowReply).toHaveBeenCalledWith({
+      organizationId: 'org',
+      integrationId: 'i',
+      senderId: 'person',
+      eventId: 'reply',
+      at,
+      text: 'Yes',
+    });
+  });
+  it('ignores outgoing echoes so the bot cannot reply to itself', async () => {
+    const { controller, flows } = setup();
+    await (controller as any).processMessagingEvent(
+      'ig',
+      {
+        sender: { id: 'ig' },
+        recipient: { id: 'person' },
+        message: { mid: 'reply', text: 'bot', is_echo: true },
+      },
+      { kind: 'global' }
+    );
+    expect(flows.handleIncomingFlowReply).not.toHaveBeenCalled();
+  });
+});

@@ -80,6 +80,7 @@ export class FlowNodeDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(20000)
   data?: string;
 
   @IsNumber()
@@ -397,12 +398,23 @@ export class MultiQuickCreateFlowDto extends QuickCreateFlowDto {
 }
 
 export class SaveCanvasDto {
+  @ApiPropertyOptional({
+    enum: [2],
+    description:
+      'Opt in to separate messages, media and reply waits. Existing active automations are not migrated.',
+  })
+  @IsOptional()
+  @IsIn([2])
+  executionVersion?: 2;
+
   @IsArray()
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => FlowNodeDto)
   nodes: FlowNodeDto[];
 
   @IsArray()
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => FlowEdgeDto)
   edges: FlowEdgeDto[];

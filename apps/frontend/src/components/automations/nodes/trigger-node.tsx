@@ -1,10 +1,11 @@
 'use client';
 
 import { FC, memo } from 'react';
+import { FlowNodeActions } from './flow-node-actions';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
-export const TriggerNode: FC<NodeProps> = memo(({ data, selected }) => {
+export const TriggerNode: FC<NodeProps> = memo(({ id, data, selected }) => {
   const t = useT();
   const config = typeof data?.config === 'string'
     ? (() => { try { return JSON.parse(data.config as string); } catch { return {}; } })()
@@ -82,6 +83,7 @@ export const TriggerNode: FC<NodeProps> = memo(({ data, selected }) => {
         <span className="text-[13px] font-semibold" style={{ color: '#4ade80' }}>
           {title}
         </span>
+        <FlowNodeActions id={id} />
       </div>
       <p className="text-[12px] text-customColor18">{description}</p>
       <p className="text-[11px] mt-[4px] text-textColor opacity-80">{modeLabel}</p>

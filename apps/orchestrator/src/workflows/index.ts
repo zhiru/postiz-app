@@ -36,3 +36,5 @@ export * from './digest.email.workflow.v2';
 export * from './streak.workflow.v3';
 export * from './send.single.email.workflow.v2';
 export * from './prepare.local.media.workflow.v1';
+
+export { flowExecutionWorkflowV2 } from './flow.execution.workflow.v2';
