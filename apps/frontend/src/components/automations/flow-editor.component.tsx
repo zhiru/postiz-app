@@ -1,6 +1,13 @@
 'use client';
 
-import { FC, useCallback, useEffect, useMemo, useState, DragEvent } from 'react';
+import {
+  FC,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  DragEvent,
+} from 'react';
 import {
   ReactFlow,
   Background,
@@ -13,6 +20,7 @@ import {
   Node,
   Edge,
   ReactFlowProvider,
+  useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -25,6 +33,7 @@ import { ReplyCommentNode } from '@gitroom/frontend/components/automations/nodes
 import { SendDmNode } from '@gitroom/frontend/components/automations/nodes/send-dm-node';
 import { DelayNode } from '@gitroom/frontend/components/automations/nodes/delay-node';
 import { DeletableEdge } from '@gitroom/frontend/components/automations/nodes/deletable-edge';
+import { FlowMessagePreview } from './flow-message-preview';
 import { NodeConfigPanel } from '@gitroom/frontend/components/automations/node-config-panel';
 import { FlowExecutionsComponent } from '@gitroom/frontend/components/automations/flow-executions.component';
 import { FlowSummaryComponent } from '@gitroom/frontend/components/automations/flow-summary.component';
@@ -37,6 +46,7 @@ const nodeTypes = {
   replyComment: ReplyCommentNode,
   sendDm: SendDmNode,
   delay: DelayNode,
+  waitReply: DelayNode,
 };
 
 const edgeTypes = {
@@ -59,15 +69,95 @@ const REVERSE_NODE_TYPE_MAP: Record<string, string> = {
   replyComment: 'REPLY_COMMENT',
   sendDm: 'SEND_DM',
   delay: 'DELAY',
+  waitReply: 'DELAY',
 };
 
 const NODE_TOOLBAR_CONFIG = [
-  { type: 'trigger', color: '#22c55e', labelKey: 'node_trigger', label: 'Trigger', descKey: 'node_trigger_desc', desc: 'Instagram comment' },
-  { type: 'condition', color: '#eab308', labelKey: 'node_condition', label: 'Condition', descKey: 'node_condition_desc', desc: 'Filter by keywords' },
-  { type: 'replyComment', color: '#3b82f6', labelKey: 'node_reply', label: 'Reply Comment', descKey: 'node_reply_desc', desc: 'Public reply' },
-  { type: 'sendDm', color: '#a855f7', labelKey: 'node_dm', label: 'Send DM', descKey: 'node_dm_desc', desc: 'Private message' },
-  { type: 'delay', color: '#f97316', labelKey: 'node_delay', label: 'Delay', descKey: 'node_delay_desc', desc: 'Wait before next' },
+  {
+    type: 'trigger',
+    color: '#22c55e',
+    labelKey: 'node_trigger',
+    label: 'Trigger',
+    descKey: 'node_trigger_desc',
+    desc: 'Instagram comment',
+  },
+  {
+    type: 'condition',
+    color: '#eab308',
+    labelKey: 'node_condition',
+    label: 'Condition',
+    descKey: 'node_condition_desc',
+    desc: 'Filter by keywords',
+  },
+  {
+    type: 'replyComment',
+    color: '#3b82f6',
+    labelKey: 'node_reply',
+    label: 'Reply Comment',
+    descKey: 'node_reply_desc',
+    desc: 'Public reply',
+  },
+  {
+    type: 'sendDm',
+    color: '#a855f7',
+    labelKey: 'node_dm',
+    label: 'Send DM',
+    descKey: 'node_dm_desc',
+    desc: 'Private message',
+  },
+  {
+    type: 'sendDm',
+    kind: 'image',
+    color: '#a855f7',
+    labelKey: 'flow_image',
+    label: 'Image',
+    descKey: 'flow_image_desc',
+    desc: 'Send from the media library',
+  },
+  {
+    type: 'sendDm',
+    kind: 'video',
+    color: '#a855f7',
+    labelKey: 'flow_video',
+    label: 'Video',
+    descKey: 'flow_video_desc',
+    desc: 'Send from the media library',
+  },
+  {
+    type: 'waitReply',
+    color: '#14b8a6',
+    labelKey: 'flow_wait_reply',
+    label: 'Wait for reply',
+    descKey: 'flow_wait_reply_desc',
+    desc: 'Continue when the person replies',
+  },
+  {
+    type: 'delay',
+    color: '#f97316',
+    labelKey: 'node_delay',
+    label: 'Delay',
+    descKey: 'node_delay_desc',
+    desc: 'Wait before next',
+  },
 ];
+
+const viewType = (node: any) => {
+  try {
+    if (node.type === 'DELAY' && JSON.parse(node.data || '{}').mode === 'reply')
+      return 'waitReply';
+  } catch {
+    /* show the original node for malformed configuration */
+  }
+  return NODE_TYPE_MAP[node.type] || 'trigger';
+};
+const newConfig = (type: string, kind?: string) =>
+  type === 'waitReply'
+    ? { mode: 'reply', timeoutHours: 24 }
+    : kind
+    ? { media: { type: kind, id: '' } }
+    : type === 'delay'
+    ? { duration: 1, unit: 'minutes' }
+    : {};
 
 interface FlowEditorProps {
   id: string;
@@ -75,12 +165,16 @@ interface FlowEditorProps {
 
 const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
   const t = useT();
+  const { screenToFlowPosition } = useReactFlow();
   const fetchApi = useFetch();
   const router = useRouter();
   const toaster = useToaster();
   const { data: flow, isLoading, mutate } = useFlow(id);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [saving, setSaving] = useState(false);
+  const [sequence, setSequence] = useState(false);
+  const [paletteSearch, setPaletteSearch] = useState('');
+  const [showPreview, setShowPreview] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [flowName, setFlowName] = useState('');
@@ -90,7 +184,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
     if (!flow?.nodes) return [];
     return flow.nodes.map((n: any) => ({
       id: n.id,
-      type: NODE_TYPE_MAP[n.type] || 'trigger',
+      type: viewType(n),
       position: { x: n.positionX, y: n.positionY },
       data: { label: n.label, config: n.data },
     }));
@@ -113,10 +207,22 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
   // Sync nodes/edges when flow data first arrives (initialNodes/initialEdges are empty on first render)
   useEffect(() => {
     if (!flow?.id) return;
+    setSequence(
+      flow.nodes.some((n: any) => {
+        try {
+          return (
+            n.type === 'TRIGGER' &&
+            JSON.parse(n.data || '{}').executionVersion === 2
+          );
+        } catch {
+          return false;
+        }
+      })
+    );
     setNodes(
       (flow.nodes ?? []).map((n: any) => ({
         id: n.id,
-        type: NODE_TYPE_MAP[n.type] || 'trigger',
+        type: viewType(n),
         position: { x: n.positionX, y: n.positionY },
         data: { label: n.label, config: n.data },
       }))
@@ -137,7 +243,11 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
       // Block DM → DM direct connection (Meta only allows 1 private reply per comment)
       const sourceNode = nodes.find((n) => n.id === params.source);
       const targetNode = nodes.find((n) => n.id === params.target);
-      if (sourceNode?.type === 'sendDm' && targetNode?.type === 'sendDm') {
+      if (
+        !sequence &&
+        sourceNode?.type === 'sendDm' &&
+        targetNode?.type === 'sendDm'
+      ) {
         toaster.show(
           t(
             'dm_single_limit',
@@ -149,9 +259,8 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
       }
       setEdges((eds) => addEdge(params, eds));
     },
-    [setEdges, nodes, toaster, t]
+    [setEdges, nodes, toaster, t, sequence]
   );
-
 
   const onNodeClick = useCallback((_: any, node: Node) => {
     setSelectedNode(node);
@@ -169,20 +278,21 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
   const onDrop = useCallback(
     (event: DragEvent) => {
       event.preventDefault();
-      const type = event.dataTransfer.getData('application/reactflow');
+      const raw = event.dataTransfer.getData('application/reactflow');
+      const [type, kind] = raw.split(':');
       if (!type) return;
 
-      const position = {
-        x: event.clientX - 250,
-        y: event.clientY - 100,
-      };
+      const position = screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
 
-      const newNodeId = `temp-${Date.now()}`;
+      const newNodeId = `temp-${crypto.randomUUID()}`;
       const newNode: Node = {
         id: newNodeId,
         type,
         position,
-        data: { label: type, config: '{}' },
+        data: { label: type, config: JSON.stringify(newConfig(type, kind)) },
       };
 
       setNodes((nds) => {
@@ -192,7 +302,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
           lastNode &&
           type !== 'trigger' &&
           // Block DM → DM auto-connect (Meta 1 private reply limit)
-          !(lastNode.type === 'sendDm' && type === 'sendDm');
+          (sequence || !(lastNode.type === 'sendDm' && type === 'sendDm'));
 
         if (shouldAutoConnect) {
           const edgeData: Edge = {
@@ -208,7 +318,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
           setEdges((eds) => [...eds, edgeData]);
         }
 
-        if (lastNode?.type === 'sendDm' && type === 'sendDm') {
+        if (!sequence && lastNode?.type === 'sendDm' && type === 'sendDm') {
           toaster.show(
             t(
               'dm_single_limit',
@@ -221,37 +331,34 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
         return [...nds, newNode];
       });
     },
-    [setNodes, setEdges]
+    [setNodes, setEdges, screenToFlowPosition, sequence]
   );
 
-  const onDragStart = useCallback(
-    (event: DragEvent, nodeType: string) => {
-      event.dataTransfer.setData('application/reactflow', nodeType);
-      event.dataTransfer.effectAllowed = 'move';
-    },
-    []
-  );
+  const onDragStart = useCallback((event: DragEvent, nodeType: string) => {
+    event.dataTransfer.setData('application/reactflow', nodeType);
+    event.dataTransfer.effectAllowed = 'move';
+  }, []);
 
   const handleAddNode = useCallback(
-    (type: string) => {
+    (type: string, kind?: string) => {
       setNodes((nds) => {
         const lastNode = nds.length > 0 ? nds[nds.length - 1] : null;
         const position = lastNode
           ? { x: lastNode.position.x, y: lastNode.position.y + 150 }
           : { x: 250, y: 50 };
 
-        const newNodeId = `temp-${Date.now()}`;
+        const newNodeId = `temp-${crypto.randomUUID()}`;
         const newNode: Node = {
           id: newNodeId,
           type,
           position,
-          data: { label: type, config: '{}' },
+          data: { label: type, config: JSON.stringify(newConfig(type, kind)) },
         };
 
         const shouldAutoConnect =
           lastNode &&
           type !== 'trigger' &&
-          !(lastNode.type === 'sendDm' && type === 'sendDm');
+          (sequence || !(lastNode.type === 'sendDm' && type === 'sendDm'));
 
         if (shouldAutoConnect) {
           const edgeData: Edge = {
@@ -266,7 +373,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
           setEdges((eds) => [...eds, edgeData]);
         }
 
-        if (lastNode?.type === 'sendDm' && type === 'sendDm') {
+        if (!sequence && lastNode?.type === 'sendDm' && type === 'sendDm') {
           toaster.show(
             t(
               'dm_single_limit',
@@ -279,7 +386,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
         return [...nds, newNode];
       });
     },
-    [setNodes, setEdges, toaster, t]
+    [setNodes, setEdges, toaster, t, sequence]
   );
 
   const handleNodeUpdate = useCallback(
@@ -300,7 +407,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
     setSaving(true);
     try {
       const canvasNodes = nodes.map((n) => {
-        const rawData =
+        let rawData =
           typeof n.data?.config === 'string'
             ? n.data.config
             : JSON.stringify(n.data?.config || {});
@@ -312,6 +419,11 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
           typeof n.data?.label === 'string' ? n.data.label : undefined;
         if (backendType === 'TRIGGER') {
           try {
+            if (sequence)
+              rawData = JSON.stringify({
+                ...JSON.parse(rawData),
+                executionVersion: 2,
+              });
             const parsed = JSON.parse(rawData);
             label =
               parsed?.triggerType === 'story_reply'
@@ -340,7 +452,11 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
 
       const res = await fetchApi(`/flows/${id}/canvas`, {
         method: 'PUT',
-        body: JSON.stringify({ nodes: canvasNodes, edges: canvasEdges }),
+        body: JSON.stringify({
+          nodes: canvasNodes,
+          edges: canvasEdges,
+          ...(sequence ? { executionVersion: 2 } : {}),
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -353,11 +469,14 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
       await mutate();
       toaster.show(t('flow_saved', 'Automacao salva'), 'success');
     } catch {
-      toaster.show(t('failed_to_save_flow', 'Falha ao salvar automacao'), 'warning');
+      toaster.show(
+        t('failed_to_save_flow', 'Falha ao salvar automacao'),
+        'warning'
+      );
     } finally {
       setSaving(false);
     }
-  }, [nodes, edges, id, fetchApi, mutate, t, toaster]);
+  }, [nodes, edges, id, fetchApi, mutate, t, toaster, sequence]);
 
   // Sync flow name from API data
   useEffect(() => {
@@ -369,7 +488,16 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
     if (viewMode !== null || !flow?.nodes) return;
     const hasCondition = flow.nodes.some((n: any) => n.type === 'CONDITION');
     const nodeCount = flow.nodes.length;
-    const isSimple = !hasCondition && nodeCount <= 4;
+    const isSimple =
+      !hasCondition &&
+      nodeCount <= 4 &&
+      !flow.nodes.some((n: any) => {
+        try {
+          return JSON.parse(n.data || '{}').executionVersion === 2;
+        } catch {
+          return false;
+        }
+      });
     setViewMode(isSimple ? 'summary' : 'advanced');
   }, [flow?.nodes, viewMode]);
 
@@ -406,7 +534,10 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
           const body = await res.json().catch(() => ({}));
           toaster.show(
             body.message ||
-              t('failed_to_change_status', 'Falha ao alterar status da automacao'),
+              t(
+                'failed_to_change_status',
+                'Falha ao alterar status da automacao'
+              ),
             'warning'
           );
           return;
@@ -429,7 +560,12 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
   );
 
   if (isLoading) return <LoadingComponent />;
-  if (!flow) return <div className="p-[24px] text-textColor">{t('flow_not_found', 'Flow not found')}</div>;
+  if (!flow)
+    return (
+      <div className="p-[24px] text-textColor">
+        {t('flow_not_found', 'Flow not found')}
+      </div>
+    );
 
   if (viewMode === 'summary') {
     return (
@@ -508,6 +644,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
         <div className="flex items-center gap-[8px]">
           <button
             onClick={() => setViewMode('summary')}
+            disabled={sequence}
             className="rounded-[4px] bg-btnSimple border border-fifth px-[12px] py-[6px] text-[12px] text-textColor hover:bg-boxHover"
           >
             {t('view_summary', 'Summary')}
@@ -537,38 +674,109 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
           )}
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || (sequence && flow.status === 'ACTIVE')}
             className="rounded-[4px] bg-btnPrimary px-[12px] py-[6px] text-[12px] text-white hover:opacity-80 disabled:opacity-50"
           >
-            {saving
-              ? t('saving_flow', 'Saving...')
-              : t('save_flow', 'Save')}
+            {saving ? t('saving_flow', 'Saving...') : t('save_flow', 'Save')}
           </button>
         </div>
       </div>
 
-      {/* Node palette */}
-      <div className="flex items-center gap-[8px] border-b border-fifth bg-newBgColorInner px-[16px] py-[8px] overflow-x-auto">
-        {NODE_TOOLBAR_CONFIG.map((item) => (
-          <div
-            key={item.type}
-            draggable
-            onDragStart={(e) => onDragStart(e, item.type)}
-            onClick={() => handleAddNode(item.type)}
-            className="cursor-grab flex items-center gap-[8px] rounded-[6px] px-[10px] py-[6px] text-textColor bg-btnSimple border border-fifth hover:bg-boxHover min-w-fit"
-            style={{ borderLeftWidth: 3, borderLeftColor: item.color }}
-            title={t('click_or_drag_to_add', 'Click or drag to add')}
+      <div className="border-b border-newTableBorder bg-newBgColorInner px-4 py-3 space-y-3">
+        <div className="flex flex-wrap items-center gap-3 justify-between">
+          <label className="flex items-center gap-2 text-sm text-textColor">
+            <input
+              type="checkbox"
+              checked={sequence}
+              disabled={
+                flow.status === 'ACTIVE' ||
+                flow.nodes.some((n: any) => {
+                  try {
+                    return JSON.parse(n.data || '{}').executionVersion === 2;
+                  } catch {
+                    return false;
+                  }
+                })
+              }
+              onChange={(e) => setSequence(e.target.checked)}
+            />
+            {t('flow_sequence_enable', 'Separate message sequence')}
+          </label>
+          <button
+            type="button"
+            onClick={() => setShowPreview((v) => !v)}
+            className="rounded-lg bg-btnSimple px-3 py-2 text-sm text-textColor focus-visible:ring-2 focus-visible:ring-btnPrimary"
+            aria-expanded={showPreview}
           >
-            <div>
-              <div className="text-[12px] font-medium leading-tight">
-                {t(item.labelKey, item.label)}
-              </div>
-              <div className="text-[10px] text-customColor18 leading-tight">
-                {t(item.descKey, item.desc)}
-              </div>
-            </div>
-          </div>
-        ))}
+            {t('flow_preview', 'Message preview')}
+          </button>
+        </div>
+        <p className="text-xs text-tableText" role="note">
+          {sequence
+            ? t(
+                'flow_sequence_rules',
+                'One first DM per comment. Wait for a reply before sending more. Media and text are separate messages; subsequent sends must stay within the messaging window.'
+              )
+            : t(
+                'flow_sequence_legacy',
+                'Current engine: messages are combined and sent at the end. Enable the new sequence on a paused or draft automation to send each step separately.'
+              )}
+        </p>
+        {flow.status === 'ACTIVE' && (
+          <p className="text-xs text-tableText">
+            {t(
+              'flow_sequence_pause',
+              'Pause before enabling or editing a new message sequence. Existing executions keep their original engine.'
+            )}
+          </p>
+        )}
+        <input
+          type="search"
+          aria-label={t('flow_find_step', 'Find a step')}
+          placeholder={t('flow_find_step', 'Find a step')}
+          value={paletteSearch}
+          onChange={(e) => setPaletteSearch(e.target.value)}
+          className="w-full max-w-sm rounded-lg border border-newTableBorder bg-newBgColor px-3 py-2 text-sm text-textColor focus-visible:ring-2 focus-visible:ring-btnPrimary"
+        />
+        <div className="flex gap-2 flex-wrap">
+          {NODE_TOOLBAR_CONFIG.filter(
+            (item) =>
+              !paletteSearch ||
+              t(item.labelKey, item.label)
+                .toLocaleLowerCase()
+                .includes(paletteSearch.toLocaleLowerCase())
+          ).map((item) => (
+            <button
+              type="button"
+              key={`${item.type}:${'kind' in item ? item.kind : ''}`}
+              draggable
+              disabled={
+                !sequence && (item.type === 'waitReply' || 'kind' in item)
+              }
+              onDragStart={(e) =>
+                onDragStart(
+                  e,
+                  `${item.type}${'kind' in item ? ':' + item.kind : ''}`
+                )
+              }
+              onClick={() =>
+                handleAddNode(item.type, 'kind' in item ? item.kind : undefined)
+              }
+              className="flex items-center gap-2 rounded-lg border border-newTableBorder bg-btnSimple px-3 py-2 text-left text-textColor hover:bg-boxHover disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-btnPrimary"
+              style={{ borderLeftWidth: 3, borderLeftColor: item.color }}
+              title={t('click_or_drag_to_add', 'Click or drag to add')}
+            >
+              <span>
+                <span className="block text-xs font-semibold">
+                  {t(item.labelKey, item.label)}
+                </span>
+                <span className="block text-[11px] text-tableText">
+                  {t(item.descKey, item.desc)}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Canvas */}
@@ -611,6 +819,14 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
             }}
           />
         </ReactFlow>
+
+        {showPreview && (
+          <FlowMessagePreview
+            nodes={nodes}
+            edges={edges}
+            onClose={() => setShowPreview(false)}
+          />
+        )}
 
         {showHistory && (
           <div className="absolute inset-0 z-20 bg-newBgColorInner overflow-y-auto">

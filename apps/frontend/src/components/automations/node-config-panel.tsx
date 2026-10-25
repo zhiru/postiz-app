@@ -1,5 +1,7 @@
 'use client';
 
+import { MediaBox, mediaLibrarySize } from '../media/media.component';
+import { useModals } from '../layout/new-modal';
 import { FC, useCallback, useState, useEffect } from 'react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import useSWR from 'swr';
@@ -42,7 +44,10 @@ const useFlowPosts = (flowId: string, enabled: boolean) => {
   return useSWR<InstagramPost[]>(
     enabled ? `/flows/${flowId}/posts` : null,
     async (url: string) => {
-      const { items } = await readIntegrationMediaResponse(await fetch(url), 'posts');
+      const { items } = await readIntegrationMediaResponse(
+        await fetch(url),
+        'posts'
+      );
       return items;
     }
   );
@@ -58,7 +63,15 @@ const KeywordsField: FC<{
   onMatchModeChange: (m: string) => void;
   inputClass: string;
   inputWrapperClass: string;
-}> = ({ t, keywords, matchMode, onKeywordsChange, onMatchModeChange, inputClass, inputWrapperClass }) => (
+}> = ({
+  t,
+  keywords,
+  matchMode,
+  onKeywordsChange,
+  onMatchModeChange,
+  inputClass,
+  inputWrapperClass,
+}) => (
   <div>
     <label className="block text-[13px] font-semibold text-textColor mb-[8px]">
       {t('trigger_keywords', 'Palavras-chave')}
@@ -67,7 +80,10 @@ const KeywordsField: FC<{
     <div className={inputWrapperClass}>
       <CommaSeparatedKeywordsInput
         className={inputClass + ' h-[42px]'}
-        placeholder={t('wizard_keywords_input_placeholder', 'Digite uma ou mais palavras')}
+        placeholder={t(
+          'wizard_keywords_input_placeholder',
+          'Digite uma ou mais palavras'
+        )}
         keywords={keywords}
         onKeywordsChange={onKeywordsChange}
       />
@@ -77,7 +93,9 @@ const KeywordsField: FC<{
     </p>
     {/* Example chips */}
     <div className="flex flex-wrap gap-[6px] mb-[10px]">
-      <span className="text-[11px] text-customColor18">{t('wizard_example', 'Por exemplo:')}</span>
+      <span className="text-[11px] text-customColor18">
+        {t('wizard_example', 'Por exemplo:')}
+      </span>
       {EXAMPLE_CHIPS.map((chip) => (
         <button
           key={chip}
@@ -103,9 +121,15 @@ const KeywordsField: FC<{
           value={matchMode}
           onChange={(e) => onMatchModeChange(e.target.value)}
         >
-          <option value="any">{t('match_any', 'Qualquer palavra-chave')}</option>
-          <option value="all">{t('match_all', 'Todas as palavras-chave')}</option>
-          <option value="exact">{t('match_exact', 'Correspondência exata')}</option>
+          <option value="any">
+            {t('match_any', 'Qualquer palavra-chave')}
+          </option>
+          <option value="all">
+            {t('match_all', 'Todas as palavras-chave')}
+          </option>
+          <option value="exact">
+            {t('match_exact', 'Correspondência exata')}
+          </option>
         </select>
       </div>
     )}
@@ -119,6 +143,7 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
   onClose,
 }) => {
   const t = useT();
+  const modals = useModals();
   const [config, setConfig] = useState<Record<string, any>>({});
 
   useEffect(() => {
@@ -132,6 +157,30 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
       setConfig({});
     }
   }, [node]);
+
+  const chooseMedia = () =>
+    modals.openModal({
+      title: t('media_library', 'Media Library'),
+      askClose: false,
+      closeOnEscape: true,
+      fullScreen: true,
+      size: mediaLibrarySize(),
+      height: mediaLibrarySize(),
+      children: (close) => (
+        <MediaBox
+          type={config.media?.type || 'image'}
+          closeModal={close}
+          setMedia={(items) => {
+            if (items[0])
+              setConfig({
+                ...config,
+                media: { ...items[0], type: config.media?.type || 'image' },
+              });
+            close();
+          }}
+        />
+      ),
+    });
 
   const handleSave = useCallback(() => {
     onUpdate(node.id, config);
@@ -213,7 +262,10 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
             <div className="flex flex-col gap-[6px] mb-[16px]">
               {(
                 [
-                  ['comment_on_post', t('trigger_type_comment', 'Comentario em publicacao')],
+                  [
+                    'comment_on_post',
+                    t('trigger_type_comment', 'Comentario em publicacao'),
+                  ],
                   ['story_reply', t('trigger_type_story', 'Resposta ao story')],
                 ] as const
               ).map(([value, label]) => (
@@ -299,77 +351,94 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
             </div>
 
             {/* Specific selectors */}
-            {currentMode === 'specific' && triggerType === 'comment_on_post' && (
-              <>
-                {postsError && (
-                  <div role="alert" className="mb-[12px] space-y-[8px] text-[12px] text-newTextColor">
-                    <p>{t('instagram_posts_load_failed', 'Could not load Instagram posts. Check the account connection and try again.')}</p>
-                    <Button
-                      secondary
-                      loading={postsValidating}
-                      disabled={postsValidating}
-                      className="rounded-[6px] text-[12px]"
-                      onClick={() => { void mutatePosts().catch(() => undefined); }}
+            {currentMode === 'specific' &&
+              triggerType === 'comment_on_post' && (
+                <>
+                  {postsError && (
+                    <div
+                      role="alert"
+                      className="mb-[12px] space-y-[8px] text-[12px] text-newTextColor"
                     >
-                      {t('try_again', 'Try Again')}
-                    </Button>
-                  </div>
-                )}
-                {!postsError && postsLoading && (
-                  <p className="text-[12px] text-customColor18">
-                    {t('loading_posts', 'Carregando posts...')}
-                  </p>
-                )}
-                {!postsError && !postsLoading && (!posts || posts.length === 0) && (
-                  <p className="text-[12px] text-customColor18">
-                    {t(
-                      'no_posts_found',
-                      'Nenhum post do Instagram encontrado. Reconecte a conta ou publique antes.'
+                      <p>
+                        {t(
+                          'instagram_posts_load_failed',
+                          'Could not load Instagram posts. Check the account connection and try again.'
+                        )}
+                      </p>
+                      <Button
+                        secondary
+                        loading={postsValidating}
+                        disabled={postsValidating}
+                        className="rounded-[6px] text-[12px]"
+                        onClick={() => {
+                          void mutatePosts().catch(() => undefined);
+                        }}
+                      >
+                        {t('try_again', 'Try Again')}
+                      </Button>
+                    </div>
+                  )}
+                  {!postsError && postsLoading && (
+                    <p className="text-[12px] text-customColor18">
+                      {t('loading_posts', 'Carregando posts...')}
+                    </p>
+                  )}
+                  {!postsError &&
+                    !postsLoading &&
+                    (!posts || posts.length === 0) && (
+                      <p className="text-[12px] text-customColor18">
+                        {t(
+                          'no_posts_found',
+                          'Nenhum post do Instagram encontrado. Reconecte a conta ou publique antes.'
+                        )}
+                      </p>
                     )}
-                  </p>
-                )}
-                {!postsError && !postsLoading && posts && posts.length > 0 && (
-                  <div className="max-h-[320px] overflow-y-auto space-y-[8px] mb-[12px]">
-                    {posts.map((post) => {
-                      const isSelected = selectedPostIds.includes(post.id);
-                      const thumb = post.thumbnailUrl || post.mediaUrl;
-                      return (
-                        <label
-                          key={post.id}
-                          className={`flex gap-[8px] p-[8px] rounded-[6px] cursor-pointer border ${
-                            isSelected
-                              ? 'border-btnPrimary bg-newBgColorInner'
-                              : 'border-newTableBorder hover:border-btnPrimary'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => togglePost(post.id)}
-                            className="mt-[4px]"
-                          />
-                          {thumb && (
-                            <img
-                              src={thumb}
-                              alt=""
-                              className="w-[48px] h-[48px] rounded-[4px] object-cover flex-shrink-0"
-                            />
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[11px] text-customColor18 uppercase">
-                              {post.mediaType}
-                            </p>
-                            <p className="text-[12px] text-textColor truncate">
-                              {post.caption || t('no_caption', '(sem legenda)')}
-                            </p>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
+                  {!postsError &&
+                    !postsLoading &&
+                    posts &&
+                    posts.length > 0 && (
+                      <div className="max-h-[320px] overflow-y-auto space-y-[8px] mb-[12px]">
+                        {posts.map((post) => {
+                          const isSelected = selectedPostIds.includes(post.id);
+                          const thumb = post.thumbnailUrl || post.mediaUrl;
+                          return (
+                            <label
+                              key={post.id}
+                              className={`flex gap-[8px] p-[8px] rounded-[6px] cursor-pointer border ${
+                                isSelected
+                                  ? 'border-btnPrimary bg-newBgColorInner'
+                                  : 'border-newTableBorder hover:border-btnPrimary'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => togglePost(post.id)}
+                                className="mt-[4px]"
+                              />
+                              {thumb && (
+                                <img
+                                  src={thumb}
+                                  alt=""
+                                  className="w-[48px] h-[48px] rounded-[4px] object-cover flex-shrink-0"
+                                />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[11px] text-customColor18 uppercase">
+                                  {post.mediaType}
+                                </p>
+                                <p className="text-[12px] text-textColor truncate">
+                                  {post.caption ||
+                                    t('no_caption', '(sem legenda)')}
+                                </p>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                </>
+              )}
 
             {currentMode === 'specific' && triggerType === 'story_reply' && (
               <div className="mb-[12px]">
@@ -415,8 +484,12 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
                 t={t}
                 keywords={config.keywords || []}
                 matchMode={config.matchMode || 'any'}
-                onKeywordsChange={(kws) => setConfig({ ...config, keywords: kws })}
-                onMatchModeChange={(m) => setConfig({ ...config, matchMode: m })}
+                onKeywordsChange={(kws) =>
+                  setConfig({ ...config, keywords: kws })
+                }
+                onMatchModeChange={(m) =>
+                  setConfig({ ...config, matchMode: m })
+                }
                 inputClass={inputClass}
                 inputWrapperClass={inputWrapperClass}
               />
@@ -427,7 +500,10 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
               <div className="mt-[16px]">
                 <label className="flex items-center justify-between gap-[8px] p-[8px] rounded-[6px] border border-newTableBorder">
                   <span className="text-[12px] text-textColor">
-                    {t('story_match_reactions', 'Responder reacoes nos stories')}
+                    {t(
+                      'story_match_reactions',
+                      'Responder reacoes nos stories'
+                    )}
                   </span>
                   <input
                     type="checkbox"
@@ -631,7 +707,9 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
                       type="number"
                       min={1}
                       max={10}
-                      value={config.maxGateAttempts ?? DEFAULT_MAX_GATE_ATTEMPTS}
+                      value={
+                        config.maxGateAttempts ?? DEFAULT_MAX_GATE_ATTEMPTS
+                      }
                       onChange={(e) => {
                         const v = Number(e.target.value);
                         setConfig({
@@ -690,7 +768,9 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
               t={t}
               keywords={config.keywords || []}
               matchMode={config.matchMode || 'any'}
-              onKeywordsChange={(kws) => setConfig({ ...config, keywords: kws })}
+              onKeywordsChange={(kws) =>
+                setConfig({ ...config, keywords: kws })
+              }
               onMatchModeChange={(m) => setConfig({ ...config, matchMode: m })}
               inputClass={inputClass}
               inputWrapperClass={inputWrapperClass}
@@ -728,6 +808,45 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
         );
 
       case 'sendDm':
+        if (config.media)
+          return (
+            <div className="space-y-3">
+              <label className="block text-sm text-textColor">
+                {t('flow_media_type', 'Message type')}
+                <select
+                  value={config.media.type || 'image'}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      media: { type: e.target.value, id: '' },
+                    })
+                  }
+                  className={inputClass}
+                >
+                  <option value="image">{t('flow_image', 'Image')}</option>
+                  <option value="video">{t('flow_video', 'Video')}</option>
+                </select>
+              </label>
+              <p className="text-xs text-tableText">
+                {t(
+                  'flow_media_limits',
+                  'Images: PNG/JPEG up to 8 MB. Videos: up to 25 MB. Use a separate text step for the caption. Sending requires an open conversation.'
+                )}
+              </p>
+              {config.media.path && (
+                <p className="text-xs text-tableText break-all">
+                  {config.media.path.split('/').pop()}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={chooseMedia}
+                className="rounded-lg bg-btnPrimary px-3 py-2 text-white focus-visible:ring-2 focus-visible:ring-btnPrimary"
+              >
+                {t('flow_choose_media', 'Choose media from the library')}
+              </button>
+            </div>
+          );
         return (
           <>
             <label className="block text-[14px] text-textColor mb-[6px]">
@@ -816,6 +935,34 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
           </>
         );
 
+      case 'waitReply':
+        return (
+          <div className="space-y-3">
+            <p className="text-sm text-textColor">
+              {t(
+                'flow_wait_reply_hint',
+                'Continue only after the person sends a new message. If the time runs out, stop without sending a reminder. Opening a URL does not count as a reply.'
+              )}
+            </p>
+            <label className="block text-sm text-textColor">
+              {t('flow_reply_timeout', 'Wait up to (hours)')}
+              <input
+                type="number"
+                min={1}
+                max={72}
+                value={config.timeoutHours ?? 24}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    mode: 'reply',
+                    timeoutHours: Number(e.target.value),
+                  })
+                }
+                className={inputClass}
+              />
+            </label>
+          </div>
+        );
       case 'delay':
         return (
           <>
@@ -857,20 +1004,24 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
       default:
         return (
           <p className="text-[14px] text-customColor18">
-            {t('no_config_available', 'No configuration available for this node')}
+            {t(
+              'no_config_available',
+              'No configuration available for this node'
+            )}
           </p>
         );
     }
   };
 
   return (
-    <div className="absolute right-0 top-0 h-full w-[320px] border-l border-fifth bg-newBgColorInner p-[16px] overflow-y-auto z-10">
+    <div className="absolute right-0 top-0 h-full w-[min(420px,100%)] border-l border-fifth bg-newBgColorInner p-[16px] overflow-y-auto z-10">
       <div className="flex items-center justify-between mb-[16px]">
         <h3 className="text-[14px] font-semibold text-textColor">
           {t('node_config', 'Node Configuration')}
         </h3>
         <button
           onClick={onClose}
+          aria-label={t('close', 'Close')}
           className="text-customColor18 hover:text-textColor text-[18px]"
         >
           &times;

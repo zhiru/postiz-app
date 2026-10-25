@@ -120,6 +120,24 @@ export class MediaRepository {
     });
   }
 
+  findAutomationMedia(org: string, id: string, profileId?: string) {
+    return this._media.model.media.findFirst({
+      where: {
+        id,
+        organizationId: org,
+        deletedAt: null,
+        ...this.profileFilter(profileId),
+      },
+      select: {
+        id: true,
+        path: true,
+        status: true,
+        type: true,
+        fileSize: true,
+      },
+    });
+  }
+
   findPostMedia(
     org: string,
     reference: { id?: string; path?: string },

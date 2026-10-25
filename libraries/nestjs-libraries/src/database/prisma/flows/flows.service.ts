@@ -41,6 +41,171 @@ import { StatusEventService } from '@gitroom/nestjs-libraries/database/prisma/st
 import { decryptIntegrationToken } from '@gitroom/nestjs-libraries/crypto/integration-token.helper';
 import * as crypto from 'crypto';
 
+export function validateFlowSequence(body: SaveCanvasDto) {
+  const fail = (message: string): never => {
+    throw new BadRequestException(message);
+  };
+  const nodes = new Map(body.nodes.map((n) => [n.id, n]));
+  if (
+    body.edges.length > 100 ||
+    !body.nodes.length ||
+    body.nodes.length > 50 ||
+    nodes.size !== body.nodes.length ||
+    nodes.has(undefined)
+  )
+    fail('Use 1–50 nodes with unique IDs.');
+  const triggers = body.nodes.filter((n) => n.type === 'TRIGGER');
+  if (triggers.length !== 1) fail('Use exactly one trigger.');
+  const config = (data?: string | null) => {
+    try {
+      const value = JSON.parse(data || '{}');
+      if (!value || typeof value !== 'object' || Array.isArray(value))
+        fail('Invalid node configuration.');
+      return value;
+    } catch {
+      return fail('Invalid node configuration.');
+    }
+  };
+  const trigger = config(triggers[0].data);
+  if (
+    !['comment_on_post', 'story_reply'].includes(
+      trigger.triggerType || 'comment_on_post'
+    )
+  )
+    fail('Unsupported trigger.');
+  if (trigger.requireFollow && trigger.triggerType !== 'story_reply')
+    fail(
+      'Keep the existing comment follow gate in the original engine. Disable follow gate to use the new sequence.'
+    );
+  for (const e of body.edges)
+    if (!nodes.has(e.sourceNodeId) || !nodes.has(e.targetNodeId))
+      fail('Invalid edge.');
+  const reached = new Set<string>();
+  const visited = new Set<string>();
+  const walk = (
+    id: string,
+    open: boolean,
+    privateSent: boolean,
+    path: Set<string>
+  ) => {
+    if (path.has(id)) fail('A cycle is not allowed.');
+    const state = JSON.stringify([id, open, privateSent]);
+    if (visited.has(state)) return;
+    visited.add(state);
+    const node = nodes.get(id)!;
+    const cfg = config(node.data);
+    const outgoing = body.edges.filter((e) => e.sourceNodeId === id);
+    if (
+      (node.type !== 'CONDITION' && outgoing.length > 1) ||
+      (node.type === 'CONDITION' &&
+        (outgoing.length > 2 ||
+          new Set(outgoing.map((e) => e.sourceHandle)).size !==
+            outgoing.length))
+    )
+      fail('Use one next step, or two distinct condition branches.');
+    if (
+      ['CONDITION', 'TRIGGER'].includes(node.type) &&
+      ((cfg.keywords &&
+        (!Array.isArray(cfg.keywords) ||
+          cfg.keywords.length > 50 ||
+          cfg.keywords.some(
+            (k: unknown) => typeof k !== 'string' || k.length > 100
+          ))) ||
+        (cfg.matchMode && !['any', 'all', 'exact'].includes(cfg.matchMode)))
+    )
+      fail('Invalid keyword condition.');
+    if (
+      node.type === 'REPLY_COMMENT' &&
+      ((cfg.message &&
+        (typeof cfg.message !== 'string' || cfg.message.length > 2200)) ||
+        (cfg.messages &&
+          (!Array.isArray(cfg.messages) ||
+            cfg.messages.length > 10 ||
+            cfg.messages.some(
+              (m: unknown) => typeof m !== 'string' || m.length > 2200
+            ))))
+    )
+      fail('Invalid public reply.');
+    reached.add(id);
+    if (node.type === 'SEND_DM') {
+      const text = cfg.message || cfg.template || '';
+      if (
+        typeof text !== 'string' ||
+        (!text.trim() && !cfg.media) ||
+        text.length > (cfg.buttonText ? 640 : 1000)
+      )
+        fail('Message text must be 1–1000 characters (640 with a button).');
+      if (
+        cfg.media &&
+        (typeof cfg.media.id !== 'string' ||
+          !cfg.media.id ||
+          !['image', 'video'].includes(cfg.media.type))
+      )
+        fail('Choose an image or video from the media library.');
+      if (cfg.media && (text.trim() || cfg.buttonText || cfg.buttonUrl))
+        fail('Use separate nodes for media and text/buttons.');
+      if (
+        !!cfg.buttonText !== !!cfg.buttonUrl ||
+        (cfg.buttonText &&
+          (typeof cfg.buttonText !== 'string' ||
+            cfg.buttonText.length > 20 ||
+            checkPublicHttpsUrl(cfg.buttonUrl) !== null))
+      )
+        fail(
+          'Provide a button title up to 20 characters and a public HTTPS URL.'
+        );
+      if (!open) {
+        if (privateSent || cfg.media)
+          fail(
+            'Wait for a reply before sending another private message or media. A timer does not open the messaging window.'
+          );
+        privateSent = true;
+      }
+    } else if (node.type === 'DELAY') {
+      if (cfg.mode === 'reply') {
+        if (
+          !Number.isInteger(cfg.timeoutHours) ||
+          cfg.timeoutHours < 1 ||
+          cfg.timeoutHours > 72
+        )
+          fail('Reply timeout must be 1–72 hours.');
+        open = true;
+      } else {
+        if (
+          !['seconds', 'minutes', 'hours'].includes(cfg.unit) ||
+          !Number.isInteger(cfg.duration) ||
+          cfg.duration < 0 ||
+          cfg.duration *
+            ((
+              { seconds: 1, minutes: 60, hours: 3600 } as Record<string, number>
+            )[cfg.unit] || 0) >
+            23 * 3600
+        )
+          fail('Delay must be between zero and 23 hours.');
+      }
+    } else if (node.type === 'REPLY_COMMENT') {
+      if (trigger.triggerType === 'story_reply')
+        fail('Public replies require a comment trigger.');
+    } else if (node.type !== 'TRIGGER' && node.type !== 'CONDITION')
+      fail('Unsupported node.');
+    for (const edge of body.edges.filter((e) => e.sourceNodeId === id)) {
+      if (
+        node.type === 'CONDITION' &&
+        !['match', 'no_match'].includes(edge.sourceHandle || '')
+      )
+        fail('Choose the condition branch.');
+      walk(edge.targetNodeId, open, privateSent, new Set([...path, id]));
+    }
+  };
+  walk(
+    triggers[0].id!,
+    trigger.triggerType === 'story_reply',
+    false,
+    new Set()
+  );
+  if (reached.size !== nodes.size) fail('Connect every node to the trigger.');
+}
+
 // Janela de 24h da Meta para trocar mensagens apos interacao do usuario.
 // Usamos 23h para dar margem de seguranca e nao tentar DM expirado.
 const POSTBACK_EXPIRATION_MS = 23 * 60 * 60 * 1000;
@@ -101,6 +266,67 @@ export class FlowsService {
 
   getFlow(orgId: string, id: string, profileId?: string) {
     return this._flowsRepository.getFlow(orgId, id, profileId);
+  }
+
+  async handleIncomingFlowReply(input: {
+    organizationId: string;
+    integrationId: string;
+    senderId: string;
+    eventId: string;
+    at: number;
+    text: string;
+  }) {
+    if (
+      !input.eventId ||
+      !Number.isFinite(input.at) ||
+      input.at > Date.now() + 60_000 ||
+      Date.now() - input.at >= 23 * 3600_000
+    )
+      return { retry: false };
+    const waits = await this._flowsRepository.findReplyWaits(
+      input.organizationId,
+      input.integrationId,
+      input.senderId
+    );
+    let retry = false;
+    for (const execution of waits) {
+      const trigger = execution.flow.nodes.find((n) => n.type === 'TRIGGER');
+      const node = execution.flow.nodes.find(
+        (n) => n.id === execution.currentNodeId && n.type === 'DELAY'
+      );
+      let eligible = false;
+      try {
+        eligible =
+          JSON.parse(trigger?.data || '{}').executionVersion === 2 &&
+          JSON.parse(node?.data || '{}').mode === 'reply';
+      } catch {
+        /* malformed flows never receive a signal */
+      }
+      if (
+        !eligible ||
+        !execution.temporalWorkflowId ||
+        !execution.currentNodeId
+      )
+        continue;
+      const client = this._temporalService.client.getRawClient();
+      if (!client) {
+        retry = true;
+        continue;
+      }
+      try {
+        await client.workflow
+          .getHandle(execution.temporalWorkflowId)
+          .signal('flow-message-reply-v2', {
+            nodeId: execution.currentNodeId,
+            eventId: input.eventId,
+            at: input.at,
+            text: input.text.slice(0, 2000),
+          });
+      } catch (error) {
+        if ((error as Error)?.name !== 'WorkflowNotFoundError') retry = true;
+      }
+    }
+    return { retry };
   }
 
   getFlowById(id: string) {
@@ -491,12 +717,65 @@ export class FlowsService {
     return this._flowsRepository.deleteFlow(orgId, id, profileId);
   }
 
-  saveCanvas(
+  async saveCanvas(
     orgId: string,
     id: string,
     body: SaveCanvasDto,
     profileId?: string
   ) {
+    const flow = await this._flowsRepository.getFlow(orgId, id, profileId);
+    if (!flow) throw new BadRequestException('Automation not found.');
+    const hasSequence = (
+      nodes: Array<{ type: string; data?: string | null }>
+    ) =>
+      nodes.some((n) => {
+        try {
+          return (
+            n.type === 'TRIGGER' &&
+            JSON.parse(n.data || '{}').executionVersion === 2
+          );
+        } catch {
+          return false;
+        }
+      });
+    const sequence =
+      body.executionVersion === 2 ||
+      hasSequence(body.nodes) ||
+      hasSequence(flow.nodes || []);
+    if (sequence) {
+      if (flow.status === 'ACTIVE')
+        throw new BadRequestException(
+          'Pause the automation before changing its sequence.'
+        );
+      validateFlowSequence(body);
+      body = {
+        ...body,
+        nodes: body.nodes.map((n) =>
+          n.type === 'TRIGGER'
+            ? {
+                ...n,
+                data: JSON.stringify({
+                  ...JSON.parse(n.data || '{}'),
+                  executionVersion: 2,
+                }),
+              }
+            : n
+        ),
+      };
+    } else if (
+      body.nodes.some((n) => {
+        try {
+          const c = JSON.parse(n.data || '{}');
+          return c.media || c.mode === 'reply';
+        } catch {
+          return false;
+        }
+      })
+    ) {
+      throw new BadRequestException(
+        'Enable the new message sequence before using media or reply waits.'
+      );
+    }
     return this._flowsRepository.saveCanvas(
       orgId,
       id,
@@ -538,6 +817,18 @@ export class FlowsService {
         );
       }
 
+      const sequential = flow.nodes.some((n) => {
+        try {
+          return (
+            n.type === 'TRIGGER' &&
+            JSON.parse(n.data || '{}').executionVersion === 2
+          );
+        } catch {
+          return false;
+        }
+      });
+      if (sequential) validateFlowSequence(flow as any);
+
       // Check for DM → DM direct connections (Meta only allows 1 private reply per comment)
       const dmNodeIds = new Set(
         flow.nodes
@@ -547,7 +838,7 @@ export class FlowsService {
       const hasDmToDm = flow.edges.some(
         (e) => dmNodeIds.has(e.sourceNodeId) && dmNodeIds.has(e.targetNodeId)
       );
-      if (hasDmToDm) {
+      if (hasDmToDm && !sequential) {
         throw new BadRequestException(
           'A Meta permite apenas 1 mensagem direta por comentario. ' +
             'Remova nos de DM consecutivos e use quebras de linha no campo de mensagem.'
@@ -647,6 +938,21 @@ export class FlowsService {
     if (!current) {
       throw new BadRequestException('Flow not found');
     }
+    if (
+      current.nodes.some((n) => {
+        try {
+          return (
+            n.type === 'TRIGGER' &&
+            JSON.parse(n.data || '{}').executionVersion === 2
+          );
+        } catch {
+          return false;
+        }
+      })
+    )
+      throw new BadRequestException(
+        'Use the visual builder to edit this message sequence.'
+      );
     // A integracao do flow nao muda no update, mas revalidamos: bloqueia
     // reativacao (DRAFT->ACTIVE) sobre integracao desativada/removida e mantem
     // simetria com o caminho de criacao (mesmo guard).
@@ -1350,30 +1656,45 @@ export class FlowsService {
       }
 
       try {
-        await temporalClient.workflow.start('flowExecutionWorkflow', {
-          workflowId,
-          workflowIdReusePolicy: 'REJECT_DUPLICATE' as any,
-          taskQueue: 'main',
-          args: [
-            {
-              executionId: execution.id,
-              flowId: flow.id,
-              triggerType: 'comment_on_post',
-              igCommentId: payload.igCommentId,
-              igCommenterId: payload.igCommenterId,
-              igCommenterName: payload.igCommenterName,
-              igMediaId: payload.igMediaId,
-              commentText: payload.commentText,
-              integrationId: payload.integrationId,
-            },
-          ],
-          typedSearchAttributes: new TypedSearchAttributes([
-            {
-              key: orgSearchAttr,
-              value: payload.organizationId,
-            },
-          ]),
-        });
+        await temporalClient.workflow.start(
+          flow.nodes.some((n) => {
+            try {
+              return (
+                n.type === 'TRIGGER' &&
+                JSON.parse(n.data || '{}').executionVersion === 2
+              );
+            } catch {
+              return false;
+            }
+          })
+            ? 'flowExecutionWorkflowV2'
+            : 'flowExecutionWorkflow',
+          {
+            workflowId,
+            workflowIdReusePolicy: 'REJECT_DUPLICATE' as any,
+            taskQueue: 'main',
+            args: [
+              {
+                executionId: execution.id,
+                receivedAt: Date.now(),
+                flowId: flow.id,
+                triggerType: 'comment_on_post',
+                igCommentId: payload.igCommentId,
+                igCommenterId: payload.igCommenterId,
+                igCommenterName: payload.igCommenterName,
+                igMediaId: payload.igMediaId,
+                commentText: payload.commentText,
+                integrationId: payload.integrationId,
+              },
+            ],
+            typedSearchAttributes: new TypedSearchAttributes([
+              {
+                key: orgSearchAttr,
+                value: payload.organizationId,
+              },
+            ]),
+          }
+        );
       } catch (err) {
         if ((err as Error).name === 'WorkflowExecutionAlreadyStartedError') {
           results.push(execution);
@@ -1535,6 +1856,7 @@ export class FlowsService {
     igStoryId: string;
     messageText: string;
     reaction?: string;
+    interactionAt?: number;
   }) {
     let activeFlows = await this._flowsRepository.getActiveFlowsForIntegration(
       payload.integrationId,
@@ -1656,32 +1978,47 @@ export class FlowsService {
       }
 
       try {
-        await temporalClient.workflow.start('flowExecutionWorkflow', {
-          workflowId,
-          workflowIdReusePolicy: 'REJECT_DUPLICATE' as any,
-          taskQueue: 'main',
-          args: [
-            {
-              executionId: execution.id,
-              flowId: flow.id,
-              triggerType: 'story_reply',
-              igSenderId: payload.igSenderId,
-              igSenderName: payload.igSenderName,
-              igStoryId: payload.igStoryId,
-              igThreadId: payload.igThreadId,
-              igMessageId: payload.igMessageId,
-              messageText: payload.messageText,
-              reaction: payload.reaction,
-              integrationId: payload.integrationId,
-            },
-          ],
-          typedSearchAttributes: new TypedSearchAttributes([
-            {
-              key: orgSearchAttr,
-              value: payload.organizationId,
-            },
-          ]),
-        });
+        await temporalClient.workflow.start(
+          flow.nodes.some((n) => {
+            try {
+              return (
+                n.type === 'TRIGGER' &&
+                JSON.parse(n.data || '{}').executionVersion === 2
+              );
+            } catch {
+              return false;
+            }
+          })
+            ? 'flowExecutionWorkflowV2'
+            : 'flowExecutionWorkflow',
+          {
+            workflowId,
+            workflowIdReusePolicy: 'REJECT_DUPLICATE' as any,
+            taskQueue: 'main',
+            args: [
+              {
+                executionId: execution.id,
+                receivedAt: payload.interactionAt || 0,
+                flowId: flow.id,
+                triggerType: 'story_reply',
+                igSenderId: payload.igSenderId,
+                igSenderName: payload.igSenderName,
+                igStoryId: payload.igStoryId,
+                igThreadId: payload.igThreadId,
+                igMessageId: payload.igMessageId,
+                messageText: payload.messageText,
+                reaction: payload.reaction,
+                integrationId: payload.integrationId,
+              },
+            ],
+            typedSearchAttributes: new TypedSearchAttributes([
+              {
+                key: orgSearchAttr,
+                value: payload.organizationId,
+              },
+            ]),
+          }
+        );
       } catch (err) {
         if ((err as Error).name === 'WorkflowExecutionAlreadyStartedError') {
           results.push(execution);

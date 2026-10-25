@@ -198,3 +198,29 @@ Se o log do backend mostrar `checkIntegrationWebhook ... Could not verify webhoo
 
 - [`docs/architecture/instagram-automations.md`](../architecture/instagram-automations.md) — engine de automações, webhook, follow-gate, credenciais (visão interna).
 - Swagger interativo: `/docs` (tag **Automações (Flows)**).
+
+
+## Editor visual e sequências V2
+
+A API pública e ferramentas MCP descritas acima mantêm o contrato simplificado
+`QuickCreateFlowDto` do motor original. Não oferecem edição do grafo V2 nesta
+entrega. Tentar editar um fluxo V2 pelo PUT simplificado retorna erro orientando
+usar o editor visual, para preservar os recursos do grafo.
+
+O painel usa a rota autenticada `PUT /flows/:id/canvas` (o proxy pode prefixar
+`/api`), com `nodes`, `edges` e `executionVersion: 2`. O ID do canal/organização
+vem do fluxo autenticado; não pode ser trocado por esse corpo. Pause antes de
+salvar. Uma vez V2, omitir o campo não rebaixa a versão persistida.
+
+Exemplos de `data` (JSON serializado dentro do campo data do nó):
+
+```json
+{"type":"SEND_DM","data":"{\"message\":\"Responda QUERO para continuar\"}"}
+{"type":"DELAY","data":"{\"mode\":\"reply\",\"timeoutHours\":24}"}
+{"type":"SEND_DM","data":"{\"media\":{\"id\":\"MEDIA_ID\",\"type\":\"image\"}}"}
+```
+
+Cada nó também exige seu `id`, `positionX` e `positionY`; cada aresta liga
+`sourceNodeId` e `targetNodeId` existentes. Condições usam sourceHandle `match`/`no_match`.
+A validação rejeita grafo inválido, mídia fora do perfil ou não pronta e followup
+sem interação. Prévia é somente leitura: salvar canvas não envia mensagens.

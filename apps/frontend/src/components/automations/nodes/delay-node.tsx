@@ -6,9 +6,16 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
 export const DelayNode: FC<NodeProps> = memo(({ data, selected }) => {
   const t = useT();
-  const config = typeof data?.config === 'string'
-    ? (() => { try { return JSON.parse(data.config as string); } catch { return {}; } })()
-    : (data?.config || {});
+  const config =
+    typeof data?.config === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(data.config as string);
+          } catch {
+            return {};
+          }
+        })()
+      : data?.config || {};
   const duration = config.duration || 0;
   const unit = config.unit || 'seconds';
 
@@ -19,7 +26,11 @@ export const DelayNode: FC<NodeProps> = memo(({ data, selected }) => {
       }`}
       style={{ background: 'rgba(251, 146, 60, 0.15)' }}
     >
-      <Handle type="target" position={Position.Top} className="!bg-orange-400" />
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!bg-orange-400"
+      />
       <div className="flex items-center gap-[8px] mb-[4px]">
         <svg
           width="16"
@@ -32,16 +43,28 @@ export const DelayNode: FC<NodeProps> = memo(({ data, selected }) => {
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
         </svg>
-        <span className="text-[13px] font-semibold" style={{ color: '#fb923c' }}>
-          {t('delay_node_label', 'Delay')}
+        <span
+          className="text-[13px] font-semibold"
+          style={{ color: '#fb923c' }}
+        >
+          {config.mode === 'reply'
+            ? t('flow_wait_reply', 'Wait for reply')
+            : t('delay_node_label', 'Delay')}
         </span>
       </div>
+      {config.mode === 'reply' && (
+        <p className="text-xs text-tableText">{config.timeoutHours || 24} h</p>
+      )}
       {duration > 0 && (
         <p className="text-[12px] text-customColor18">
           {duration} {unit}
         </p>
       )}
-      <Handle type="source" position={Position.Bottom} className="!bg-orange-400" />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!bg-orange-400"
+      />
     </div>
   );
 });

@@ -1,3 +1,4 @@
+import { FlowMessageService } from './flows/flow-message.service';
 import { PostMetricsRepository } from './analytics/post-metrics.repository';
 import { PostMetricsService } from './analytics/post-metrics.service';
 import { MediaTransferService } from './media/media.transfer.service';
@@ -185,6 +186,7 @@ import { InstanceCredentialsService } from '@gitroom/nestjs-libraries/database/p
     AutomationDeliveryService,
     FlowsRepository,
     FlowsService,
+    FlowMessageService,
     UnmatchedCommentService,
     InstagramProvider,
     ReviewLinksRepository,

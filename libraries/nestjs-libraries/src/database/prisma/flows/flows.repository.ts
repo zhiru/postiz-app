@@ -343,6 +343,31 @@ export class FlowsRepository {
     return { nodes: createdNodes, edges: createdEdges };
   }
 
+  findReplyWaits(orgId: string, integrationId: string, senderId: string) {
+    return this._flowExecution.model.flowExecution.findMany({
+      where: {
+        status: 'RUNNING',
+        igCommenterId: senderId,
+        flow: {
+          organizationId: orgId,
+          integrationId,
+          status: 'ACTIVE',
+          deletedAt: null,
+        },
+      },
+      select: {
+        id: true,
+        temporalWorkflowId: true,
+        currentNodeId: true,
+        flow: {
+          select: { nodes: { select: { id: true, type: true, data: true } } },
+        },
+      },
+      take: 50,
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   // --- Executions ---
 
   createExecution(data: {

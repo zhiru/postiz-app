@@ -19,6 +19,25 @@ describe('FlowsRepository', () => {
     );
   });
 
+  it('scopes reply waits to an active flow, organization, channel and sender', async () => {
+    await repo.findReplyWaits('org', 'i', 'u');
+    expect(flowExecution.model.flowExecution.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: 'RUNNING',
+          igCommenterId: 'u',
+          flow: {
+            organizationId: 'org',
+            integrationId: 'i',
+            status: 'ACTIVE',
+            deletedAt: null,
+          },
+        },
+        take: 50,
+      })
+    );
+  });
+
   describe('getExecution', () => {
     it('filtra por id e organizationId do flow para isolar o tenant', async () => {
       flowExecution.model.flowExecution.findFirst.mockResolvedValue(null);

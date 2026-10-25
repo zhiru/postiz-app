@@ -6,9 +6,16 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
 export const SendDmNode: FC<NodeProps> = memo(({ data, selected }) => {
   const t = useT();
-  const config = typeof data?.config === 'string'
-    ? (() => { try { return JSON.parse(data.config as string); } catch { return {}; } })()
-    : (data?.config || {});
+  const config =
+    typeof data?.config === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(data.config as string);
+          } catch {
+            return {};
+          }
+        })()
+      : data?.config || {};
   const message = config.message || config.template || '';
   const buttonText: string = config.buttonText || '';
   const buttonUrl: string = config.buttonUrl || '';
@@ -21,7 +28,11 @@ export const SendDmNode: FC<NodeProps> = memo(({ data, selected }) => {
       }`}
       style={{ background: 'rgba(168, 85, 247, 0.15)' }}
     >
-      <Handle type="target" position={Position.Top} className="!bg-purple-400" />
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!bg-purple-400"
+      />
       <div className="flex items-center gap-[8px] mb-[4px]">
         <svg
           width="16"
@@ -34,12 +45,27 @@ export const SendDmNode: FC<NodeProps> = memo(({ data, selected }) => {
           <line x1="22" y1="2" x2="11" y2="13" />
           <polygon points="22 2 15 22 11 13 2 9 22 2" />
         </svg>
-        <span className="text-[13px] font-semibold" style={{ color: '#c084fc' }}>
-          {t('send_dm_node_label', 'Send DM')}
+        <span
+          className="text-[13px] font-semibold"
+          style={{ color: '#c084fc' }}
+        >
+          {config.media?.type === 'image'
+            ? t('flow_image', 'Image')
+            : config.media?.type === 'video'
+            ? t('flow_video', 'Video')
+            : t('send_dm_node_label', 'Send DM')}
         </span>
       </div>
+      {config.media && (
+        <p className="text-xs text-tableText max-w-[180px] truncate">
+          {config.media.path?.split('/').pop() ||
+            t('flow_choose_media', 'Choose media from the library')}
+        </p>
+      )}
       {message && (
-        <p className="text-[12px] text-customColor18 truncate max-w-[180px]">{message}</p>
+        <p className="text-[12px] text-customColor18 truncate max-w-[180px]">
+          {message}
+        </p>
       )}
       {hasButton && (
         <span
@@ -49,7 +75,11 @@ export const SendDmNode: FC<NodeProps> = memo(({ data, selected }) => {
           🔗 {buttonText}
         </span>
       )}
-      <Handle type="source" position={Position.Bottom} className="!bg-purple-400" />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!bg-purple-400"
+      />
     </div>
   );
 });

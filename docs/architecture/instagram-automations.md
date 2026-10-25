@@ -410,3 +410,34 @@ pnpm --filter ./apps/frontend exec tsc --noEmit -p tsconfig.json
   FlowActivity permitem reusar o IG User Token cadastrado em Settings
   para integrations conectadas via Facebook Business, sem reconectar.
 - Paridade do Flow Builder com o wizard (follow gate fields + button CTA).
+
+
+## 10. Motor opt-in de sequências V2
+
+`SaveCanvasDto.executionVersion=2` grava `executionVersion:2` no TRIGGER.
+`FlowsService` considera também a versão persistida, valida todo o grafo e recusa
+edição de fluxo V2 ativo ou pelo wizard. Os pontos de partida de comentário e
+Story selecionam `flowExecutionWorkflowV2`; o workflow original e assinaturas
+existentes de activities ficam preservados. Não há migração de dados.
+
+SEND_DM envia imediatamente por nó. `data.media={id,type:"image"|"video"}`
+usa `MediaRepository.findAutomationMedia` com organização/perfil, status ready,
+extensão e tamanho conhecidos; nunca usa um path arbitrário vindo do canvas.
+Arquivos históricos sem fileSize conhecido continuam sujeitos ao limite remoto
+(a Meta pode rejeitá-los). Metadados históricos type=image em vídeo são resolvidos
+pela extensão canônica. Texto e mídia não compartilham a mesma etapa.
+
+DELAY com `data.mode="reply"` e `timeoutHours` 1–72 persiste o nó atual antes de
+esperar. O webhook já autenticado sinaliza `flow-message-reply-v2` somente para
+execuções V2 RUNNING desse canal/organização/remetente. O workflow rejeita MID
+repetido, nó diferente e timestamp anterior ao início daquela espera, obtido pela
+activity `flowSequenceTimeV2`. Sem resposta, encerra CANCELLED. O webhook normal
+continua sendo encaminhado ao NeuralTalk pelo relay existente.
+
+`FlowMessageService` revalida fluxo/canal/perfil, janela de 23h e idempotência
+antes do efeito. A primeira resposta mantém a chave privada por comentário já
+usada pelo motor original; envios seguintes usam execução+nó. Resultado incerto
+não provoca nova tentativa automática. Pausa é conferida antes dos efeitos;
+uma chamada externa já em andamento não pode ser desfeita. A validação rejeita
+ciclos, nós desconectados, bifurcações ambíguas e mídia/followups de comentário
+sem espera anterior. Follow-gate de comentário continua no motor original.

@@ -1,3 +1,7 @@
+import {
+  FlowMessageService,
+  FlowSequenceMessage,
+} from '@gitroom/nestjs-libraries/database/prisma/flows/flow-message.service';
 import { AiTextService } from '@gitroom/nestjs-libraries/ai/ai-text.service';
 import { AutomationDeliveryService } from '@gitroom/nestjs-libraries/database/prisma/flows/automation-delivery.service';
 import { Injectable, Logger, Optional } from '@nestjs/common';
@@ -32,8 +36,23 @@ export class FlowActivity {
     private _unmatchedCommentService: UnmatchedCommentService,
     private _encryption: EncryptionService,
     private _deliveries: AutomationDeliveryService,
-    @Optional() private _aiText?: AiTextService
+    @Optional() private _aiText?: AiTextService,
+    @Optional() private _flowMessages?: FlowMessageService
   ) {}
+
+  @ActivityMethod()
+  async flowSequenceTimeV2() {
+    return Date.now();
+  }
+
+  @ActivityMethod()
+  async sendFlowSequenceMessageV2(input: FlowSequenceMessage) {
+    if (!this._flowMessages) throw new Error('Message service unavailable');
+    const message = input.message
+      ? await this.automationMessage(input.flowId, 'aiDmEnabled', input.message)
+      : input.message;
+    return this._flowMessages.send({ ...input, message });
+  }
 
   // Descriptografa integration.token in-place (B1). No-op em tokens sem prefixo
   // (texto puro legado). Chamado logo apos cada getIntegrationById nos metodos
