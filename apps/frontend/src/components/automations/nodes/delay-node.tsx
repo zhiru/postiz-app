@@ -1,10 +1,11 @@
 'use client';
 
 import { FC, memo } from 'react';
+import { FlowNodeActions } from './flow-node-actions';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
-export const DelayNode: FC<NodeProps> = memo(({ data, selected }) => {
+export const DelayNode: FC<NodeProps> = memo(({ id, data, selected }) => {
   const t = useT();
   const config =
     typeof data?.config === 'string'
@@ -51,6 +52,7 @@ export const DelayNode: FC<NodeProps> = memo(({ data, selected }) => {
             ? t('flow_wait_reply', 'Wait for reply')
             : t('delay_node_label', 'Delay')}
         </span>
+        <FlowNodeActions id={id} />
       </div>
       {config.mode === 'reply' && (
         <p className="text-xs text-tableText">{config.timeoutHours || 24} h</p>

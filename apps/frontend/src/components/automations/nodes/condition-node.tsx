@@ -1,10 +1,11 @@
 'use client';
 
 import { FC, memo } from 'react';
+import { FlowNodeActions } from './flow-node-actions';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
-export const ConditionNode: FC<NodeProps> = memo(({ data, selected }) => {
+export const ConditionNode: FC<NodeProps> = memo(({ id, data, selected }) => {
   const t = useT();
   const config = typeof data?.config === 'string'
     ? (() => { try { return JSON.parse(data.config as string); } catch { return {}; } })()
@@ -35,6 +36,7 @@ export const ConditionNode: FC<NodeProps> = memo(({ data, selected }) => {
         <span className="text-[13px] font-semibold" style={{ color: '#facc15' }}>
           {t('condition_node_label', 'Condition: Keyword')}
         </span>
+        <FlowNodeActions id={id} />
       </div>
       {keywords.length > 0 && (
         <p className="text-[12px] text-customColor18 truncate">

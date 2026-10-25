@@ -2555,5 +2555,10 @@
   "flow_media_type": "Message type",
   "flow_media_limits": "Images: PNG/JPEG up to 8 MB. Videos: up to 25 MB. Use a separate text step for the caption. Sending requires an open conversation.",
   "flow_wait_reply_hint": "Continue only after the person sends a new message. If the time runs out, stop without sending a reminder. Opening a URL does not count as a reply.",
-  "flow_reply_timeout": "Wait up to (hours)"
+  "flow_reply_timeout": "Wait up to (hours)",
+  "flow_step_actions": "Step actions",
+  "flow_step_edit": "Edit step",
+  "flow_step_duplicate": "Duplicate step",
+  "flow_step_delete": "Delete step",
+  "flow_step_trigger_required": "Keep one trigger per flow"
 }

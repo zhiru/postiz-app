@@ -1,10 +1,11 @@
 'use client';
 
 import { FC, memo } from 'react';
+import { FlowNodeActions } from './flow-node-actions';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
-export const SendDmNode: FC<NodeProps> = memo(({ data, selected }) => {
+export const SendDmNode: FC<NodeProps> = memo(({ id, data, selected }) => {
   const t = useT();
   const config =
     typeof data?.config === 'string'
@@ -55,6 +56,7 @@ export const SendDmNode: FC<NodeProps> = memo(({ data, selected }) => {
             ? t('flow_video', 'Video')
             : t('send_dm_node_label', 'Send DM')}
         </span>
+        <FlowNodeActions id={id} />
       </div>
       {config.media && (
         <p className="text-xs text-tableText max-w-[180px] truncate">

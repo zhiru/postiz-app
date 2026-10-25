@@ -2555,5 +2555,10 @@
   "flow_media_type": "Tipo de mensagem",
   "flow_media_limits": "Imagens: PNG/JPEG de até 8 MB. Vídeos: até 25 MB. Use uma etapa de texto separada para a legenda. O envio exige uma conversa aberta.",
   "flow_wait_reply_hint": "Continue somente quando a pessoa enviar uma nova mensagem. Se o prazo terminar, encerre sem enviar lembrete. Abrir um link não conta como resposta.",
-  "flow_reply_timeout": "Aguardar por até (horas)"
+  "flow_reply_timeout": "Aguardar por até (horas)",
+  "flow_step_actions": "Ações da etapa",
+  "flow_step_edit": "Editar etapa",
+  "flow_step_duplicate": "Duplicar etapa",
+  "flow_step_delete": "Excluir etapa",
+  "flow_step_trigger_required": "Mantenha um gatilho por fluxo"
 }

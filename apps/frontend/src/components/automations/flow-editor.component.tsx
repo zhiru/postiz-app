@@ -34,6 +34,7 @@ import { SendDmNode } from '@gitroom/frontend/components/automations/nodes/send-
 import { DelayNode } from '@gitroom/frontend/components/automations/nodes/delay-node';
 import { DeletableEdge } from '@gitroom/frontend/components/automations/nodes/deletable-edge';
 import { FlowMessagePreview } from './flow-message-preview';
+import { FlowNodeActionsContext } from './nodes/flow-node-actions';
 import { NodeConfigPanel } from '@gitroom/frontend/components/automations/node-config-panel';
 import { FlowExecutionsComponent } from '@gitroom/frontend/components/automations/flow-executions.component';
 import { FlowSummaryComponent } from '@gitroom/frontend/components/automations/flow-summary.component';
@@ -185,6 +186,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
     return flow.nodes.map((n: any) => ({
       id: n.id,
       type: viewType(n),
+      deletable: n.type !== 'TRIGGER',
       position: { x: n.positionX, y: n.positionY },
       data: { label: n.label, config: n.data },
     }));
@@ -223,6 +225,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
       (flow.nodes ?? []).map((n: any) => ({
         id: n.id,
         type: viewType(n),
+        deletable: n.type !== 'TRIGGER',
         position: { x: n.positionX, y: n.positionY },
         data: { label: n.label, config: n.data },
       }))
@@ -291,6 +294,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
       const newNode: Node = {
         id: newNodeId,
         type,
+        deletable: type !== 'trigger',
         position,
         data: { label: type, config: JSON.stringify(newConfig(type, kind)) },
       };
@@ -781,44 +785,55 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
 
       {/* Canvas */}
       <div className="flex-1 relative" style={{ minHeight: 0 }}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onNodeClick={onNodeClick}
-          onPaneClick={onPaneClick}
-          onDragOver={onDragOver}
-          onDrop={onDrop}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          defaultEdgeOptions={defaultEdgeOptions}
-          deleteKeyCode={['Backspace', 'Delete']}
-          fitView
-          style={{ background: 'var(--new-bgColor)' }}
+        <FlowNodeActionsContext.Provider
+          value={{
+            edit: setSelectedNode,
+            disabled: sequence && flow.status === 'ACTIVE',
+          }}
         >
-          <Background color="var(--new-bgLineColor)" gap={20} />
-          <Controls />
-          <MiniMap
-            nodeColor={(n) => {
-              switch (n.type) {
-                case 'trigger':
-                  return '#22c55e';
-                case 'condition':
-                  return '#eab308';
-                case 'replyComment':
-                  return '#3b82f6';
-                case 'sendDm':
-                  return '#a855f7';
-                case 'delay':
-                  return '#6b7280';
-                default:
-                  return '#999';
-              }
-            }}
-          />
-        </ReactFlow>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onNodeClick={onNodeClick}
+            onPaneClick={onPaneClick}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            defaultEdgeOptions={defaultEdgeOptions}
+            deleteKeyCode={
+              sequence && flow.status === 'ACTIVE'
+                ? null
+                : ['Backspace', 'Delete']
+            }
+            fitView
+            style={{ background: 'var(--new-bgColor)' }}
+          >
+            <Background color="var(--new-bgLineColor)" gap={20} />
+            <Controls />
+            <MiniMap
+              nodeColor={(n) => {
+                switch (n.type) {
+                  case 'trigger':
+                    return '#22c55e';
+                  case 'condition':
+                    return '#eab308';
+                  case 'replyComment':
+                    return '#3b82f6';
+                  case 'sendDm':
+                    return '#a855f7';
+                  case 'delay':
+                    return '#6b7280';
+                  default:
+                    return '#999';
+                }
+              }}
+            />
+          </ReactFlow>
+        </FlowNodeActionsContext.Provider>
 
         {showPreview && (
           <FlowMessagePreview

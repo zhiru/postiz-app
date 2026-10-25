@@ -1,10 +1,11 @@
 'use client';
 
 import { FC, memo } from 'react';
+import { FlowNodeActions } from './flow-node-actions';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
-export const ReplyCommentNode: FC<NodeProps> = memo(({ data, selected }) => {
+export const ReplyCommentNode: FC<NodeProps> = memo(({ id, data, selected }) => {
   const t = useT();
   const config = typeof data?.config === 'string'
     ? (() => { try { return JSON.parse(data.config as string); } catch { return {}; } })()
@@ -33,6 +34,7 @@ export const ReplyCommentNode: FC<NodeProps> = memo(({ data, selected }) => {
         <span className="text-[13px] font-semibold" style={{ color: '#60a5fa' }}>
           {t('reply_comment_node_label', 'Reply Comment')}
         </span>
+        <FlowNodeActions id={id} />
       </div>
       {message && (
         <p className="text-[12px] text-customColor18 truncate max-w-[180px]">{message}</p>

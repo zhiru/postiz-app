@@ -472,3 +472,11 @@ O follow-gate de comentários com postback continua no motor original; a versão
 V2 recusa essa combinação em vez de alterar silenciosamente o comportamento.
 A versão V2 não pode ser editada pelo resumo/wizard antigo nem rebaixada por um
 cliente antigo. Nenhuma dessas etapas cria uma conversa livre fora das regras da Meta.
+
+
+Cada bloco do editor tem um menu **⋯** com **Editar etapa**, **Duplicar etapa** e
+**Excluir etapa**. A cópia mantém a configuração e nasce sem conexões; ligue-a
+no ponto desejado antes de salvar. Excluir remove o bloco e as conexões que o
+usavam, sem reconectar os vizinhos automaticamente. O gatilho não pode ser
+copiado nem excluído pelo menu/teclado. Essas ações alteram somente o canvas;
+é preciso salvar para aplicá-las. Em uma sequência V2 ativa, pause antes de editar.
