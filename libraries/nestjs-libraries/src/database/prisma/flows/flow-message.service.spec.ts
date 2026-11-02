@@ -63,6 +63,21 @@ describe('FlowMessageService', () => {
     message: 'Hello',
     interactionAt: Date.now(),
   };
+  it('cannot send follower preparation even if its stored status is active', async () => {
+    repo.getFlowById.mockResolvedValue({
+      organizationId: 'org',
+      integrationId: 'i',
+      status: 'ACTIVE',
+      nodes: [
+        {
+          type: 'TRIGGER',
+          data: JSON.stringify({ triggerType: 'new_follower' }),
+        },
+      ],
+    } as any);
+    await expect(service.send(input)).rejects.toThrow(/Meta/);
+    expect(delivery.sendOnce).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     jest.clearAllMocks();
     repo.getFlowById.mockResolvedValue({

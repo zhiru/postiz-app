@@ -219,8 +219,10 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
   const renderFields = () => {
     switch (node.type) {
       case 'trigger': {
-        const triggerType: 'comment_on_post' | 'story_reply' =
-          config.triggerType === 'story_reply'
+        const triggerType: 'comment_on_post' | 'story_reply' | 'new_follower' =
+          config.triggerType === 'new_follower'
+            ? 'new_follower'
+            : config.triggerType === 'story_reply'
             ? 'story_reply'
             : 'comment_on_post';
         const currentMode: 'all' | 'specific' | 'next_publication' =
@@ -232,11 +234,20 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
             ? 'specific'
             : 'all';
 
-        const setTriggerType = (type: 'comment_on_post' | 'story_reply') => {
+        const setTriggerType = (
+          type: 'comment_on_post' | 'story_reply' | 'new_follower'
+        ) => {
           const next: Record<string, any> = { ...config, triggerType: type };
           // Clear id list from the other type to avoid stale references
           if (type === 'comment_on_post') delete next.storyIds;
           if (type === 'story_reply') delete next.postIds;
+          if (type === 'new_follower') {
+            next.requireFollow = false;
+            next.mode = 'all';
+            next.keywords = [];
+            delete next.postIds;
+            delete next.storyIds;
+          }
           setConfig(next);
         };
 
@@ -253,7 +264,7 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
           ? config.storyIds
           : [];
 
-        return (
+        const picker = (
           <>
             {/* Trigger type switch */}
             <label className="block text-[13px] font-semibold text-textColor mb-[8px]">
@@ -267,6 +278,10 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
                     t('trigger_type_comment', 'Comentario em publicacao'),
                   ],
                   ['story_reply', t('trigger_type_story', 'Resposta ao story')],
+                  [
+                    'new_follower',
+                    t('flow_new_follower', 'New follower · preparation'),
+                  ],
                 ] as const
               ).map(([value, label]) => (
                 <label
@@ -286,7 +301,37 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
                 </label>
               ))}
             </div>
-
+          </>
+        );
+        if (triggerType === 'new_follower')
+          return (
+            <>
+              {picker}
+              <p
+                role="note"
+                className="rounded-lg border border-newTableBorder bg-btnSimple p-3 text-sm text-textColor"
+              >
+                {t(
+                  'flow_follower_pending',
+                  'Preparation only. Official Meta access and the follower event are not available for our app. You can save the sequence, but activation and sending are blocked.'
+                )}
+              </p>
+              <a
+                className="block mt-3 text-sm underline text-textColor"
+                href="https://github.com/zhiru/postiz-app/issues/71"
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t(
+                  'flow_follower_access',
+                  'Access request and technical requirements'
+                )}
+              </a>
+            </>
+          );
+        return (
+          <>
+            {picker}
             {/* Mode */}
             <label className="block text-[13px] font-semibold text-textColor mb-[8px]">
               {triggerType === 'story_reply'

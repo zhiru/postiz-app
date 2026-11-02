@@ -224,3 +224,16 @@ Cada nó também exige seu `id`, `positionX` e `positionY`; cada aresta liga
 `sourceNodeId` e `targetNodeId` existentes. Condições usam sourceHandle `match`/`no_match`.
 A validação rejeita grafo inválido, mídia fora do perfil ou não pronta e followup
 sem interação. Prévia é somente leitura: salvar canvas não envia mensagens.
+
+
+### Preparação Follow to DM
+
+Somente o canvas autenticado permite salvar TRIGGER com
+`triggerType: "new_follower"`. A versão V2 é aplicada pelo servidor, inclusive se
+omitida pelo cliente. O fluxo precisa estar pausado ou em rascunho. O contrato
+público simplificado/MCP continua aceitando apenas comentário e Story; ele não
+cria automações de novo seguidor. A tentativa de ativar a preparação por qualquer
+rota de status retorna 400 com mensagem de dependência de acesso oficial da Meta,
+antes de mudar status ou assinaturas. Não há envio/ingestão de seguidores nesta
+entrega. Isso não representa ativação do beta nem implementação de um endpoint
+privado da Meta.

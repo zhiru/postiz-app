@@ -2560,5 +2560,10 @@
   "flow_step_edit": "Editar etapa",
   "flow_step_duplicate": "Duplicar etapa",
   "flow_step_delete": "Excluir etapa",
-  "flow_step_trigger_required": "Mantenha um gatilho por fluxo"
+  "flow_step_trigger_required": "Mantenha um gatilho por fluxo",
+  "flow_new_follower": "Novo seguidor · preparação",
+  "flow_follower_pending": "Somente preparação. Nosso app ainda não dispõe do acesso oficial da Meta e do evento de novo seguidor. Você pode salvar a sequência, mas a ativação e os envios estão bloqueados.",
+  "flow_follower_access": "Solicitação de acesso e requisitos técnicos",
+  "flow_follower_blocked": "Aguardando acesso oficial da Meta",
+  "flow_follower_draft_hint": "Monte e visualize a sequência aqui. Salvar a preparação não libera o beta nem envia mensagens."
 }

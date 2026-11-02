@@ -2560,5 +2560,10 @@
   "flow_step_edit": "Edit step",
   "flow_step_duplicate": "Duplicate step",
   "flow_step_delete": "Delete step",
-  "flow_step_trigger_required": "Keep one trigger per flow"
+  "flow_step_trigger_required": "Keep one trigger per flow",
+  "flow_new_follower": "New follower · preparation",
+  "flow_follower_pending": "Preparation only. Official Meta access and the follower event are not available for our app. You can save the sequence, but activation and sending are blocked.",
+  "flow_follower_access": "Access request and technical requirements",
+  "flow_follower_blocked": "Waiting for official Meta access",
+  "flow_follower_draft_hint": "Design and preview the sequence here. Saving preparation does not enable the beta or send messages."
 }

@@ -41,7 +41,7 @@ import { StatusEventService } from '@gitroom/nestjs-libraries/database/prisma/st
 import { decryptIntegrationToken } from '@gitroom/nestjs-libraries/crypto/integration-token.helper';
 import * as crypto from 'crypto';
 
-export function validateFlowSequence(body: SaveCanvasDto) {
+export function validateFlowSequence(body: SaveCanvasDto, preparation = false) {
   const fail = (message: string): never => {
     throw new BadRequestException(message);
   };
@@ -68,11 +68,15 @@ export function validateFlowSequence(body: SaveCanvasDto) {
   };
   const trigger = config(triggers[0].data);
   if (
-    !['comment_on_post', 'story_reply'].includes(
+    !['comment_on_post', 'story_reply', 'new_follower'].includes(
       trigger.triggerType || 'comment_on_post'
     )
   )
     fail('Unsupported trigger.');
+  if (trigger.triggerType === 'new_follower' && !preparation)
+    fail(
+      'Follow to DM requires official Meta access. This flow can only be saved as preparation.'
+    );
   if (trigger.requireFollow && trigger.triggerType !== 'story_reply')
     fail(
       'Keep the existing comment follow gate in the original engine. Disable follow gate to use the new sequence.'
@@ -184,7 +188,7 @@ export function validateFlowSequence(body: SaveCanvasDto) {
           fail('Delay must be between zero and 23 hours.');
       }
     } else if (node.type === 'REPLY_COMMENT') {
-      if (trigger.triggerType === 'story_reply')
+      if (trigger.triggerType && trigger.triggerType !== 'comment_on_post')
         fail('Public replies require a comment trigger.');
     } else if (node.type !== 'TRIGGER' && node.type !== 'CONDITION')
       fail('Unsupported node.');
@@ -298,6 +302,7 @@ export class FlowsService {
       try {
         eligible =
           JSON.parse(trigger?.data || '{}').executionVersion === 2 &&
+          this.getTriggerType(execution.flow) !== 'new_follower' &&
           JSON.parse(node?.data || '{}').mode === 'reply';
       } catch {
         /* malformed flows never receive a signal */
@@ -741,13 +746,15 @@ export class FlowsService {
     const sequence =
       body.executionVersion === 2 ||
       hasSequence(body.nodes) ||
-      hasSequence(flow.nodes || []);
+      hasSequence(flow.nodes || []) ||
+      this.getTriggerType({ nodes: body.nodes as any }) === 'new_follower' ||
+      this.getTriggerType(flow) === 'new_follower';
     if (sequence) {
       if (flow.status === 'ACTIVE')
         throw new BadRequestException(
           'Pause the automation before changing its sequence.'
         );
-      validateFlowSequence(body);
+      validateFlowSequence(body, true);
       body = {
         ...body,
         nodes: body.nodes.map((n) =>
@@ -796,6 +803,11 @@ export class FlowsService {
       if (!flow) {
         throw new BadRequestException('Automacao nao encontrada');
       }
+
+      if (this.getTriggerType(flow) === 'new_follower')
+        throw new BadRequestException(
+          'Follow to DM requires official Meta access. This flow can only be saved as preparation.'
+        );
 
       const hasTrigger = flow.nodes.some(
         (n) => n.type === FlowNodeType.TRIGGER
@@ -1245,12 +1257,25 @@ export class FlowsService {
 
   private getTriggerType(flow: {
     nodes?: Array<{ type: string; label?: string | null; data: string | null }>;
-  }): 'comment_on_post' | 'story_reply' {
+  }): 'comment_on_post' | 'story_reply' | 'new_follower' {
+    if (
+      flow.nodes?.some((n) => {
+        if (n.type !== 'TRIGGER') return false;
+        if (n.label === 'new_follower') return true;
+        try {
+          return JSON.parse(n.data || '{}').triggerType === 'new_follower';
+        } catch {
+          return false;
+        }
+      })
+    )
+      return 'new_follower';
     const trigger = flow.nodes?.find((n) => n.type === 'TRIGGER');
     if (trigger?.label === 'story_reply') return 'story_reply';
     if (trigger?.data) {
       try {
         const parsed = JSON.parse(trigger.data);
+        if (parsed?.triggerType === 'new_follower') return 'new_follower';
         if (parsed?.triggerType === 'story_reply') return 'story_reply';
       } catch {
         // ignore

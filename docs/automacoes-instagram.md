@@ -480,3 +480,16 @@ no ponto desejado antes de salvar. Excluir remove o bloco e as conexões que o
 usavam, sem reconectar os vizinhos automaticamente. O gatilho não pode ser
 copiado nem excluído pelo menu/teclado. Essas ações alteram somente o canvas;
 é preciso salvar para aplicá-las. Em uma sequência V2 ativa, pause antes de editar.
+
+
+## Novo seguidor — preparação bloqueada
+
+No gatilho do Flow Builder, selecione **Novo seguidor · preparação** em um fluxo
+pausado ou rascunho. Você pode preparar a primeira mensagem e os passos seguintes,
+inclusive a espera por resposta e mídias. A faixa de aviso permanece visível e
+**Ativar fica indisponível**. Salvar não muda o status nem envia mensagens.
+
+A Meta ainda não disponibilizou para nosso app o evento e o acesso oficial
+necessários. A API também bloqueia a ativação, mesmo se o cliente omitir essa
+restrição. O fluxo não reage a comentários ou Stories como substituto de follow.
+Para prosseguir com o beta, consulte o [pedido de acesso pronto para revisão](operations/instagram-follow-to-dm-access.md).

@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Flow Builder: preparação de fluxo para novo seguidor com mensagens/mídias e aviso explícito; ativação e envios bloqueados até acesso e contrato oficiais da Meta. Inclui pedido de acesso técnico pronto para revisão, sem alterar conexões e automações existentes.
+
 - Etapas do Flow Builder com menu de três pontos para editar, duplicar sem conexões e excluir com limpeza das arestas; o gatilho permanece único e as ações não salvam nem enviam automaticamente.
 
 - Flow Builder: sequências opt-in com mensagens separadas, imagens/vídeos da biblioteca, espera por resposta, busca de etapas e prévia sem envio; preserva o motor original e valida a janela de atendimento por interação autenticada.

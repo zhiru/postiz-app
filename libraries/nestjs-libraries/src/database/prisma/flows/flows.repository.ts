@@ -360,7 +360,11 @@ export class FlowsRepository {
         temporalWorkflowId: true,
         currentNodeId: true,
         flow: {
-          select: { nodes: { select: { id: true, type: true, data: true } } },
+          select: {
+            nodes: {
+              select: { id: true, type: true, data: true, label: true },
+            },
+          },
         },
       },
       take: 50,
