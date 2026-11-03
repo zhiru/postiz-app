@@ -1,5 +1,35 @@
 import { isVideo } from './has.extension';
-import { getPostFormat } from './posts.list.minify';
+import { getPostFormat, isTrialReel } from './posts.list.minify';
+
+describe('isTrialReel', () => {
+  it.each([true, 'true', 'TRUE'])(
+    'recognizes the explicitly enabled setting %s',
+    (is_trial_reel) => {
+      expect(isTrialReel(JSON.stringify({ is_trial_reel }))).toBe(true);
+    }
+  );
+
+  it.each([false, 'false', 'FALSE', null, undefined, '', 0, 1, '1', {}, []])(
+    'does not enable the badge for %s',
+    (is_trial_reel) => {
+      expect(isTrialReel(JSON.stringify({ is_trial_reel }))).toBe(false);
+    }
+  );
+
+  it.each([
+    undefined,
+    null,
+    '',
+    'broken',
+    'null',
+    '[]',
+    '"true"',
+    '{}',
+    '{"post_type":"reel","media_type":"VIDEO"}',
+  ])('requires explicit evidence in settings: %s', (settings) =>
+    expect(isTrialReel(settings)).toBe(false)
+  );
+});
 
 describe('getPostFormat', () => {
   it('distinguishes stories from short videos and feed posts without platform branches', () => {

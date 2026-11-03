@@ -12,6 +12,8 @@ A listagem permite 10, 20, 50 ou 100 posts por página e inclui rascunhos passad
 
 Ao abrir Dia/Semana contendo a data atual, a tela posiciona a linha do horário atual no campo de visão. Clicar em Hoje repete o foco. Atualizações dos dados e do relógio preservam a rolagem manual. Datas sem o dia atual não são reposicionadas. A barra de canais reduzida mantém avatares proporcionais e o botão acessível de expandir/recolher.
 
+O selo “Reel de Teste” aparece no calendário e na listagem somente quando `settings.is_trial_reel` está explicitamente habilitado (`true` ou a string legada `"true"`, sem distinção de maiúsculas). `false`, `"false"`, dados ausentes ou inválidos não exibem o selo. O filtro continua sendo Reels/vídeos. Posts importados seguem a mesma regra: vídeo, URL de Reel e origem importada não comprovam teste. A importação atual de mídia do Instagram não consulta nem persiste esse sinal; sem evidência nas configurações locais, não há selo.
+
 ## Compatibilidade
 
 Os filtros privados respeitam organização e perfil permitido. A API pública e o MCP mantêm os parâmetros e o tamanho padrão da biblioteca. Não há migração de schema, alteração de workflows, envio de mensagens ou edição de automações. O filtro de formato da listagem classifica metadados do escopo antes de paginar; em históricos muito grandes, considerar um campo normalizado e indexado após medição.
