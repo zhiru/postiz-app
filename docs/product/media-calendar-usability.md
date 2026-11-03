@@ -6,6 +6,8 @@ Arrastar arquivos para a área da biblioteca inicia o upload automaticamente, as
 
 No calendário e na listagem, use a busca por texto, o filtro de formato (Feed, Stories, Reels/vídeos, Carrosséis) e o de estado. Formato é deduzido das configurações, anexos e URL da publicação. Quando não há metadados suficientes, o item entra em Feed. Uma publicação tem um formato principal: carrosséis de várias mídias ficam em Carrosséis, mesmo contendo vídeo.
 
+O menu de três pontos recebe foco sem rolar a página ao abrir ou navegar pelo teclado, evitando que a rolagem causada pelo foco feche o próprio menu. Escape, clique externo e rolagem manual continuam fechando o menu. Publicações importadas mantêm prévia e ações permitidas pelo perfil; edição, mudança de data e duplicação continuam indisponíveis para importados.
+
 A listagem permite 10, 20, 50 ou 100 posts por página e inclui rascunhos passados. O filtro Rascunhos atrasados mostra somente rascunhos com data anterior ao horário atual. Eles recebem X vermelho e “Não publicado”; o verde continua reservado aos publicados. Esse indicador não altera o estado nem agenda/publica o conteúdo automaticamente.
 
 Ao abrir Dia/Semana contendo a data atual, a tela posiciona a linha do horário atual no campo de visão. Clicar em Hoje repete o foco. Atualizações dos dados e do relógio preservam a rolagem manual. Datas sem o dia atual não são reposicionadas. A barra de canais reduzida mantém avatares proporcionais e o botão acessível de expandir/recolher.

@@ -8,6 +8,7 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 ## [Unreleased]
 
 - Calendário/listagem: selo traduzido “Reel de Teste” somente com `settings.is_trial_reel` explícito; respeita `"false"` legado e não deduz teste de vídeos ou Reels importados.
+- Calendário/listagem: evita que a rolagem provocada pelo foco feche imediatamente o menu de três pontos, com regressão para vídeos importados e preservação das permissões de ações.
 
 - Etapas do Flow Builder com menu de três pontos para editar, duplicar sem conexões e excluir com limpeza das arestas; o gatilho permanece único e as ações não salvam nem enviam automaticamente.
 
