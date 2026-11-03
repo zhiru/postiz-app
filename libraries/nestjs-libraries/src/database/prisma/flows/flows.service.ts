@@ -1,3 +1,4 @@
+import { FlowExecutionsQueryDto } from '@gitroom/nestjs-libraries/dtos/flows/flow-executions-query.dto';
 import { createHash } from 'crypto';
 import {
   Injectable,
@@ -1459,6 +1460,18 @@ export class FlowsService {
     }
   ) {
     return this._flowsRepository.appendExecutionLog(id, entry);
+  }
+
+  getExecutionsPage(
+    orgId: string,
+    flowId: string,
+    query: FlowExecutionsQueryDto,
+    profileId?: string
+  ) {
+    if (query.since && query.until && new Date(query.since) >= new Date(query.until)) {
+      throw new BadRequestException('The end of the date range must follow its start');
+    }
+    return this._flowsRepository.getExecutionsPage(flowId, orgId, query, profileId);
   }
 
   getExecutions(

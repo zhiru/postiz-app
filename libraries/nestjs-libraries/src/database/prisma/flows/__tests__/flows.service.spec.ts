@@ -23,6 +23,7 @@ const mockRepository = {
   saveCanvas: jest.fn(),
   updateFlowStatus: jest.fn(),
   getExecutions: jest.fn(),
+  getExecutionsPage: jest.fn(),
   createExecution: jest.fn(),
   updateExecution: jest.fn(),
   getExecutionEventContext: jest.fn(),
@@ -171,6 +172,23 @@ describe('FlowsService', () => {
   });
 
   // --- Issue 1: roteamento de host/token via resolveIgRoute ---
+
+  describe('getExecutionsPage', () => {
+    it('passes the authenticated scope and filters to the repository', async () => {
+      const query = { page: 2, limit: 10, search: 'Ana' };
+      mockRepository.getExecutionsPage.mockResolvedValue({ items: [], total: 0 });
+      await expect(service.getExecutionsPage('org-1', 'flow-1', query, 'profile-1'))
+        .resolves.toEqual({ items: [], total: 0 });
+      expect(mockRepository.getExecutionsPage).toHaveBeenCalledWith('flow-1', 'org-1', query, 'profile-1');
+    });
+
+    it('rejects an inverted date range before querying', () => {
+      expect(() => service.getExecutionsPage('org-1', 'flow-1', {
+        since: '2026-11-03T00:00:00.000Z', until: '2026-11-01T00:00:00.000Z',
+      })).toThrow(BadRequestException);
+      expect(mockRepository.getExecutionsPage).not.toHaveBeenCalled();
+    });
+  });
 
   describe('getInstagramPostsByIntegration (host routing)', () => {
     const setProviderMedia = () => {

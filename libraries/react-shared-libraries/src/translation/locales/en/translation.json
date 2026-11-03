@@ -2560,5 +2560,21 @@
   "flow_step_edit": "Edit step",
   "flow_step_duplicate": "Duplicate step",
   "flow_step_delete": "Delete step",
-  "flow_step_trigger_required": "Keep one trigger per flow"
+  "flow_step_trigger_required": "Keep one trigger per flow",
+  "flow_comments_search": "Search comments or people",
+  "flow_comments_all_statuses": "All statuses",
+  "flow_comments_since": "Started from",
+  "flow_comments_until": "Started through",
+  "flow_comments_order": "Order",
+  "flow_comments_newest": "Newest first",
+  "flow_comments_oldest": "Oldest first",
+  "flow_comments_view": "Comment view",
+  "flow_comments_compact": "Compact list",
+  "flow_comments_cards": "Cards",
+  "flow_comments_invalid_dates": "The end date must be on or after the start date.",
+  "flow_comments_load_failed": "Unable to load comments.",
+  "flow_comments_retry": "Try again",
+  "flow_comments_no_matches": "No comments match these filters.",
+  "flow_comments_open": "Open comment by {{name}}",
+  "flow_execution_status_cancelled": "CANCELLED"
 }

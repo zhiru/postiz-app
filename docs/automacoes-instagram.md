@@ -480,3 +480,27 @@ no ponto desejado antes de salvar. Excluir remove o bloco e as conexões que o
 usavam, sem reconectar os vizinhos automaticamente. O gatilho não pode ser
 copiado nem excluído pelo menu/teclado. Essas ações alteram somente o canvas;
 é preciso salvar para aplicá-las. Em uma sequência V2 ativa, pause antes de editar.
+
+
+### Consultar comentários e execuções de uma automação
+
+Em `/automacoes/<id>`, abra a lista de comentários/execuções. A lista compacta
+mostra autor, comentário, status e início; **Cards** apresenta os mesmos registros
+em cartões. A troca de visualização mantém os filtros e a página atual.
+
+- Busque pelo texto do comentário, nome ou ID da pessoa (sem diferenciar maiúsculas).
+- Filtre por status e pelas datas de início da execução. A data final inclui o dia
+  inteiro no fuso do navegador; use **Limpar filtros** para restaurar a consulta.
+- Ordene pelos registros mais recentes ou mais antigos e escolha 10, 20, 50 ou 100
+  itens por página. A contagem corresponde a todos os resultados filtrados, e os
+  filtros são aplicados no servidor antes da paginação.
+- Abra um registro pelo autor na lista ou pelo cartão para consultar o detalhe já
+  existente. Estes controles de listagem não alteram a URL.
+- Se a consulta falhar, use **Tentar novamente**. Uma falha de carregamento não é
+  apresentada como lista vazia.
+
+A listagem usa `GET /flows/:id/executions?paginated=true` com `page` (a partir de 1),
+`limit` (até 100), `search`, `status`, `since`, `until` e `order` (`asc`/`desc`).
+`since` é inclusivo e `until` exclusivo, ambos em ISO 8601. A resposta paginada é
+`{ items, total }`, limitada à organização e ao perfil autenticados. Sem
+`paginated=true`, o endpoint mantém a resposta anterior em array.

@@ -2560,5 +2560,21 @@
   "flow_step_edit": "Editar etapa",
   "flow_step_duplicate": "Duplicar etapa",
   "flow_step_delete": "Excluir etapa",
-  "flow_step_trigger_required": "Mantenha um gatilho por fluxo"
+  "flow_step_trigger_required": "Mantenha um gatilho por fluxo",
+  "flow_comments_search": "Buscar comentários ou pessoas",
+  "flow_comments_all_statuses": "Todos os status",
+  "flow_comments_since": "Iniciados a partir de",
+  "flow_comments_until": "Iniciados até",
+  "flow_comments_order": "Ordenação",
+  "flow_comments_newest": "Mais recentes primeiro",
+  "flow_comments_oldest": "Mais antigos primeiro",
+  "flow_comments_view": "Visualização dos comentários",
+  "flow_comments_compact": "Lista compacta",
+  "flow_comments_cards": "Cards",
+  "flow_comments_invalid_dates": "A data final deve ser igual ou posterior à data inicial.",
+  "flow_comments_load_failed": "Não foi possível carregar os comentários.",
+  "flow_comments_retry": "Tentar novamente",
+  "flow_comments_no_matches": "Nenhum comentário corresponde a estes filtros.",
+  "flow_comments_open": "Abrir comentário de {{name}}",
+  "flow_execution_status_cancelled": "CANCELADO"
 }

@@ -49,3 +49,29 @@ describe('FlowsController Instagram media profile scope', () => {
     );
   });
 });
+
+describe('FlowsController execution listing compatibility', () => {
+  const org = { id: 'org-1' } as any;
+  const profile = { id: 'profile-1' } as any;
+
+  it('retains the array response for existing callers', async () => {
+    const flows = createMock<FlowsService>();
+    flows.getExecutions.mockResolvedValue([{ id: 'exec-1' }] as any);
+    const controller = new FlowsController(flows, createMock<CredentialService>());
+    await expect(controller.getExecutions(org, profile, 'flow-1', { page: 2, limit: 20 }))
+      .resolves.toEqual([{ id: 'exec-1' }]);
+    expect(flows.getExecutions).toHaveBeenCalledWith('org-1', 'flow-1', 2, 20, 'profile-1');
+    expect(flows.getExecutionsPage).not.toHaveBeenCalled();
+  });
+
+  it('returns the paginated response only when explicitly requested', async () => {
+    const flows = createMock<FlowsService>();
+    const result = { items: [] as never[], total: 0 };
+    flows.getExecutionsPage.mockResolvedValue(result);
+    const controller = new FlowsController(flows, createMock<CredentialService>());
+    const query = { paginated: 'true' as const, page: 2, limit: 10, search: 'Ana' };
+    await expect(controller.getExecutions(org, profile, 'flow-1', query)).resolves.toEqual(result);
+    expect(flows.getExecutionsPage).toHaveBeenCalledWith('org-1', 'flow-1', query, 'profile-1');
+    expect(flows.getExecutions).not.toHaveBeenCalled();
+  });
+});
