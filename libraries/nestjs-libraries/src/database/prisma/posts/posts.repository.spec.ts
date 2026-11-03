@@ -311,6 +311,37 @@ describe('PostsRepository.getPostsList filters', () => {
     expect(result.posts[0]).not.toHaveProperty('settings');
   });
 
+  it('projects only the explicit trial flag for native and imported posts', async () => {
+    const { repo, prisma } = setup();
+    const rows = [
+      { settings: '{"is_trial_reel":true}' },
+      { settings: '{"is_trial_reel":"true"}', importedFromPlatform: true },
+      { settings: '{"is_trial_reel":"false"}' },
+      { settings: '{"is_trial_reel":false}', importedFromPlatform: true },
+      { settings: '{}', importedFromPlatform: true },
+      { settings: 'broken', importedFromPlatform: true },
+    ].map((post, i) => ({
+      id: String(i),
+      image: '[{"path":"clip.mp4"}]',
+      releaseURL: 'https://www.instagram.com/reel/example/',
+      ...post,
+    }));
+    prisma.model.post.findMany.mockResolvedValueOnce(rows as any);
+    const result = await repo.getPostsList('org-1', {}, 'profile-1');
+    expect(result.posts.map((post) => post.isTrialReel)).toEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    for (const post of result.posts) {
+      expect(post.format).toBe('video');
+      expect(post).not.toHaveProperty('settings');
+    }
+  });
+
   it('filters formats before counting and paging and never returns raw media/settings', async () => {
     const { repo, prisma } = setup();
     prisma.model.post.findMany
@@ -353,7 +384,7 @@ describe('PostsRepository calendar format compatibility', () => {
       id: 'post-1',
       publishDate: new Date('2026-10-21T15:00:00Z'),
       state: 'DRAFT',
-      settings: '{}',
+      settings: '{"is_trial_reel":true}',
       image: '[{"path":"a.jpg"},{"path":"b.jpg"}]',
       error: null as string | null,
     };
@@ -374,6 +405,7 @@ describe('PostsRepository calendar format compatibility', () => {
       'profile-1'
     );
     expect(publicPosts[0]).not.toHaveProperty('format');
+    expect(publicPosts[0]).not.toHaveProperty('isTrialReel');
     expect(publicPosts[0]).not.toHaveProperty('image');
     expect(
       (prisma.model.post.findMany.mock.calls[0][0] as any).select.image
@@ -386,6 +418,7 @@ describe('PostsRepository calendar format compatibility', () => {
       true
     );
     expect(privatePosts[0].format).toBe('carousel');
+    expect(privatePosts[0].isTrialReel).toBe(true);
     expect(privatePosts[0]).not.toHaveProperty('image');
     const attached = await repo.getPosts(
       'org-1',
@@ -395,5 +428,6 @@ describe('PostsRepository calendar format compatibility', () => {
     );
     expect(attached[0].image).toBe(row.image);
     expect(attached[0]).not.toHaveProperty('format');
+    expect(attached[0]).not.toHaveProperty('isTrialReel');
   });
 });

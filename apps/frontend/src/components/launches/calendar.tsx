@@ -1710,6 +1710,7 @@ export const CalendarItem: FC<{
   post: Post & {
     integration: Integration;
     format?: PostFormat;
+    isTrialReel?: boolean;
     remoteDeletionSupported?: boolean;
     mediaPreview?: { src: string; video: boolean } | null;
     tags: {
@@ -1923,7 +1924,9 @@ export const CalendarItem: FC<{
       });
       return;
     }
-    actionPopup.current.querySelector('button')?.focus();
+    // Scrolling on focus would trigger the global scroll listener and close
+    // this portal immediately when opening it from a scrolled calendar/list.
+    actionPopup.current.querySelector('button')?.focus({ preventScroll: true });
   }, [actionPosition]);
   useEffect(() => {
     if (!actionPosition) return;
@@ -1939,7 +1942,7 @@ export const CalendarItem: FC<{
       if (event.key === 'Escape') {
         event.preventDefault();
         setActionPosition(null);
-        actionButton.current?.focus();
+        actionButton.current?.focus({ preventScroll: true });
       }
     };
     const resize = () => setActionPosition(null);
@@ -2119,7 +2122,7 @@ export const CalendarItem: FC<{
         onKeyDown={(event) => {
           if (event.key === 'Tab') {
             setActionPosition(null);
-            actionButton.current?.focus();
+            actionButton.current?.focus({ preventScroll: true });
             return;
           }
           const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
@@ -2142,7 +2145,7 @@ export const CalendarItem: FC<{
                   (event.key === 'ArrowDown' ? 1 : -1) +
                   items.length) %
                 items.length;
-          items[next]?.focus();
+          items[next]?.focus({ preventScroll: true });
         }}
       >
         {renderActionItems()}
@@ -2363,6 +2366,11 @@ export const CalendarItem: FC<{
           media={post.mediaPreview || null}
           display={display}
         />
+        {post.isTrialReel === true && (
+          <span className="shrink-0 self-start rounded border border-current px-1 text-[10px] font-semibold leading-[16px] text-textColor">
+            {t('trial_reel_badge', 'Trial Reel')}
+          </span>
+        )}
         <div
           className={clsx(
             'w-full min-w-0 flex-1 flex flex-col min-h-[40px]',

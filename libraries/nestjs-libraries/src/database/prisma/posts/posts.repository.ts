@@ -1,6 +1,7 @@
 import {
   getPostFormat,
   firstCalendarMedia,
+  isTrialReel,
 } from '@gitroom/helpers/utils/posts.list.minify';
 import {
   PrismaRepository,
@@ -469,6 +470,7 @@ export class PostsRepository {
         ...(includeFormat
           ? {
               format: getPostFormat({ ...post, image }),
+              isTrialReel: isTrialReel(post.settings),
               mediaPreview: firstCalendarMedia(image),
             }
           : {}),
@@ -653,6 +655,7 @@ export class PostsRepository {
       posts: posts.map(({ settings, image, ...post }) => ({
         ...post,
         format: getPostFormat({ ...post, settings, image }),
+        isTrialReel: isTrialReel(settings),
         mediaPreview: firstCalendarMedia(image),
       })),
       total,
