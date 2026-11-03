@@ -480,3 +480,24 @@ no ponto desejado antes de salvar. Excluir remove o bloco e as conexões que o
 usavam, sem reconectar os vizinhos automaticamente. O gatilho não pode ser
 copiado nem excluído pelo menu/teclado. Essas ações alteram somente o canvas;
 é preciso salvar para aplicá-las. Em uma sequência V2 ativa, pause antes de editar.
+
+
+## Publicações excluídas
+
+No assistente de automação de comentários e no Flow Builder, use **Publicações
+excluídas** para selecionar posts/Reels que não devem disparar aquela automação.
+O seletor permite busca nas páginas carregadas, carregar mais e inserir IDs de
+mídia do Instagram para anúncios ou posts fora da lista. Remova uma seleção para
+voltar a permitir esse post. A exclusão é por automação, não exclui o post da rede
+e não cancela execuções já iniciadas.
+
+API de criação/edição rápida e MCP `createCommentAutomationTool` aceitam
+`excludedPostIds: ["17999999999999999"]`. Máximo de 100 IDs únicos, não vazios,
+sem espaços, com até 64 caracteres. No canvas, o campo fica no JSON do nó TRIGGER.
+Na edição rápida, omitir preserva as exclusões; `[]` remove todas. O retorno
+existente dos nós inclui a configuração salva. Não há migração de banco.
+
+As exclusões prevalecem sobre seleção específica e aliases de anúncios. Em
+`next_publication`, um post excluído não vincula o fluxo: ele aguarda o próximo
+permitido. O filtro vale para comentários (feed/Reels); não modifica gatilhos de
+Stories. Fluxos sem exclusões mantêm o comportamento anterior.

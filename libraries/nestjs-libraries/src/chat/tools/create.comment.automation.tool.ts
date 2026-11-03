@@ -57,6 +57,8 @@ link) ANTES de criar a automacao.
           .array(z.string())
           .optional()
           .describe('IDs de midia do Instagram quando postMode=specific (comment_on_post)'),
+        excludedPostIds: z.array(z.string().min(1).max(64).regex(/^\S+$/)).max(100).optional()
+          .describe('IDs de midia cujos comentarios serao ignorados, inclusive anuncios. Prevalece sobre postIds e aliases; nao exclui posts nem cancela execucoes iniciadas.'),
         storyIds: z
           .array(z.string())
           .optional()
@@ -128,6 +130,7 @@ link) ANTES de criar a automacao.
               triggerType: input.triggerType,
               postMode: input.postMode ?? 'next_publication',
               postIds: input.postIds,
+              excludedPostIds: input.excludedPostIds,
               storyIds: input.storyIds,
               keywords: input.keywords,
               matchMode: input.matchMode,

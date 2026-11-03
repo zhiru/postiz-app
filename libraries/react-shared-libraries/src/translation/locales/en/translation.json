@@ -2560,5 +2560,11 @@
   "flow_step_edit": "Edit step",
   "flow_step_duplicate": "Duplicate step",
   "flow_step_delete": "Delete step",
-  "flow_step_trigger_required": "Keep one trigger per flow"
+  "flow_step_trigger_required": "Keep one trigger per flow",
+  "flow_excluded_posts": "Excluded posts",
+  "flow_excluded_posts_hint": "Ignore comments on these posts and Reels, including ads. This does not delete posts or cancel executions already started.",
+  "flow_choose_excluded_posts": "Choose posts to ignore",
+  "flow_remove_exclusion": "Remove exclusion",
+  "flow_search_loaded_posts": "Search loaded posts",
+  "flow_excluded_media_id": "Or add an Instagram media ID (including ads)"
 }

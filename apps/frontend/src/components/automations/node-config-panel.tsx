@@ -1,4 +1,5 @@
 'use client';
+import { ExcludedPostsField } from './excluded-posts-field';
 
 import { MediaBox, mediaLibrarySize } from '../media/media.component';
 import { useModals } from '../layout/new-modal';
@@ -350,6 +351,17 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
               </label>
             </div>
 
+            {triggerType === 'comment_on_post' &&
+              flowSummary?.integrationId && (
+                <ExcludedPostsField
+                  key={flowSummary.integrationId}
+                  integrationId={flowSummary.integrationId}
+                  value={config.excludedPostIds || []}
+                  onChange={(ids) =>
+                    setConfig({ ...config, excludedPostIds: ids })
+                  }
+                />
+              )}
             {/* Specific selectors */}
             {currentMode === 'specific' &&
               triggerType === 'comment_on_post' && (

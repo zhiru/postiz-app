@@ -87,6 +87,9 @@ export const TriggerNode: FC<NodeProps> = memo(({ id, data, selected }) => {
       </div>
       <p className="text-[12px] text-customColor18">{description}</p>
       <p className="text-[11px] mt-[4px] text-textColor opacity-80">{modeLabel}</p>
+      {config.triggerType !== 'story_reply' && config.excludedPostIds?.length > 0 && (
+        <p className="mt-1 text-xs text-textColor">{t('flow_excluded_posts', 'Excluded posts')}: {config.excludedPostIds.length}</p>
+      )}
       {keywords.length > 0 && (
         <p className="text-[11px] mt-[2px] truncate max-w-[180px] text-textColor opacity-70">
           {t('trigger_keywords_label', 'Palavras-chave')}: {keywords.join(', ')}

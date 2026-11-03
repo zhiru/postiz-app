@@ -725,6 +725,18 @@ export class FlowsService {
   ) {
     const flow = await this._flowsRepository.getFlow(orgId, id, profileId);
     if (!flow) throw new BadRequestException('Automation not found.');
+    for (const node of body.nodes) {
+      if (node.type !== 'TRIGGER') continue;
+      let config: Record<string, any>;
+      try {
+        config = JSON.parse(node.data || '{}');
+      } catch {
+        throw new BadRequestException('Invalid trigger configuration.');
+      }
+      if (!config || typeof config !== 'object' || Array.isArray(config))
+        throw new BadRequestException('Invalid trigger configuration.');
+      this.validateExcludedPostIds(config.excludedPostIds);
+    }
     const hasSequence = (
       nodes: Array<{ type: string; data?: string | null }>
     ) =>
@@ -953,6 +965,20 @@ export class FlowsService {
       throw new BadRequestException(
         'Use the visual builder to edit this message sequence.'
       );
+    if (body.excludedPostIds === undefined) {
+      const trigger = current.nodes.find((n) => n.type === 'TRIGGER');
+      let previous: unknown;
+      try {
+        previous = JSON.parse(trigger?.data || '{}')?.excludedPostIds;
+      } catch {
+        throw new BadRequestException('Invalid saved trigger configuration.');
+      }
+      if (previous !== undefined) {
+        this.validateExcludedPostIds(previous);
+        body = { ...body, excludedPostIds: previous as string[] };
+      }
+    }
+    this.validateExcludedPostIds(body.excludedPostIds);
     // A integracao do flow nao muda no update, mas revalidamos: bloqueia
     // reativacao (DRAFT->ACTIVE) sobre integracao desativada/removida e mantem
     // simetria com o caminho de criacao (mesmo guard).
@@ -1003,6 +1029,7 @@ export class FlowsService {
     body: QuickCreateFlowDto,
     profileId?: string
   ) {
+    this.validateExcludedPostIds(body.excludedPostIds);
     await this.assertIntegrationAccess(orgId, body.integrationId, profileId);
     this.assertDmButtonUrl(body.dmButtonUrl);
     const check = await this.checkIntegrationWebhook(orgId, body.integrationId);
@@ -1188,7 +1215,10 @@ export class FlowsService {
 
   private buildTriggerConfig(body: QuickCreateFlowDto): Record<string, any> {
     const triggerType = body.triggerType ?? 'comment_on_post';
+    this.validateExcludedPostIds(body.excludedPostIds);
     const triggerConfig: Record<string, any> = { triggerType };
+    if (body.excludedPostIds !== undefined)
+      triggerConfig.excludedPostIds = body.excludedPostIds;
 
     if (body.postMode === 'next_publication') {
       triggerConfig.mode = 'next_publication';
@@ -1259,6 +1289,44 @@ export class FlowsService {
     return 'comment_on_post';
   }
 
+  private validateExcludedPostIds(ids: unknown) {
+    if (ids === undefined) return;
+    if (
+      !Array.isArray(ids) ||
+      ids.length > 100 ||
+      ids.some(
+        (id) => typeof id !== 'string' || !id || id.length > 64 || /\s/.test(id)
+      ) ||
+      new Set(ids).size !== ids.length
+    ) {
+      throw new BadRequestException(
+        'excludedPostIds must contain up to 100 unique, non-empty Instagram media IDs (maximum 64 characters each).'
+      );
+    }
+  }
+
+  private isPostExcluded(
+    flow: { nodes?: Array<{ type: string; data?: string | null }> },
+    mediaId: string
+  ): boolean {
+    return (flow.nodes || []).some((node) => {
+      if (node.type !== 'TRIGGER') return false;
+      let ids: unknown;
+      try {
+        ids = JSON.parse(node.data || '{}')?.excludedPostIds;
+      } catch {
+        return false;
+      } // Preserve legacy handling when no exclusion list can be read.
+      if (ids === undefined) return false;
+      try {
+        this.validateExcludedPostIds(ids);
+      } catch {
+        return true;
+      } // Invalid saved exclusions must not allow an accidental send.
+      return (ids as string[]).includes(mediaId);
+    });
+  }
+
   private isPendingNextPublication(
     flow: {
       triggerPostIds?: string | null;
@@ -1297,6 +1365,11 @@ export class FlowsService {
       let bound = 0;
       for (const flow of pending) {
         if (!this.isPendingNextPublication(flow, triggerType)) continue;
+        if (
+          triggerType === 'comment_on_post' &&
+          this.isPostExcluded(flow, mediaId)
+        )
+          continue;
 
         const triggerNode = flow.nodes?.find((n) => n.type === 'TRIGGER');
         if (!triggerNode) continue;
@@ -1601,6 +1674,11 @@ export class FlowsService {
       );
       matchingFlows = matchingFlows.concat(fromAlias);
     }
+
+    // Exclusions override organic matches and ad aliases before any execution is claimed.
+    matchingFlows = matchingFlows.filter(
+      (flow) => !this.isPostExcluded(flow, payload.igMediaId)
+    );
 
     // Sem flows que matcham: persistir UnmatchedComment + dispatch enrichment
     if (matchingFlows.length === 0) {

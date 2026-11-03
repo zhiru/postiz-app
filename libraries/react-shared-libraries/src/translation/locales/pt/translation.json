@@ -2560,5 +2560,11 @@
   "flow_step_edit": "Editar etapa",
   "flow_step_duplicate": "Duplicar etapa",
   "flow_step_delete": "Excluir etapa",
-  "flow_step_trigger_required": "Mantenha um gatilho por fluxo"
+  "flow_step_trigger_required": "Mantenha um gatilho por fluxo",
+  "flow_excluded_posts": "Publicações excluídas",
+  "flow_excluded_posts_hint": "Ignorar comentários nestes posts e Reels, inclusive anúncios. Isso não exclui publicações nem cancela execuções já iniciadas.",
+  "flow_choose_excluded_posts": "Escolher publicações para ignorar",
+  "flow_remove_exclusion": "Remover exclusão",
+  "flow_search_loaded_posts": "Buscar nas publicações carregadas",
+  "flow_excluded_media_id": "Ou adicionar ID de mídia do Instagram (inclusive anúncios)"
 }

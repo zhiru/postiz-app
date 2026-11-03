@@ -668,6 +668,96 @@ describe('FlowsService', () => {
 
   // --- Activation validation ---
 
+  describe('excluded post configuration', () => {
+    it.each([undefined, [], ['media-2']].map((ids) => ({ ids })))(
+      'preserves omitted exclusions and allows explicit replacement: %j',
+      async ({ ids }) => {
+        mockRepository.getFlow.mockResolvedValue(
+          makeFlow({
+            status: FlowStatus.PAUSED,
+            nodes: [
+              {
+                type: FlowNodeType.TRIGGER,
+                data: JSON.stringify({ excludedPostIds: ['media-1'] }),
+              },
+            ],
+          })
+        );
+        await service.quickUpdateFlow(
+          'org-1',
+          'flow-1',
+          {
+            name: 'Wizard',
+            integrationId: 'int-1',
+            postMode: 'all',
+            excludedPostIds: ids,
+          } as any,
+          'profile-1'
+        );
+        const nodes = mockRepository.saveCanvas.mock.calls[0][2];
+        expect(
+          JSON.parse(nodes.find((n: any) => n.type === 'TRIGGER').data)
+            .excludedPostIds
+        ).toEqual(ids ?? ['media-1']);
+        expect(mockRepository.updateFlowStatus).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each(
+      [
+        null,
+        'media-1',
+        [''],
+        ['a b'],
+        ['a', 'a'],
+        Array(101).fill('x'),
+        [123],
+      ].map((ids) => ({ ids }))
+    )(
+      'rejects invalid exclusions before quick-create writes: %j',
+      async ({ ids }) => {
+        await expect(
+          service.quickCreateFlow('org-1', {
+            name: 'X',
+            integrationId: 'int-1',
+            excludedPostIds: ids,
+          } as any)
+        ).rejects.toThrow('excludedPostIds');
+        expect(mockRepository.createFlow).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each(['null', '[]', '"text"'])(
+      'rejects non-object trigger config: %s',
+      async (data) => {
+        mockRepository.getFlow.mockResolvedValue(makeFlow());
+        await expect(
+          service.saveCanvas('org-1', 'flow-1', {
+            nodes: [{ type: 'TRIGGER', data }],
+            edges: [],
+          } as any)
+        ).rejects.toThrow(BadRequestException);
+        expect(mockRepository.saveCanvas).not.toHaveBeenCalled();
+      }
+    );
+
+    it('rejects invalid canvas exclusions before writing', async () => {
+      mockRepository.getFlow.mockResolvedValue(makeFlow());
+      await expect(
+        service.saveCanvas('org-1', 'flow-1', {
+          nodes: [
+            {
+              type: 'TRIGGER',
+              data: JSON.stringify({ excludedPostIds: 'media-1' }),
+            },
+          ],
+          edges: [],
+        } as any)
+      ).rejects.toThrow('excludedPostIds');
+      expect(mockRepository.saveCanvas).not.toHaveBeenCalled();
+    });
+  });
+
   describe('wizard activation path', () => {
     it('uses normal activation after quick-create saves the canvas', async () => {
       jest.spyOn(service, 'checkIntegrationWebhook').mockResolvedValue({ ok: true });
@@ -900,6 +990,91 @@ describe('FlowsService', () => {
       commentText: 'Hello!',
       organizationId: 'org-1',
     };
+
+    it.each([false, true])(
+      'excludes media even when matched by alias (%s)',
+      async (alias) => {
+        const flow = makeFlow({
+          nodes: [
+            {
+              id: 'n1',
+              type: FlowNodeType.TRIGGER,
+              data: JSON.stringify({ excludedPostIds: ['media-1'] }),
+            },
+          ],
+        });
+        mockRepository.getActiveFlowsForIntegration.mockResolvedValue([flow]);
+        mockRepository.findAliasesByIntegrationAndMedia.mockResolvedValue(
+          alias ? [{ flowId: flow.id }] : []
+        );
+        expect(await service.handleIncomingComment(commentPayload)).toEqual({
+          executions: [],
+          retry: false,
+        });
+        expect(mockRepository.createExecution).not.toHaveBeenCalled();
+        expect(mockWorkflowStart.mock.calls.every(([name]) => name === 'enrichUnmatchedCommentWorkflow')).toBe(true);
+      }
+    );
+
+    it('keeps another automation eligible on the same post', async () => {
+      const excluded = makeFlow({
+        nodes: [
+          {
+            type: FlowNodeType.TRIGGER,
+            data: JSON.stringify({ excludedPostIds: ['media-1'] }),
+          },
+        ],
+      });
+      const allowed = makeFlow({
+        id: 'flow-2',
+        nodes: [
+          {
+            type: FlowNodeType.TRIGGER,
+            data: JSON.stringify({ excludedPostIds: ['other-media'] }),
+          },
+        ],
+      });
+      mockRepository.getActiveFlowsForIntegration.mockResolvedValue([
+        excluded,
+        allowed,
+      ]);
+      mockRepository.findExistingExecution.mockResolvedValue(null);
+      mockRepository.createExecution.mockResolvedValue({ id: 'exec-2' });
+      await service.handleIncomingComment(commentPayload);
+      expect(mockRepository.createExecution).toHaveBeenCalledTimes(1);
+      expect(mockRepository.createExecution).toHaveBeenCalledWith(
+        expect.objectContaining({ flowId: 'flow-2' })
+      );
+    });
+
+    it('preserves legacy matching when trigger JSON cannot be parsed', async () => {
+      const flow = makeFlow({
+        nodes: [{ type: FlowNodeType.TRIGGER, data: '{invalid' }],
+      });
+      mockRepository.getActiveFlowsForIntegration.mockResolvedValue([flow]);
+      mockRepository.findExistingExecution.mockResolvedValue(null);
+      mockRepository.createExecution.mockResolvedValue({ id: 'exec-1' });
+      await service.handleIncomingComment(commentPayload);
+      expect(mockRepository.createExecution).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not bind an excluded next publication', async () => {
+      const flow = makeFlow({
+        nodes: [
+          {
+            id: 'n1',
+            type: FlowNodeType.TRIGGER,
+            data: JSON.stringify({
+              mode: 'next_publication',
+              excludedPostIds: ['media-1'],
+            }),
+          },
+        ],
+      });
+      mockRepository.findPendingNextPublicationFlows.mockResolvedValue([flow]);
+      expect(await service.bindPendingFlowsToPost('int-1', 'media-1')).toBe(0);
+      expect(mockRepository.bindFlowTriggerToMedia).not.toHaveBeenCalled();
+    });
 
     it('should find matching active flows and start Temporal workflow', async () => {
       const flow = makeFlow({
