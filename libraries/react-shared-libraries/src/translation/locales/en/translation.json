@@ -2560,5 +2560,17 @@
   "flow_step_edit": "Edit step",
   "flow_step_duplicate": "Duplicate step",
   "flow_step_delete": "Delete step",
-  "flow_step_trigger_required": "Keep one trigger per flow"
+  "flow_step_trigger_required": "Keep one trigger per flow",
+  "neuraltalk_preview_recipients": "NeuralTalk recipients",
+  "neuraltalk_recipients_persisted": "Saved destinations for this post. A configured destination does not confirm delivery.",
+  "neuraltalk_recipient_configured": "Configured destination — delivery not confirmed",
+  "neuraltalk_recipient_accepted": "Message registered in NeuralTalk — device delivery not confirmed",
+  "neuraltalk_recipient_confirmed": "Send confirmed by provider — device delivery not confirmed",
+  "neuraltalk_recipient_rejected": "Send rejected — delivery not confirmed",
+  "neuraltalk_recipient_unknown": "Send result unknown — delivery not confirmed",
+  "neuraltalk_recipients_loading": "Loading recipients…",
+  "neuraltalk_recipients_unavailable": "Recipients could not be loaded.",
+  "neuraltalk_recipient_group": "Group #{{id}}",
+  "neuraltalk_recipient_contact": "Contact #{{id}}",
+  "neuraltalk_recipients_empty": "No saved destinations for this post."
 }

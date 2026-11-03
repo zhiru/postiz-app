@@ -1614,7 +1614,7 @@ export const PostPreviewFrame: FC<{ postId: string; share: boolean }> = ({
         key={attempt}
         className="h-full w-full border-0"
         title={t('preview_post', 'Preview post')}
-        src={`/p/${encodeURIComponent(postId)}${share ? '?share=true' : ''}`}
+        src={`/p/${encodeURIComponent(postId)}?private=true${share ? '&share=true' : ''}`}
         onLoad={(event) => {
           const frame = event.currentTarget;
           // An iframe fires an initial about:blank load before the actual page.

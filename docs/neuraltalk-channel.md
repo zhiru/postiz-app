@@ -53,3 +53,16 @@ Ambos os sufixos são IDs de Contact no tenant NeuralTalk, não números de tele
 ## Testes
 
 Testes automatizados usam respostas falsas no formato dos controllers/jbuilders do Hermes; não enviam mensagens reais. Conferir permissões da conta/caixa e destinos na instância publicada antes do primeiro envio. Publicar o release é uma etapa separada da implementação. Não há alteração de schema nem de workflows existentes nesta integração.
+
+## Destinatários na prévia
+
+A prévia aberta pelo calendário autenticado mostra os contatos e grupos salvos em `Post.settings.targets`. Os nomes atuais são consultados pela mesma função `destinations` do seletor, com a credencial do canal mantida no servidor e a validação da caixa autorizada. Se o nome estiver vazio, indisponível ou a consulta falhar, usa “Contato #ID” ou “Grupo #ID”. A consulta é de leitura e não envia mensagens.
+
+- **Destino configurado:** há seleção salva, sem operação de envio registrada.
+- **Mensagem registrada no NeuralTalk:** existe recibo persistido em `PostOperation`, sem confirmação de entrega no aparelho.
+- **Envio confirmado pelo provedor:** além do recibo, o post está `PUBLISHED` e seu `releaseId` contém o ID daquela mensagem, gravado após a verificação de status do provedor. Essa verificação pode concluir pelo `source_id`; não comprova entrega no aparelho nem leitura.
+- **Envio rejeitado / resultado desconhecido:** o registro rejeitou o envio ou não permite determinar o resultado; isso nunca é apresentado como envio confirmado.
+
+Publicações antigas sem seleção salva mostram um estado vazio. Registros parciais ou inválidos não viram confirmação. Em falha de leitura, a prévia informa indisponibilidade.
+
+A rota de leitura `GET /posts/:id/neuraltalk-recipients` exige sessão autenticada e limita post e operações à organização e ao perfil permitido. O painel é ativado na prévia interna (`?private=true`); links copiados para clientes e links de revisão não o incluem. O parâmetro apenas controla a apresentação: a autorização é sempre feita no backend. A resposta pública de prévia omite `settings`, inclusive para visitantes autenticados.

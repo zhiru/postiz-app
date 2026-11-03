@@ -2560,5 +2560,17 @@
   "flow_step_edit": "Editar etapa",
   "flow_step_duplicate": "Duplicar etapa",
   "flow_step_delete": "Excluir etapa",
-  "flow_step_trigger_required": "Mantenha um gatilho por fluxo"
+  "flow_step_trigger_required": "Mantenha um gatilho por fluxo",
+  "neuraltalk_preview_recipients": "Destinatários NeuralTalk",
+  "neuraltalk_recipients_persisted": "Destinos salvos nesta publicação. Um destino configurado não comprova entrega.",
+  "neuraltalk_recipient_configured": "Destino configurado — entrega não confirmada",
+  "neuraltalk_recipient_accepted": "Mensagem registrada no NeuralTalk — entrega no aparelho não confirmada",
+  "neuraltalk_recipient_confirmed": "Envio confirmado pelo provedor — entrega no aparelho não confirmada",
+  "neuraltalk_recipient_rejected": "Envio rejeitado — entrega não confirmada",
+  "neuraltalk_recipient_unknown": "Resultado do envio desconhecido — entrega não confirmada",
+  "neuraltalk_recipients_loading": "Carregando destinatários…",
+  "neuraltalk_recipients_unavailable": "Não foi possível carregar os destinatários.",
+  "neuraltalk_recipient_group": "Grupo #{{id}}",
+  "neuraltalk_recipient_contact": "Contato #{{id}}",
+  "neuraltalk_recipients_empty": "Nenhum destino salvo para esta publicação."
 }

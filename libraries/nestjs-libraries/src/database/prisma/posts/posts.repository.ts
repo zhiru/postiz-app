@@ -201,6 +201,50 @@ export class PostsRepository {
     );
   }
 
+  getRecipientPreviewPost(
+    orgId: string,
+    profileId: string | undefined,
+    id: string
+  ) {
+    return this._post.model.post.findFirst({
+      where: {
+        id,
+        organizationId: orgId,
+        ...(profileId ? { profileId } : {}),
+        deletedAt: null,
+        OR: [{ profileId: null }, { profile: { deletedAt: null } }],
+        integration: {
+          organizationId: orgId,
+          ...(profileId ? { profileId } : {}),
+          deletedAt: null,
+        },
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        profileId: true,
+        integrationId: true,
+        settings: true,
+        state: true,
+        releaseId: true,
+        integration: { select: { providerIdentifier: true, profileId: true } },
+      },
+    });
+  }
+
+  getPostOperations(
+    ids: string[],
+    organizationId: string,
+    profileId: string | null
+  ) {
+    return this._transaction.model.$transaction((tx) =>
+      tx.postOperation.findMany({
+        where: { id: { in: ids }, organizationId, profileId },
+        select: { id: true, result: true },
+      })
+    );
+  }
+
   async reservePostOperation(
     id: string,
     organizationId: string,

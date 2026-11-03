@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Prévia autenticada mostra nomes de contatos/grupos NeuralTalk salvos, com ID como fallback, e diferencia configuração, mensagem registrada, rejeição, resultado desconhecido e envio confirmado pelo provedor, sem afirmar entrega no aparelho; destinatários e configurações ficam fora do link público e da revisão.
+
 - Etapas do Flow Builder com menu de três pontos para editar, duplicar sem conexões e excluir com limpeza das arestas; o gatilho permanece único e as ações não salvam nem enviam automaticamente.
 
 - Flow Builder: sequências opt-in com mensagens separadas, imagens/vídeos da biblioteca, espera por resposta, busca de etapas e prévia sem envio; preserva o motor original e valida a janela de atendimento por interação autenticada.

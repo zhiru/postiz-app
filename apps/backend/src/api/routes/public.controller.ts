@@ -83,9 +83,9 @@ export class PublicController {
   @Get(`/posts/:id`)
   async getPreview(@Param('id') id: string) {
     // the batch only links the posts in the dashboard, it stays out of the
-    // public preview
+    // public preview. Provider settings may contain private recipient IDs.
     return (await this._postsService.getPostsRecursively(id, true)).map(
-      ({ childrenPost, batchId, ...p }) => ({
+      ({ childrenPost, batchId, settings, ...p }) => ({
         ...p,
         ...(p.integration
           ? {

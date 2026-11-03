@@ -34,6 +34,7 @@ const buildController = () => {
     postsService,
     null as any,
     null as any,
+    null as any,
     null as any
   );
 
@@ -83,5 +84,26 @@ describe('PostsController.changeDate - republicacao explicita', () => {
       true,
       'profile-1'
     );
+  });
+});
+
+describe('PostsController.getNeuralTalkRecipients', () => {
+  it('passes only the authenticated organization and resolved profile to the preview service', async () => {
+    const preview = jest.fn().mockResolvedValue({ recipients: [] });
+    const controller = new PostsController(
+      null as any,
+      null as any,
+      null as any,
+      null as any,
+      { preview } as any
+    );
+    await expect(
+      controller.getNeuralTalkRecipients(
+        { id: 'org' } as any,
+        { id: 'profile' } as any,
+        'post'
+      )
+    ).resolves.toEqual({ recipients: [] });
+    expect(preview).toHaveBeenCalledWith('org', 'profile', 'post');
   });
 });

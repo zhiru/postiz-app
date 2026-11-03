@@ -188,7 +188,9 @@ it('shows loading, timeout and retry instead of an empty preview', () => {
   expect(screen.getByRole('alert').textContent).toContain('preview');
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.getByTitle('Preview post').getAttribute('src')).toBe('/p/post');
+  expect(screen.getByTitle('Preview post').getAttribute('src')).toBe(
+    '/p/post?private=true'
+  );
   jest.useRealTimers();
 });
 it('uses media previews and compact month cards without losing the actions menu', () => {

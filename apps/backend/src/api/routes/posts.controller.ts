@@ -40,6 +40,7 @@ import {
   CreatePublicCommentDto,
   ResolveCommentDto,
 } from '@gitroom/nestjs-libraries/dtos/comments/add.comment.dto';
+import { NeuralTalkDeliveryService } from '@gitroom/nestjs-libraries/integrations/neuraltalk.delivery.service';
 import { RealIP } from 'nestjs-real-ip';
 
 @ApiTags('Posts')
@@ -49,8 +50,18 @@ export class PostsController {
     private _postsService: PostsService,
     private _agentGraphService: AgentGraphService,
     private _shortLinkService: ShortLinkService,
-    private _reviewLinksService: ReviewLinksService
+    private _reviewLinksService: ReviewLinksService,
+    private _neuralTalkDeliveryService: NeuralTalkDeliveryService
   ) {}
+
+  @Get('/:id/neuraltalk-recipients')
+  getNeuralTalkRecipients(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') id: string
+  ) {
+    return this._neuralTalkDeliveryService.preview(org.id, profile?.id, id);
+  }
 
   @Get('/:id/remote-deletion')
   @ProfileManage()
