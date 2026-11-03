@@ -254,7 +254,7 @@ export const Component: FC<{
               <div
                 className={clsx(
                   'whitespace-pre-line',
-                  !!modal.height && !!modal.size && 'flex flex-1 flex-col'
+                  !!modal.height && !!modal.size && 'flex min-h-0 flex-1 flex-col'
                 )}
               >
                 {RenderComponent}

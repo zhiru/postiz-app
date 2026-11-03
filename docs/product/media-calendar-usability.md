@@ -17,3 +17,5 @@ O selo “Reel de Teste” aparece no calendário e na listagem somente quando `
 ## Compatibilidade
 
 Os filtros privados respeitam organização e perfil permitido. A API pública e o MCP mantêm os parâmetros e o tamanho padrão da biblioteca. Não há migração de schema, alteração de workflows, envio de mensagens ou edição de automações. O filtro de formato da listagem classifica metadados do escopo antes de paginar; em históricos muito grandes, considerar um campo normalizado e indexado após medição.
+
+A prévia mantém o modal centralizado em **80vw × 80vh**. O corpo e o conteúdo usam uma cadeia flex com `min-h-0`; a barra de ações não encolhe e o iframe ocupa toda a área restante, inclusive quando as ações quebram em mais de uma linha.

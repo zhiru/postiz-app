@@ -431,3 +431,69 @@ describe('PostsRepository calendar format compatibility', () => {
     expect(attached[0]).not.toHaveProperty('isTrialReel');
   });
 });
+
+describe('PostsRepository recipient preview scope', () => {
+  it('limits saved post data to the authenticated organization/profile and excludes deleted records', async () => {
+    const post = createPrismaRepositoryMock('post');
+    const repo = new PostsRepository(
+      post as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any
+    );
+    await repo.getRecipientPreviewPost('org', 'profile', 'post');
+    expect(post.model.post.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'post',
+        organizationId: 'org',
+        profileId: 'profile',
+        deletedAt: null,
+        OR: [{ profileId: null }, { profile: { deletedAt: null } }],
+        integration: {
+          organizationId: 'org',
+          profileId: 'profile',
+          deletedAt: null,
+        },
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        profileId: true,
+        integrationId: true,
+        settings: true,
+        state: true,
+        releaseId: true,
+        integration: { select: { providerIdentifier: true, profileId: true } },
+      },
+    });
+  });
+  it('scopes operation reads even when operation IDs are supplied', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const transaction = {
+      model: {
+        $transaction: (run: any) => run({ postOperation: { findMany } }),
+      },
+    };
+    const repo = new PostsRepository(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      transaction as any
+    );
+    await repo.getPostOperations(['receipt'], 'org', null);
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['receipt'] },
+        organizationId: 'org',
+        profileId: null,
+      },
+      select: { id: true, result: true },
+    });
+  });
+});

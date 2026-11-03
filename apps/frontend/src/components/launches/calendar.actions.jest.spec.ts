@@ -1,5 +1,10 @@
 export {};
 jest.mock('canvas', () => null);
+jest.mock(
+  '@gitroom/nestjs-libraries/services/make.is',
+  () => ({ makeId: () => 'modal-id' }),
+  { virtual: true }
+);
 jest.mock('@gitroom/react/helpers/delete.dialog', () => ({
   deleteDialog: jest.fn(),
 }));
@@ -329,8 +334,21 @@ it('opens published posts in a centered 80vw by 80vh preview', () => {
   });
   const preview = mockModal.mock.calls[0][0].children;
   cleanup();
-  render(preview);
-  expect(screen.getByTitle('Preview post')).not.toBeNull();
+  const { Component: ModalComponent } = jest.requireActual(
+    '@gitroom/frontend/components/layout/new-modal'
+  );
+  render(
+    React.createElement(ModalComponent, {
+      modal: mockModal.mock.calls[0][0],
+      isLast: true,
+      zIndex: 100,
+      closeModal: mockCloseById,
+    })
+  );
+  expect(screen.getByTitle('Preview post').getAttribute('src')).toBe(
+    '/p/post?private=true&share=true'
+  );
+  expect(screen.getByRole('group', { name: 'Post actions' })).not.toBeNull();
 });
 
 it('shows loading, timeout and retry instead of an empty preview', () => {
@@ -343,7 +361,9 @@ it('shows loading, timeout and retry instead of an empty preview', () => {
   expect(screen.getByRole('alert').textContent).toContain('preview');
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.getByTitle('Preview post').getAttribute('src')).toBe('/p/post');
+  expect(screen.getByTitle('Preview post').getAttribute('src')).toBe(
+    '/p/post?private=true'
+  );
   jest.useRealTimers();
 });
 it('uses media previews and compact month cards without losing the actions menu', () => {
@@ -642,7 +662,9 @@ it('keeps write actions out of the viewer preview and context menu', () => {
   expect(
     screen.queryByRole('button', { name: 'Remove from Mali Posts' })
   ).toBeNull();
-  expect(screen.getByTitle('Preview post').getAttribute('src')).toBe('/p/post');
+  expect(screen.getByTitle('Preview post').getAttribute('src')).toBe(
+    '/p/post?private=true'
+  );
 });
 
 it.each([false, true])(

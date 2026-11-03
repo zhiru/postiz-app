@@ -1,3 +1,7 @@
+jest.mock(
+  '@gitroom/nestjs-libraries/database/prisma/posts/posts.service',
+  () => ({ PostsService: class {} })
+);
 jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
   IntegrationManager: class IntegrationManagerMock {},
 }));
@@ -32,6 +36,7 @@ const buildController = () => {
   const controller = new PostsController(
     null as any,
     agentGraphService,
+    null as any,
     null as any,
     null as any
   );

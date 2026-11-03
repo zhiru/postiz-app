@@ -1,3 +1,4 @@
+import { NeuralTalkRecipients } from '@gitroom/frontend/components/preview/neuraltalk.recipients';
 import { internalFetch } from '@gitroom/helpers/utils/internal.fetch';
 import { sanitizePostContent } from '@gitroom/helpers/utils/sanitize.post.content';
 export const dynamic = 'force-dynamic';
@@ -31,6 +32,7 @@ export default async function Auth(props: {
   }>;
   searchParams?: Promise<{
     share?: string;
+    private?: string;
     token?: string;
   }>;
 }) {
@@ -134,6 +136,14 @@ export default async function Auth(props: {
                       )}
                     </div>
                     <div className="flex flex-col gap-[16px]">
+                      {searchParams?.private === 'true' && !token && (
+                        <NeuralTalkRecipients
+                          postId={p.id}
+                          providerIdentifier={
+                            post[0].integration.providerIdentifier
+                          }
+                        />
+                      )}
                       <PostContentClient
                         postId={p.id}
                         html={sanitizePostContent(p.content)}
