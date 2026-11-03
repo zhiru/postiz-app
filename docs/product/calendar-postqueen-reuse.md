@@ -18,6 +18,14 @@ Não foi importado o calendário inteiro: menu ancorado, permissões, edição, 
 - Após erro ou 20 segundos sem carregamento, exibe uma mensagem e **Tentar novamente**. Uma resposta tardia válida ainda pode recuperar a prévia.
 - Fechar não salva, agenda, publica ou altera filtros e paginação.
 
+## Ações internas da prévia
+
+A prévia autenticada do calendário/listagem oferece as mesmas ações e permissões do menu do card. **Duplicar** abre o composer existente com texto e mídias completos e o canal de origem selecionado; **Copiar para outra rede** abre o mesmo composer sem canal selecionado, para escolher o destino. O composer continua permitindo revisar conteúdo, mídias, configurações e canais antes de salvar ou agendar. Abrir essas ações só consulta dados e uma sugestão de horário; não salva nem publica.
+
+Publicações importadas também podem servir como origem. A cópia recebe novos identificadores locais e não herda identidade remota, estado de publicação, recorrência, canais irmãos nem configurações específicas da rede original. Mídias disponíveis usam a resolução existente do editor; mídias indisponíveis precisam de revisão/substituição. Editar o original importado continua bloqueado. Visualizadores não recebem ações de escrita.
+
+Clique direito no card abre o mesmo menu dos três pontos na posição do ponteiro, sem abrir a edição. Com foco no corpo do card, a tecla de menu de contexto ou Shift+F10 abre o menu; setas, Home/End, Escape e navegação por Tab preservam o comportamento existente. As ações internas são renderizadas no contêiner autenticado, fora do iframe: a rota pública de revisão e seu contrato permanecem iguais.
+
 ## Miniaturas e calendário móvel
 
 `mediaPreview: { src, video } | null` é derivado da primeira mídia na lista privada e no calendário privado. Não expõe o JSON completo de mídias, configurações ou credenciais. Consultas públicas existentes mantêm seu contrato.

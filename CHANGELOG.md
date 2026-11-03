@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Prévia autenticada do calendário/listagem reutiliza as ações do card, incluindo duplicar e copiar para outra rede no composer com seleção de canal; aceita publicações importadas como origem e oferece o mesmo menu por clique direito ou teclado, sem publicação automática.
+
 - Etapas do Flow Builder com menu de três pontos para editar, duplicar sem conexões e excluir com limpeza das arestas; o gatilho permanece único e as ações não salvam nem enviam automaticamente.
 
 - Flow Builder: sequências opt-in com mensagens separadas, imagens/vídeos da biblioteca, espera por resposta, busca de etapas e prévia sem envio; preserva o motor original e valida a janela de atendimento por interação autenticada.

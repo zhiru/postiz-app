@@ -219,7 +219,7 @@ const useFocusCurrentTime = (
 };
 
 // Shared hook for post actions (edit, delete, statistics)
-const usePostActions = (onMutate?: () => void) => {
+export const usePostActions = (onMutate?: () => void) => {
   const t = useT();
   const fetch = useFetch();
   const modal = useModals();
@@ -232,101 +232,102 @@ const usePostActions = (onMutate?: () => void) => {
   }, [reloadCalendarView, onMutate]);
 
   const editPost = useCallback(
-    (loadPost: any, isDuplicate?: boolean) => async () => {
-      if (loadPost.importedFromPlatform) {
-        modal.openModal({
-          title: t('posts_sync_imported', 'Published on the social platform'),
-          withCloseButton: true,
-          children: (
-            <div className="flex flex-col gap-4">
-              <p className="whitespace-pre-wrap">
-                {postContentPlainText(loadPost.content)}
-              </p>
-              <p>{newDayjs(loadPost.publishDate).format('DD/MM/YYYY HH:mm')}</p>
-              <a
-                href={loadPost.releaseURL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-              >
-                {t('posts_sync_view_original', 'View original publication')}
-              </a>
-              <p>
-                {t(
-                  'posts_sync_read_only',
-                  'This publication was imported. Manage it on the social platform.'
-                )}
-              </p>
-            </div>
-          ),
-        });
-        return;
-      }
-      const post = {
-        ...loadPost,
-        publishDate: loadPost.actualDate || loadPost.publishDate,
-      };
+    (load: any, isDuplicate?: boolean, copy = false) =>
+      async () => {
+        if (load.importedFromPlatform && !isDuplicate) {
+          modal.openModal({
+            title: t('posts_sync_imported', 'Published on the social platform'),
+            withCloseButton: true,
+            children: (
+              <div className="flex flex-col gap-4">
+                <p className="whitespace-pre-wrap">
+                  {postContentPlainText(load.content)}
+                </p>
+                <p>{newDayjs(load.publishDate).format('DD/MM/YYYY HH:mm')}</p>
+                <a
+                  href={load.releaseURL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                >
+                  {t('posts_sync_view_original', 'View original publication')}
+                </a>
+                <p>
+                  {t(
+                    'posts_sync_read_only',
+                    'This publication was imported. Manage it on the social platform.'
+                  )}
+                </p>
+              </div>
+            ),
+          });
+          return;
+        }
+        const post = {
+          ...load,
+          publishDate: load.actualDate || load.publishDate,
+        };
 
-      const data = await (await fetch(`/posts/group/${post.group}`)).json();
-      if (!data?.posts?.length) {
-        toaster.show(t('post_not_found', 'Post not found'), 'warning');
-        mutate();
-        return;
-      }
-      const date = !isDuplicate
-        ? null
-        : (await (await fetch('/posts/find-slot')).json()).date;
-      const publishDate = fromUtc(date || data.posts[0].publishDate);
-      const ExistingData = !isDuplicate
-        ? ExistingDataContextProvider
-        : Fragment;
-      modal.openModal({
-        id: 'add-edit-modal',
-        closeOnClickOutside: false,
-        removeLayout: true,
-        closeOnEscape: false,
-        withCloseButton: false,
-        askClose: true,
-        fullScreen: true,
-        classNames: {
-          modal: 'w-[100%] max-w-[1400px] text-textColor',
-        },
-        children: (
-          <ExistingData value={data}>
-            <AddEditModal
-              {...(isDuplicate
-                ? {
-                    onlyValues: data.posts.map(
-                      ({ image, settings, content }: any) => ({
+        const data = await (await fetch(`/posts/group/${post.group}`)).json();
+        if (!data?.posts?.length) {
+          toaster.show(t('post_not_found', 'Post not found'), 'warning');
+          mutate();
+          return;
+        }
+        const date = !isDuplicate
+          ? null
+          : (await (await fetch('/posts/find-slot')).json()).date;
+        const publishDate = fromUtc(date || data.posts[0].publishDate);
+        const ExistingData = !isDuplicate
+          ? ExistingDataContextProvider
+          : Fragment;
+        modal.openModal({
+          id: 'add-edit-modal',
+          closeOnClickOutside: false,
+          removeLayout: true,
+          closeOnEscape: false,
+          withCloseButton: false,
+          askClose: true,
+          fullScreen: true,
+          classNames: {
+            modal: 'w-[100%] max-w-[1400px] text-textColor',
+          },
+          children: (
+            <ExistingData value={data}>
+              <AddEditModal
+                {...(isDuplicate
+                  ? {
+                      onlyValues: data.posts.map(({ image, content }: any) => ({
                         image,
-                        settings,
                         content,
-                      })
-                    ),
-                  }
-                : {})}
-              allIntegrations={integrations.map((p) => ({ ...p }))}
-              reopenModal={editPost(post)}
-              mutate={mutate}
-              integrations={
-                isDuplicate
-                  ? integrations
-                  : integrations
-                      .slice(0)
-                      .filter((f) => f.id === data.integration)
-                      .map((p) => ({
-                        ...p,
-                        picture: data.integrationPicture,
-                      }))
-              }
-              date={publishDate}
-            />
-          </ExistingData>
-        ),
-        size: '80%',
-        title: ``,
-      });
-    },
+                      })),
+                    }
+                  : {})}
+                selectedChannels={
+                  isDuplicate && !copy ? [data.integration] : undefined
+                }
+                allIntegrations={integrations.map((p) => ({ ...p }))}
+                reopenModal={editPost(post, isDuplicate, copy)}
+                mutate={mutate}
+                integrations={
+                  isDuplicate
+                    ? integrations
+                    : integrations
+                        .slice(0)
+                        .filter((f) => f.id === data.integration)
+                        .map((p) => ({
+                          ...p,
+                          picture: data.integrationPicture,
+                        }))
+                }
+                date={publishDate}
+              />
+            </ExistingData>
+          ),
+          size: '80%',
+          title: ``,
+        });
+      },
     [integrations, fetch, modal, mutate, toaster, t]
   );
 
@@ -1019,6 +1020,7 @@ export const ListView = () => {
                     openPost={openPost(post)}
                     editPost={editPost(post, false)}
                     duplicatePost={editPost(post, true)}
+                    copyToChannel={editPost(post, true, true)}
                     copyDebugJson={
                       user?.isSuperAdmin ? copyDebugJson(post) : undefined
                     }
@@ -1463,6 +1465,7 @@ export const CalendarColumn: FC<{
                   openPost={openPost(post)}
                   editPost={editPost(post, false)}
                   duplicatePost={editPost(post, true)}
+                  copyToChannel={editPost(post, true, true)}
                   copyDebugJson={
                     user?.isSuperAdmin ? copyDebugJson(post) : undefined
                   }
@@ -1694,6 +1697,7 @@ export const CalendarItem: FC<{
   isBeforeNow: boolean;
   editPost: () => void;
   duplicatePost: () => void;
+  copyToChannel: () => void;
   copyDebugJson?: () => void;
   deletePost: () => void;
   statistics: () => void;
@@ -1719,6 +1723,7 @@ export const CalendarItem: FC<{
     editPost,
     statistics,
     duplicatePost,
+    copyToChannel,
     copyDebugJson,
     post,
     date,
@@ -1751,7 +1756,7 @@ export const CalendarItem: FC<{
     user?.impersonate &&
     post.creationMethod &&
     post.creationMethod !== 'UNKNOWN';
-  const preview = useCallback(() => {
+  const preview = () => {
     modals.openModal({
       id: `post-preview-${post.id}`,
       title: t('preview_post', 'Preview post'),
@@ -1759,14 +1764,33 @@ export const CalendarItem: FC<{
       size: '80vw',
       height: '80vh',
       withCloseButton: true,
-      children: <PostPreviewFrame postId={post.id} share={canWrite} />,
+      children: (
+        <div className="flex h-full min-h-0 flex-col">
+          <div
+            role="group"
+            aria-label={t('post_actions', 'Post actions')}
+            className="flex shrink-0 flex-wrap gap-1 border-b border-newTableBorder p-2"
+          >
+            {renderActionItems(false)}
+          </div>
+          <div className="min-h-0 flex-1">
+            <PostPreviewFrame postId={post.id} share={canWrite} />
+          </div>
+        </div>
+      ),
     });
-  }, [post.id, canWrite, modals, t]);
+  };
+  const openComposer = (action: () => void) => {
+    modals.closeById(`post-preview-${post.id}`);
+    action();
+  };
   const fetchRemote = useFetch();
   const toastRemote = useToaster();
   const [deletingRemote, setDeletingRemote] = useState(false);
+  const deletingRemoteRef = useRef(false);
   const deleteRemote = async () => {
-    if (deletingRemote) return;
+    if (deletingRemoteRef.current) return;
+    deletingRemoteRef.current = true;
     setDeletingRemote(true);
     try {
       const read = await fetchRemote(`/posts/${post.id}/remote-deletion`);
@@ -1856,6 +1880,7 @@ export const CalendarItem: FC<{
         'warning'
       );
     } finally {
+      deletingRemoteRef.current = false;
       setDeletingRemote(false);
     }
   };
@@ -1929,6 +1954,154 @@ export const CalendarItem: FC<{
       window.removeEventListener('resize', resize);
     };
   }, [actionPosition]);
+  const renderActionItems = (includePreview = true) => (
+    <>
+      {editable && (
+        <button
+          type="button"
+          role={includePreview ? 'menuitem' : undefined}
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={() => openComposer(editPost)}
+        >
+          {t('edit_post', 'Edit post')}
+        </button>
+      )}
+      {editable && (
+        <button
+          type="button"
+          role={includePreview ? 'menuitem' : undefined}
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={() => openComposer(editPost)}
+        >
+          {t('post_action_change_date', 'Change date and time')}
+        </button>
+      )}
+      {canWrite && (
+        <button
+          type="button"
+          role={includePreview ? 'menuitem' : undefined}
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={() => openComposer(duplicatePost)}
+        >
+          {t('duplicate_post', 'Duplicate post')}
+        </button>
+      )}
+      {canWrite && (
+        <button
+          type="button"
+          role={includePreview ? 'menuitem' : undefined}
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={() => openComposer(copyToChannel)}
+        >
+          {t('post_action_copy_channel', 'Copy to another network')}
+        </button>
+      )}
+      {includePreview && (
+        <button
+          type="button"
+          role={includePreview ? 'menuitem' : undefined}
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={preview}
+        >
+          {t('preview_post', 'Preview post')}
+        </button>
+      )}
+      <button
+        type="button"
+        role={includePreview ? 'menuitem' : undefined}
+        className="p-2 text-start hover:bg-newColColor"
+        onClick={() => copyText(postContentPlainText(post.content))}
+      >
+        {t('post_action_copy_caption', 'Copy caption')}
+      </button>
+      <button
+        type="button"
+        role={includePreview ? 'menuitem' : undefined}
+        className="p-2 text-start hover:bg-newColColor"
+        onClick={() =>
+          copyText(`${window.location.origin}/p/${encodeURIComponent(post.id)}`)
+        }
+      >
+        {t('post_action_copy_link', 'Copy post link')}
+      </button>
+      {canWrite && (
+        <button
+          type="button"
+          role={includePreview ? 'menuitem' : undefined}
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={openReviewLinks}
+        >
+          {t('client_review_links', 'Client review links')}
+        </button>
+      )}
+      {post.releaseURL?.startsWith('http') && (
+        <button
+          type="button"
+          role={includePreview ? 'menuitem' : undefined}
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={openPost}
+        >
+          {t('posts_sync_view_original', 'View original publication')}
+        </button>
+      )}
+      {post.releaseURL?.startsWith('https://') && (
+        <button
+          type="button"
+          role={includePreview ? 'menuitem' : undefined}
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={() => copyText(post.releaseURL!)}
+        >
+          {t('post_action_copy_network_link', 'Copy network link')}
+        </button>
+      )}
+      {post.releaseId &&
+        !(post.integration.providerIdentifier === 'x' && disableXAnalytics) && (
+          <button
+            type="button"
+            role={includePreview ? 'menuitem' : undefined}
+            className="p-2 text-start hover:bg-newColColor"
+            onClick={post.releaseId === 'missing' ? missingRelease : statistics}
+          >
+            {t('statistics', 'Statistics')}
+          </button>
+        )}
+      {copyDebugJson && (
+        <button
+          type="button"
+          role={includePreview ? 'menuitem' : undefined}
+          className="p-2 text-start hover:bg-newColColor"
+          onClick={copyDebugJson}
+        >
+          {t('copy_debug_json', 'Copy Debug JSON')}
+        </button>
+      )}
+      {canWrite &&
+        state === 'PUBLISHED' &&
+        post.releaseId &&
+        !remoteDeleted &&
+        post.remoteDeletionSupported && (
+          <button
+            type="button"
+            role={includePreview ? 'menuitem' : undefined}
+            disabled={deletingRemote}
+            className="p-2 text-start text-red-500 hover:bg-newColColor disabled:opacity-50"
+            onClick={deleteRemote}
+          >
+            {t('delete_from_network', 'Delete from network')}
+          </button>
+        )}
+      {canWrite && (
+        <button
+          type="button"
+          role={includePreview ? 'menuitem' : undefined}
+          className="p-2 text-start text-red-500 hover:bg-newColColor"
+          onClick={deletePost}
+        >
+          {t('remove_from_postiz', 'Remove from Mali Posts')}
+        </button>
+      )}
+    </>
+  );
   const renderActions = () =>
     actionPosition &&
     createPortal(
@@ -1972,144 +2145,7 @@ export const CalendarItem: FC<{
           items[next]?.focus();
         }}
       >
-        {editable && (
-          <button
-            type="button"
-            role="menuitem"
-            className="p-2 text-start hover:bg-newColColor"
-            onClick={editPost}
-          >
-            {t('edit_post', 'Edit post')}
-          </button>
-        )}
-        {editable && (
-          <button
-            type="button"
-            role="menuitem"
-            className="p-2 text-start hover:bg-newColColor"
-            onClick={editPost}
-          >
-            {t('post_action_change_date', 'Change date and time')}
-          </button>
-        )}
-        {canWrite && !post.importedFromPlatform && (
-          <button
-            type="button"
-            role="menuitem"
-            className="p-2 text-start hover:bg-newColColor"
-            onClick={duplicatePost}
-          >
-            {t('duplicate_post', 'Duplicate post')}
-          </button>
-        )}
-        <button
-          type="button"
-          role="menuitem"
-          className="p-2 text-start hover:bg-newColColor"
-          onClick={preview}
-        >
-          {t('preview_post', 'Preview post')}
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          className="p-2 text-start hover:bg-newColColor"
-          onClick={() => copyText(postContentPlainText(post.content))}
-        >
-          {t('post_action_copy_caption', 'Copy caption')}
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          className="p-2 text-start hover:bg-newColColor"
-          onClick={() =>
-            copyText(
-              `${window.location.origin}/p/${encodeURIComponent(post.id)}`
-            )
-          }
-        >
-          {t('post_action_copy_link', 'Copy post link')}
-        </button>
-        {canWrite && (
-          <button
-            type="button"
-            role="menuitem"
-            className="p-2 text-start hover:bg-newColColor"
-            onClick={openReviewLinks}
-          >
-            {t('client_review_links', 'Client review links')}
-          </button>
-        )}
-        {post.releaseURL?.startsWith('http') && (
-          <button
-            type="button"
-            role="menuitem"
-            className="p-2 text-start hover:bg-newColColor"
-            onClick={openPost}
-          >
-            {t('posts_sync_view_original', 'View original publication')}
-          </button>
-        )}
-        {post.releaseURL?.startsWith('https://') && (
-          <button
-            type="button"
-            role="menuitem"
-            className="p-2 text-start hover:bg-newColColor"
-            onClick={() => copyText(post.releaseURL!)}
-          >
-            {t('post_action_copy_network_link', 'Copy network link')}
-          </button>
-        )}
-        {post.releaseId &&
-          !(
-            post.integration.providerIdentifier === 'x' && disableXAnalytics
-          ) && (
-            <button
-              type="button"
-              role="menuitem"
-              className="p-2 text-start hover:bg-newColColor"
-              onClick={
-                post.releaseId === 'missing' ? missingRelease : statistics
-              }
-            >
-              {t('statistics', 'Statistics')}
-            </button>
-          )}
-        {copyDebugJson && (
-          <button
-            type="button"
-            role="menuitem"
-            className="p-2 text-start hover:bg-newColColor"
-            onClick={copyDebugJson}
-          >
-            {t('copy_debug_json', 'Copy Debug JSON')}
-          </button>
-        )}
-        {canWrite &&
-          state === 'PUBLISHED' &&
-          post.releaseId &&
-          !remoteDeleted &&
-          post.remoteDeletionSupported && (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={deletingRemote}
-              className="p-2 text-start text-red-500 hover:bg-newColColor disabled:opacity-50"
-              onClick={deleteRemote}
-            >
-              {t('delete_from_network', 'Delete from network')}
-            </button>
-          )}
-        {canWrite && (
-          <button
-            type="button"
-            role="menuitem"
-            className="p-2 text-start text-red-500 hover:bg-newColColor"
-            onClick={deletePost}
-          >
-            {t('remove_from_postiz', 'Remove from Mali Posts')}
-          </button>
-        )}
+        {renderActionItems()}
       </div>,
       document.body
     );
@@ -2146,6 +2182,14 @@ export const CalendarItem: FC<{
   );
   return (
     <div
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setActionPosition({
+          x: Math.max(8, Math.min(event.clientX, window.innerWidth - 240)),
+          y: Math.max(8, event.clientY),
+        });
+      }}
       // @ts-ignore
       ref={dragRef}
       data-calendar-card={display}
@@ -2283,6 +2327,14 @@ export const CalendarItem: FC<{
         }
         onClick={activate}
         onKeyDown={(event) => {
+          if (
+            event.key === 'ContextMenu' ||
+            (event.shiftKey && event.key === 'F10')
+          ) {
+            event.preventDefault();
+            openActions();
+            return;
+          }
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             activate();
