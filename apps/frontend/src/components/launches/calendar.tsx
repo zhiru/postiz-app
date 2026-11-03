@@ -1706,6 +1706,7 @@ export const CalendarItem: FC<{
   post: Post & {
     integration: Integration;
     format?: PostFormat;
+    isTrialReel?: boolean;
     remoteDeletionSupported?: boolean;
     mediaPreview?: { src: string; video: boolean } | null;
     tags: {
@@ -2311,6 +2312,11 @@ export const CalendarItem: FC<{
           media={post.mediaPreview || null}
           display={display}
         />
+        {post.isTrialReel === true && (
+          <span className="shrink-0 self-start rounded border border-current px-1 text-[10px] font-semibold leading-[16px] text-textColor">
+            {t('trial_reel_badge', 'Trial Reel')}
+          </span>
+        )}
         <div
           className={clsx(
             'w-full min-w-0 flex-1 flex flex-col min-h-[40px]',

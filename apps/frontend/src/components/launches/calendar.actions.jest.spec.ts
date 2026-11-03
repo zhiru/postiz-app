@@ -119,6 +119,35 @@ afterEach(() => {
   mockCanWrite = true;
 });
 afterAll(() => dom.window.close());
+it.each(['day', 'week', 'month'])(
+  'shows the explicit trial badge in the %s card, including imported posts',
+  (display: string) => {
+    const value: any = props();
+    value.display = display;
+    Object.assign(value.post, {
+      isTrialReel: true,
+      format: 'video',
+      importedFromPlatform: true,
+    });
+    render(React.createElement(CalendarItem, value));
+    const badge = screen.getByText('Trial Reel');
+    expect(badge.closest('.sr-only')).toBeNull();
+  }
+);
+it.each([false, undefined, 'false', 'true'])(
+  'does not show a trial badge without a boolean projection: %s',
+  (isTrialReel: unknown) => {
+    const value: any = props();
+    Object.assign(value.post, {
+      isTrialReel,
+      format: 'video',
+      importedFromPlatform: true,
+      releaseURL: 'https://www.instagram.com/reel/example/',
+    });
+    render(React.createElement(CalendarItem, value));
+    expect(screen.queryByText('Trial Reel')).toBeNull();
+  }
+);
 it('opens drafts for editing through click and keyboard, with one actions button', () => {
   const value = props();
   render(React.createElement(CalendarItem, value));

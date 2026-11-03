@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Calendário/listagem: selo traduzido “Reel de Teste” somente com `settings.is_trial_reel` explícito; respeita `"false"` legado e não deduz teste de vídeos ou Reels importados.
+
 - Etapas do Flow Builder com menu de três pontos para editar, duplicar sem conexões e excluir com limpeza das arestas; o gatilho permanece único e as ações não salvam nem enviam automaticamente.
 
 - Flow Builder: sequências opt-in com mensagens separadas, imagens/vídeos da biblioteca, espera por resposta, busca de etapas e prévia sem envio; preserva o motor original e valida a janela de atendimento por interação autenticada.
