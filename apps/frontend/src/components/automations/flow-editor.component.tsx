@@ -27,6 +27,7 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useFlow } from '@gitroom/frontend/components/automations/hooks/use-flows';
 import { useRouter } from 'next/navigation';
+import { useFlowHistory } from './hooks/use-flow-history';
 import { TriggerNode } from '@gitroom/frontend/components/automations/nodes/trigger-node';
 import { ConditionNode } from '@gitroom/frontend/components/automations/nodes/condition-node';
 import { ReplyCommentNode } from '@gitroom/frontend/components/automations/nodes/reply-comment-node';
@@ -176,7 +177,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
   const [sequence, setSequence] = useState(false);
   const [paletteSearch, setPaletteSearch] = useState('');
   const [showPreview, setShowPreview] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
+  const { showHistory, navigateHistory } = useFlowHistory();
   const [editingName, setEditingName] = useState(false);
   const [flowName, setFlowName] = useState('');
   const [viewMode, setViewMode] = useState<'summary' | 'advanced' | null>(null);
@@ -654,7 +655,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
             {t('view_summary', 'Summary')}
           </button>
           <button
-            onClick={() => setShowHistory((v) => !v)}
+            onClick={() => navigateHistory(!showHistory)}
             className="rounded-[4px] bg-btnSimple border border-fifth px-[12px] py-[6px] text-[12px] text-textColor hover:bg-boxHover"
           >
             {showHistory
@@ -850,7 +851,8 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
                 {t('flow_executions', 'Historico de Execucoes')}
               </h3>
               <button
-                onClick={() => setShowHistory(false)}
+                onClick={() => navigateHistory(false)}
+                aria-label={t('hide_history', 'Ocultar historico')}
                 className="text-customColor18 hover:text-textColor text-[20px]"
               >
                 &times;

@@ -2,6 +2,50 @@
 
 Guia completo para configurar e usar automacoes de comentarios do Instagram no Robo MultiPost.
 
+## Link direto para um comentário no histórico
+
+Em `/automacoes/<id>`, clique em um comentário no histórico para abrir seus detalhes.
+A URL passa a incluir `history=1&executionId=<id-da-execucao>`. O nome da pessoa
+é um link que pode ser copiado ou aberto em outra aba. O identificador é o registro
+local da execução daquele comentário, usado pela API de histórico; não é o ID do
+comentário no Instagram.
+
+Abrir esse link ou recarregar a página restaura a seleção, inclusive no editor
+avançado. **Voltar/Avançar** do navegador restaura a lista, o comentário e a abertura
+do histórico. **Voltar à lista** remove a seleção e mantém o histórico aberto;
+fechar o histórico remove seus parâmetros. Essas ações preservam a automação,
+os demais parâmetros da URL (inclusive parâmetros repetidos) e o fragmento.
+Um registro inexistente ou inacessível continua oferecendo retorno à lista.
+O link requer login e as permissões existentes da organização/perfil/automação.
+
+## Mensagem depois do comentário e follow-up
+
+Para a primeira DM após um comentário, escolha **Comentário em Feed/Reels** em
+**Nova Automação** e configure **Enviar mensagem privada** no assistente.
+Para mensagens seguintes separadas, abra o editor avançado de uma automação
+pausada ou em rascunho e habilite **Sequência de mensagens separadas**. Conecte
+a primeira mensagem, **Aguardar resposta** e a mensagem seguinte. A espera só
+continua quando a pessoa responde; se expirar, encerra sem enviar lembrete.
+Um atraso simples não substitui essa resposta, e abrir um link não conta como resposta.
+O gate de pedir para seguir em comentários continua no motor original.
+
+Follow-up é uma etapa da automação de comentário, por isso não aparece como
+gatilho próprio no modal. `NovaAutomacaoModal` lista explicitamente apenas
+`comment_on_post`, `story_reply` e `repost_story`; `CreateFlowFromWizardDto`
+aceita somente os dois primeiros (repost tem seu próprio fluxo).
+O editor implementa `waitReply` como `DELAY` com `mode="reply"` e habilita a
+sequência por `executionVersion: 2`.
+
+Isso é diferente de **Follow to DM** para um novo seguidor: esse gatilho não está
+implementado nessa lista nem no DTO. **Pedir para seguir** (`requireFollow`) é
+uma condição dentro do fluxo iniciado por comentário ou resposta ao story;
+não cria um gatilho de novo seguidor.
+
+Referências: `apps/frontend/src/components/automations/nova-automacao-modal.component.tsx`,
+`automation-wizard.component.tsx`, `flow-editor.component.tsx` e `node-config-panel.tsx`
+no mesmo diretório; `libraries/nestjs-libraries/src/dtos/flows/flow.dto.ts`;
+`docs/architecture/instagram-automations.md` (sequência V2).
+
 ## Resposta pública e DM independentes
 
 No assistente de comentários, use os switches de resposta pública e **Enviar mensagem privada** separadamente. Para responder somente nos comentários, ligue a resposta pública e desligue a DM. O texto e os links da DM ficam ocultos; o pedido para seguir também fica desativado, pois ele envia mensagens privadas. A alteração só é aplicada ao salvar. Ao salvar com DM desligada, os botões pendentes de pedir para seguir são cancelados e mensagens privadas ainda na fila verificam a configuração atual antes de enviar. Mensagens já enviadas não são removidas. Automações existentes com uma ação de DM abrem com o switch ligado, sem mudança automática na configuração ou no status.
