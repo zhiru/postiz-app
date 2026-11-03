@@ -27,6 +27,7 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useFlow } from '@gitroom/frontend/components/automations/hooks/use-flows';
 import { useRouter } from 'next/navigation';
+import { useFlowHistory } from './hooks/use-flow-history';
 import { TriggerNode } from '@gitroom/frontend/components/automations/nodes/trigger-node';
 import { ConditionNode } from '@gitroom/frontend/components/automations/nodes/condition-node';
 import { ReplyCommentNode } from '@gitroom/frontend/components/automations/nodes/reply-comment-node';
@@ -176,7 +177,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
   const [sequence, setSequence] = useState(false);
   const [paletteSearch, setPaletteSearch] = useState('');
   const [showPreview, setShowPreview] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
+  const { showHistory, navigateHistory } = useFlowHistory();
   const [editingName, setEditingName] = useState(false);
   const [flowName, setFlowName] = useState('');
   const [viewMode, setViewMode] = useState<'summary' | 'advanced' | null>(null);
@@ -393,8 +394,21 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
     [setNodes, setEdges, toaster, t, sequence]
   );
 
+  const followerPreparation = nodes.some((n) => {
+    if (n.type !== 'trigger') return false;
+    try {
+      return (
+        JSON.parse(String(n.data?.config || '{}')).triggerType ===
+        'new_follower'
+      );
+    } catch {
+      return false;
+    }
+  });
+
   const handleNodeUpdate = useCallback(
     (nodeId: string, config: Record<string, any>) => {
+      if (config.triggerType === 'new_follower') setSequence(true);
       setNodes((nds) =>
         nds.map((n) =>
           n.id === nodeId
@@ -430,7 +444,9 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
               });
             const parsed = JSON.parse(rawData);
             label =
-              parsed?.triggerType === 'story_reply'
+              parsed?.triggerType === 'new_follower'
+                ? 'new_follower'
+                : parsed?.triggerType === 'story_reply'
                 ? 'story_reply'
                 : 'comment_on_post';
           } catch {
@@ -654,7 +670,7 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
             {t('view_summary', 'Summary')}
           </button>
           <button
-            onClick={() => setShowHistory((v) => !v)}
+            onClick={() => navigateHistory(!showHistory)}
             className="rounded-[4px] bg-btnSimple border border-fifth px-[12px] py-[6px] text-[12px] text-textColor hover:bg-boxHover"
           >
             {showHistory
@@ -671,6 +687,15 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
           ) : (
             <button
               onClick={() => handleStatusChange('ACTIVE')}
+              disabled={followerPreparation}
+              title={
+                followerPreparation
+                  ? t(
+                      'flow_follower_blocked',
+                      'Waiting for official Meta access'
+                    )
+                  : undefined
+              }
               className="rounded-[4px] bg-customColor42/20 text-customColor42 px-[12px] py-[6px] text-[12px] hover:opacity-80"
             >
               {t('activate_flow', 'Activate')}
@@ -687,12 +712,24 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
       </div>
 
       <div className="border-b border-newTableBorder bg-newBgColorInner px-4 py-3 space-y-3">
+        {followerPreparation && (
+          <p
+            role="alert"
+            className="rounded-lg border border-newTableBorder bg-btnSimple p-3 text-sm text-textColor"
+          >
+            {t(
+              'flow_follower_pending',
+              'Preparation only. Official Meta access and the follower event are not available for our app. You can save the sequence, but activation and sending are blocked.'
+            )}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-3 justify-between">
           <label className="flex items-center gap-2 text-sm text-textColor">
             <input
               type="checkbox"
               checked={sequence}
               disabled={
+                followerPreparation ||
                 flow.status === 'ACTIVE' ||
                 flow.nodes.some((n: any) => {
                   try {
@@ -716,7 +753,12 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
           </button>
         </div>
         <p className="text-xs text-tableText" role="note">
-          {sequence
+          {followerPreparation
+            ? t(
+                'flow_follower_draft_hint',
+                'Design and preview the sequence here. Saving preparation does not enable the beta or send messages.'
+              )
+            : sequence
             ? t(
                 'flow_sequence_rules',
                 'One first DM per comment. Wait for a reply before sending more. Media and text are separate messages; subsequent sends must stay within the messaging window.'
@@ -755,7 +797,8 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
               key={`${item.type}:${'kind' in item ? item.kind : ''}`}
               draggable
               disabled={
-                !sequence && (item.type === 'waitReply' || 'kind' in item)
+                (followerPreparation && item.type === 'replyComment') ||
+                (!sequence && (item.type === 'waitReply' || 'kind' in item))
               }
               onDragStart={(e) =>
                 onDragStart(
@@ -775,7 +818,9 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
                   {t(item.labelKey, item.label)}
                 </span>
                 <span className="block text-[11px] text-tableText">
-                  {t(item.descKey, item.desc)}
+                  {followerPreparation && item.type === 'trigger'
+                    ? t('flow_new_follower', 'New follower · preparation')
+                    : t(item.descKey, item.desc)}
                 </span>
               </span>
             </button>
@@ -850,7 +895,8 @@ const FlowEditorInner: FC<FlowEditorProps> = ({ id }) => {
                 {t('flow_executions', 'Historico de Execucoes')}
               </h3>
               <button
-                onClick={() => setShowHistory(false)}
+                onClick={() => navigateHistory(false)}
+                aria-label={t('hide_history', 'Ocultar historico')}
                 className="text-customColor18 hover:text-textColor text-[20px]"
               >
                 &times;

@@ -224,3 +224,36 @@ Cada nó também exige seu `id`, `positionX` e `positionY`; cada aresta liga
 `sourceNodeId` e `targetNodeId` existentes. Condições usam sourceHandle `match`/`no_match`.
 A validação rejeita grafo inválido, mídia fora do perfil ou não pronta e followup
 sem interação. Prévia é somente leitura: salvar canvas não envia mensagens.
+
+
+### Preparação Follow to DM
+
+Somente o canvas autenticado permite salvar TRIGGER com
+`triggerType: "new_follower"`. A versão V2 é aplicada pelo servidor, inclusive se
+omitida pelo cliente. O fluxo precisa estar pausado ou em rascunho. O contrato
+público simplificado/MCP continua aceitando apenas comentário e Story; ele não
+cria automações de novo seguidor. A tentativa de ativar a preparação por qualquer
+rota de status retorna 400 com mensagem de dependência de acesso oficial da Meta,
+antes de mudar status ou assinaturas. Não há envio/ingestão de seguidores nesta
+entrega. Isso não representa ativação do beta nem implementação de um endpoint
+privado da Meta.
+
+## Publicações excluídas
+
+No assistente de automação de comentários e no Flow Builder, use **Publicações
+excluídas** para selecionar posts/Reels que não devem disparar aquela automação.
+O seletor permite busca nas páginas carregadas, carregar mais e inserir IDs de
+mídia do Instagram para anúncios ou posts fora da lista. Remova uma seleção para
+voltar a permitir esse post. A exclusão é por automação, não exclui o post da rede
+e não cancela execuções já iniciadas.
+
+API de criação/edição rápida e MCP `createCommentAutomationTool` aceitam
+`excludedPostIds: ["17999999999999999"]`. Máximo de 100 IDs únicos, não vazios,
+sem espaços, com até 64 caracteres. No canvas, o campo fica no JSON do nó TRIGGER.
+Na edição rápida, omitir preserva as exclusões; `[]` remove todas. O retorno
+existente dos nós inclui a configuração salva. Não há migração de banco.
+
+As exclusões prevalecem sobre seleção específica e aliases de anúncios. Em
+`next_publication`, um post excluído não vincula o fluxo: ele aguarda o próximo
+permitido. O filtro vale para comentários (feed/Reels); não modifica gatilhos de
+Stories. Fluxos sem exclusões mantêm o comportamento anterior.

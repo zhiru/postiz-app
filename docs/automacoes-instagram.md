@@ -2,6 +2,50 @@
 
 Guia completo para configurar e usar automacoes de comentarios do Instagram no Robo MultiPost.
 
+## Link direto para um comentário no histórico
+
+Em `/automacoes/<id>`, clique em um comentário no histórico para abrir seus detalhes.
+A URL passa a incluir `history=1&executionId=<id-da-execucao>`. O nome da pessoa
+é um link que pode ser copiado ou aberto em outra aba. O identificador é o registro
+local da execução daquele comentário, usado pela API de histórico; não é o ID do
+comentário no Instagram.
+
+Abrir esse link ou recarregar a página restaura a seleção, inclusive no editor
+avançado. **Voltar/Avançar** do navegador restaura a lista, o comentário e a abertura
+do histórico. **Voltar à lista** remove a seleção e mantém o histórico aberto;
+fechar o histórico remove seus parâmetros. Essas ações preservam a automação,
+os demais parâmetros da URL (inclusive parâmetros repetidos) e o fragmento.
+Um registro inexistente ou inacessível continua oferecendo retorno à lista.
+O link requer login e as permissões existentes da organização/perfil/automação.
+
+## Mensagem depois do comentário e follow-up
+
+Para a primeira DM após um comentário, escolha **Comentário em Feed/Reels** em
+**Nova Automação** e configure **Enviar mensagem privada** no assistente.
+Para mensagens seguintes separadas, abra o editor avançado de uma automação
+pausada ou em rascunho e habilite **Sequência de mensagens separadas**. Conecte
+a primeira mensagem, **Aguardar resposta** e a mensagem seguinte. A espera só
+continua quando a pessoa responde; se expirar, encerra sem enviar lembrete.
+Um atraso simples não substitui essa resposta, e abrir um link não conta como resposta.
+O gate de pedir para seguir em comentários continua no motor original.
+
+Follow-up é uma etapa da automação de comentário, por isso não aparece como
+gatilho próprio no modal. `NovaAutomacaoModal` lista explicitamente apenas
+`comment_on_post`, `story_reply` e `repost_story`; `CreateFlowFromWizardDto`
+aceita somente os dois primeiros (repost tem seu próprio fluxo).
+O editor implementa `waitReply` como `DELAY` com `mode="reply"` e habilita a
+sequência por `executionVersion: 2`.
+
+Isso é diferente de **Follow to DM** para um novo seguidor: esse gatilho não está
+implementado nessa lista nem no DTO. **Pedir para seguir** (`requireFollow`) é
+uma condição dentro do fluxo iniciado por comentário ou resposta ao story;
+não cria um gatilho de novo seguidor.
+
+Referências: `apps/frontend/src/components/automations/nova-automacao-modal.component.tsx`,
+`automation-wizard.component.tsx`, `flow-editor.component.tsx` e `node-config-panel.tsx`
+no mesmo diretório; `libraries/nestjs-libraries/src/dtos/flows/flow.dto.ts`;
+`docs/architecture/instagram-automations.md` (sequência V2).
+
 ## Resposta pública e DM independentes
 
 No assistente de comentários, use os switches de resposta pública e **Enviar mensagem privada** separadamente. Para responder somente nos comentários, ligue a resposta pública e desligue a DM. O texto e os links da DM ficam ocultos; o pedido para seguir também fica desativado, pois ele envia mensagens privadas. A alteração só é aplicada ao salvar. Ao salvar com DM desligada, os botões pendentes de pedir para seguir são cancelados e mensagens privadas ainda na fila verificam a configuração atual antes de enviar. Mensagens já enviadas não são removidas. Automações existentes com uma ação de DM abrem com o switch ligado, sem mudança automática na configuração ou no status.
@@ -480,3 +524,59 @@ no ponto desejado antes de salvar. Excluir remove o bloco e as conexões que o
 usavam, sem reconectar os vizinhos automaticamente. O gatilho não pode ser
 copiado nem excluído pelo menu/teclado. Essas ações alteram somente o canvas;
 é preciso salvar para aplicá-las. Em uma sequência V2 ativa, pause antes de editar.
+
+
+## Novo seguidor — preparação bloqueada
+
+No gatilho do Flow Builder, selecione **Novo seguidor · preparação** em um fluxo
+pausado ou rascunho. Você pode preparar a primeira mensagem e os passos seguintes,
+inclusive a espera por resposta e mídias. A faixa de aviso permanece visível e
+**Ativar fica indisponível**. Salvar não muda o status nem envia mensagens.
+
+A Meta ainda não disponibilizou para nosso app o evento e o acesso oficial
+necessários. A API também bloqueia a ativação, mesmo se o cliente omitir essa
+restrição. O fluxo não reage a comentários ou Stories como substituto de follow.
+Para prosseguir com o beta, consulte o [pedido de acesso pronto para revisão](operations/instagram-follow-to-dm-access.md).
+
+## Publicações excluídas
+
+No assistente de automação de comentários e no Flow Builder, use **Publicações
+excluídas** para selecionar posts/Reels que não devem disparar aquela automação.
+O seletor permite busca nas páginas carregadas, carregar mais e inserir IDs de
+mídia do Instagram para anúncios ou posts fora da lista. Remova uma seleção para
+voltar a permitir esse post. A exclusão é por automação, não exclui o post da rede
+e não cancela execuções já iniciadas.
+
+API de criação/edição rápida e MCP `createCommentAutomationTool` aceitam
+`excludedPostIds: ["17999999999999999"]`. Máximo de 100 IDs únicos, não vazios,
+sem espaços, com até 64 caracteres. No canvas, o campo fica no JSON do nó TRIGGER.
+Na edição rápida, omitir preserva as exclusões; `[]` remove todas. O retorno
+existente dos nós inclui a configuração salva. Não há migração de banco.
+
+As exclusões prevalecem sobre seleção específica e aliases de anúncios. Em
+`next_publication`, um post excluído não vincula o fluxo: ele aguarda o próximo
+permitido. O filtro vale para comentários (feed/Reels); não modifica gatilhos de
+Stories. Fluxos sem exclusões mantêm o comportamento anterior.
+
+### Consultar comentários e execuções de uma automação
+
+Em `/automacoes/<id>`, abra a lista de comentários/execuções. A lista compacta
+mostra autor, comentário, status e início; **Cards** apresenta os mesmos registros
+em cartões. A troca de visualização mantém os filtros e a página atual.
+
+- Busque pelo texto do comentário, nome ou ID da pessoa (sem diferenciar maiúsculas).
+- Filtre por status e pelas datas de início da execução. A data final inclui o dia
+  inteiro no fuso do navegador; use **Limpar filtros** para restaurar a consulta.
+- Ordene pelos registros mais recentes ou mais antigos e escolha 10, 20, 50 ou 100
+  itens por página. A contagem corresponde a todos os resultados filtrados, e os
+  filtros são aplicados no servidor antes da paginação.
+- Abra um registro pelo autor na lista ou pelo cartão para consultar o detalhe já
+  existente. Estes controles de listagem não alteram a URL.
+- Se a consulta falhar, use **Tentar novamente**. Uma falha de carregamento não é
+  apresentada como lista vazia.
+
+A listagem usa `GET /flows/:id/executions?paginated=true` com `page` (a partir de 1),
+`limit` (até 100), `search`, `status`, `since`, `until` e `order` (`asc`/`desc`).
+`since` é inclusivo e `until` exclusivo, ambos em ISO 8601. A resposta paginada é
+`{ items, total }`, limitada à organização e ao perfil autenticados. Sem
+`paginated=true`, o endpoint mantém a resposta anterior em array.

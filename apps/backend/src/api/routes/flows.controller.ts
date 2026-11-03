@@ -1,3 +1,4 @@
+import { FlowExecutionsQueryDto } from '@gitroom/nestjs-libraries/dtos/flows/flow-executions-query.dto';
 import {
   Body,
   Controller,
@@ -220,14 +221,16 @@ export class FlowsController {
     @GetOrgFromRequest() org: Organization,
     @GetProfileFromRequest() profile: Profile | null,
     @Param('id') id: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string
+    @Query() query: FlowExecutionsQueryDto
   ) {
+    if (query.paginated === 'true') {
+      return this._flowsService.getExecutionsPage(org.id, id, query, profile?.id);
+    }
     return this._flowsService.getExecutions(
       org.id,
       id,
-      page ? parseInt(page, 10) : undefined,
-      limit ? parseInt(limit, 10) : undefined,
+      query.page,
+      query.limit,
       profile?.id
     );
   }

@@ -190,6 +190,9 @@ export const FlowSummaryComponent: FC<FlowSummaryProps> = ({
               ? t('summary_specific_posts', '{count} specific post(s)').replace('{count}', String(triggerConfig.postIds.length))
               : t('summary_all_posts', 'Todos os posts')}
           </p>
+      {triggerConfig.triggerType !== 'story_reply' && triggerConfig.excludedPostIds?.length > 0 && (
+        <p className="mt-1 text-xs text-textColor">{t('flow_excluded_posts', 'Excluded posts')}: {triggerConfig.excludedPostIds.length}</p>
+      )}
           {triggerConfig.keywords?.length > 0 && (
             <p className="text-[11px] text-customColor18 mt-[4px]">
               {t('trigger_keywords_label', 'Palavras-chave')}: {triggerConfig.keywords.join(', ')}

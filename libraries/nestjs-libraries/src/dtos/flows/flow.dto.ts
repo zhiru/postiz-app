@@ -172,6 +172,20 @@ export class QuickCreateFlowDto {
   @MaxLength(64, { each: true })
   postIds?: string[];
 
+  @ApiPropertyOptional({
+    type: [String],
+    maxItems: 100,
+    description:
+      'Instagram media IDs whose comments must never trigger this automation. Exclusions override post selection and ad aliases. Omit on update to preserve; [] clears. Does not cancel executions already started.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  excludedPostIds?: string[];
+
   // Obrigatorio e nao-vazio quando postMode='specific' em story_reply.
   @ApiPropertyOptional({
     type: [String],

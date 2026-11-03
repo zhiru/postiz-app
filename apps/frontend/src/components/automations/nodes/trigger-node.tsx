@@ -7,11 +7,22 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
 export const TriggerNode: FC<NodeProps> = memo(({ id, data, selected }) => {
   const t = useT();
-  const config = typeof data?.config === 'string'
-    ? (() => { try { return JSON.parse(data.config as string); } catch { return {}; } })()
-    : (data?.config || {});
-  const triggerType: 'comment_on_post' | 'story_reply' =
-    config.triggerType === 'story_reply' ? 'story_reply' : 'comment_on_post';
+  const config =
+    typeof data?.config === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(data.config as string);
+          } catch {
+            return {};
+          }
+        })()
+      : data?.config || {};
+  const triggerType: 'comment_on_post' | 'story_reply' | 'new_follower' =
+    config.triggerType === 'new_follower'
+      ? 'new_follower'
+      : config.triggerType === 'story_reply'
+      ? 'story_reply'
+      : 'comment_on_post';
   const mode: 'all' | 'specific' | 'next_publication' =
     config.mode === 'next_publication'
       ? 'next_publication'
@@ -21,25 +32,31 @@ export const TriggerNode: FC<NodeProps> = memo(({ id, data, selected }) => {
       ? 'specific'
       : 'all';
   const postCount = Array.isArray(config.postIds) ? config.postIds.length : 0;
-  const storyCount = Array.isArray(config.storyIds) ? config.storyIds.length : 0;
-  const keywords: string[] = Array.isArray(config.keywords) ? config.keywords : [];
+  const storyCount = Array.isArray(config.storyIds)
+    ? config.storyIds.length
+    : 0;
+  const keywords: string[] = Array.isArray(config.keywords)
+    ? config.keywords
+    : [];
 
   const title =
-    triggerType === 'story_reply'
+    triggerType === 'new_follower'
+      ? t('flow_new_follower', 'New follower · preparation')
+      : triggerType === 'story_reply'
       ? t('trigger_node_label_story', 'Gatilho: Resposta ao story')
       : t('trigger_node_label', 'Gatilho: Comentario no Instagram');
   const description =
-    triggerType === 'story_reply'
+    triggerType === 'new_follower'
+      ? t('flow_follower_blocked', 'Waiting for official Meta access')
+      : triggerType === 'story_reply'
       ? t(
           'trigger_node_description_story',
           'Quando alguem responder ou reagir ao seu story'
         )
-      : t(
-          'trigger_node_description',
-          'Quando alguem comentar em uma postagem'
-        );
+      : t('trigger_node_description', 'Quando alguem comentar em uma postagem');
 
   const modeLabel = (() => {
+    if (triggerType === 'new_follower') return '';
     if (mode === 'next_publication') {
       return triggerType === 'story_reply'
         ? t('summary_next_story', 'Aguardando proximo story')
@@ -47,10 +64,10 @@ export const TriggerNode: FC<NodeProps> = memo(({ id, data, selected }) => {
     }
     if (mode === 'specific') {
       if (triggerType === 'story_reply') {
-        return t('summary_specific_stories', '{count} story(ies) especifico(s)').replace(
-          '{count}',
-          String(storyCount)
-        );
+        return t(
+          'summary_specific_stories',
+          '{count} story(ies) especifico(s)'
+        ).replace('{count}', String(storyCount));
       }
       return t('trigger_posts_selected', '{count} post(s) selected').replace(
         '{count}',
@@ -80,26 +97,40 @@ export const TriggerNode: FC<NodeProps> = memo(({ id, data, selected }) => {
         >
           <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" />
         </svg>
-        <span className="text-[13px] font-semibold" style={{ color: '#4ade80' }}>
+        <span
+          className="text-[13px] font-semibold"
+          style={{ color: '#4ade80' }}
+        >
           {title}
         </span>
         <FlowNodeActions id={id} />
       </div>
       <p className="text-[12px] text-customColor18">{description}</p>
-      <p className="text-[11px] mt-[4px] text-textColor opacity-80">{modeLabel}</p>
-      {keywords.length > 0 && (
+      <p className="text-[11px] mt-[4px] text-textColor opacity-80">
+        {modeLabel}
+      </p>
+      {triggerType === 'comment_on_post' &&
+        config.excludedPostIds?.length > 0 && (
+          <p className="mt-1 text-xs text-textColor">
+            {t('flow_excluded_posts', 'Excluded posts')}:{' '}
+            {config.excludedPostIds.length}
+          </p>
+        )}
+      {triggerType !== 'new_follower' && keywords.length > 0 && (
         <p className="text-[11px] mt-[2px] truncate max-w-[180px] text-textColor opacity-70">
           {t('trigger_keywords_label', 'Palavras-chave')}: {keywords.join(', ')}
         </p>
       )}
       {config.requireFollow && (
-        <span
-          className="inline-block mt-[6px] text-[10px] px-[6px] py-[2px] rounded-[10px] border border-yellow-500/40 bg-yellow-500/10 text-yellow-200"
-        >
+        <span className="inline-block mt-[6px] text-[10px] px-[6px] py-[2px] rounded-[10px] border border-yellow-500/40 bg-yellow-500/10 text-yellow-200">
           ⚠️ {t('trigger_node_follow_gate_badge', 'Pede para seguir')}
         </span>
       )}
-      <Handle type="source" position={Position.Bottom} className="!bg-green-400" />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!bg-green-400"
+      />
     </div>
   );
 });

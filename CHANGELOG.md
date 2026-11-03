@@ -8,11 +8,14 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 ## [Unreleased]
 
 - Prévia do calendário mantém o modal em 80vw/80vh e o iframe preenchendo a área restante abaixo da barra de ações.
-
 - Prévia autenticada mostra nomes de contatos/grupos NeuralTalk salvos, com ID como fallback, e diferencia configuração, mensagem registrada, rejeição, resultado desconhecido e envio confirmado pelo provedor, sem afirmar entrega no aparelho; destinatários e configurações ficam fora do link público e da revisão.
 - Calendário/listagem: evita que a rolagem provocada pelo foco feche imediatamente o menu de três pontos, com regressão para vídeos importados e preservação das permissões de ações.
 - Calendário/listagem: selo traduzido “Reel de Teste” somente com `settings.is_trial_reel` explícito; respeita `"false"` legado e não deduz teste de vídeos ou Reels importados.
 - Prévia autenticada do calendário/listagem reutiliza as ações do card, incluindo duplicar e copiar para outra rede no composer com seleção de canal; aceita publicações importadas como origem e oferece o mesmo menu por clique direito ou teclado, sem publicação automática.
+- Flow Builder: preparação de fluxo para novo seguidor com mensagens/mídias e aviso explícito; ativação e envios bloqueados até acesso e contrato oficiais da Meta. Inclui pedido de acesso técnico pronto para revisão, sem alterar conexões e automações existentes.
+- Automações de comentários: selecionar posts e Reels excluídos, inclusive anúncios, no assistente e Flow Builder; API/MCP aceitam `excludedPostIds`, com prioridade sobre seleção e aliases.
+- Histórico de comentários em `/automacoes/<id>` com link direto por execução e seleção/lista restauradas por Voltar/Avançar, preservando automação e parâmetros da URL; retorno à lista também para registros indisponíveis.
+- Comentários de automações: paginação com total e tamanho de página, busca por texto/pessoa, filtros de status e período, ordenação e alternância entre lista compacta e cards.
 
 - Etapas do Flow Builder com menu de três pontos para editar, duplicar sem conexões e excluir com limpeza das arestas; o gatilho permanece único e as ações não salvam nem enviam automaticamente.
 

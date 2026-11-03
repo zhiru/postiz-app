@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { WizardPhonePreview } from '@gitroom/frontend/components/automations/wizard-phone-preview.component';
 import { AddLinkModal } from '@gitroom/frontend/components/automations/add-link-modal.component';
+import { ExcludedPostsField } from './excluded-posts-field';
 import { AdAliasesField } from '@gitroom/frontend/components/automations/ad-aliases-field.component';
 import { CommaSeparatedKeywordsInput } from '@gitroom/frontend/components/automations/comma-separated-keywords-input.component';
 
@@ -75,6 +76,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
   const [activateAfterSave, setActivateAfterSave] = useState(false);
   const creationId = useRef<string | undefined>(undefined);
   const [postMode, setPostMode] = useState<'all' | 'specific' | 'next_publication'>(initialIntegrationIds.length > 1 ? 'all' : 'specific');
+  const [excludedPostIds, setExcludedPostIds] = useState<string[]>([]);
   const [selectedPostIds, setSelectedPostIds] = useState<string[]>([]);
   const [keywordMode, setKeywordMode] = useState<'any_word' | 'specific'>('any_word');
   const [keywords, setKeywords] = useState<string[]>([]);
@@ -126,6 +128,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
     const replyNode = initialFlow.nodes?.find((n: any) => n.type === 'REPLY_COMMENT');
     const dmNode = initialFlow.nodes?.find((n: any) => n.type === 'SEND_DM');
     const triggerCfg = safeJson(triggerNode?.data);
+    setExcludedPostIds(triggerCfg.excludedPostIds || []);
     const replyCfg = safeJson(replyNode?.data);
     const dmCfg = safeJson(dmNode?.data);
     if (triggerCfg.mode === 'next_publication' && !triggerCfg.postIds?.length) {
@@ -277,6 +280,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
         integrationId,
         triggerType: 'comment_on_post',
         postMode,
+        excludedPostIds,
         enableDm,
         aiReplyEnabled: enableReply && aiReplyEnabled,
         aiDmEnabled: enableDm && aiDmEnabled,
@@ -415,7 +419,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
           ) : (
             <InstagramAccountSelect accounts={instagramIntegrations} value={integrationIds}
               multiple={!isEditing} disabled={isEditing}
-              onChange={ids => { setIntegrationIds(ids); setSelectedPostIds([]); if (ids.length > 1) setPostMode('all'); }} />
+              onChange={ids => { setIntegrationIds(ids); setSelectedPostIds([]); setExcludedPostIds([]); if (ids.length > 1) setPostMode('all'); }} />
           )}
         </div>
 
@@ -533,6 +537,11 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
                   {t('wizard_next_publication_hint', 'A automação será vinculada automaticamente ao próximo feed ou reel publicado nesta conta. Stories não são suportados.')}
                 </p>
               </div>
+
+              {integrationIds.length === 1 && integrationId && (
+                <ExcludedPostsField key={integrationId} integrationId={integrationId}
+                  value={excludedPostIds} onChange={setExcludedPostIds} />
+              )}
 
               {/* Aliases de dark posts (anuncios) — aditivo a qualquer modo */}
               <div className="mt-[16px]">
