@@ -52,13 +52,16 @@ const parseJsonSafe = (value: unknown): any => {
 };
 
 const buildTriggerSummary = (flow: FlowListItem): TriggerSummary => {
-  const triggerNode = flow.nodes?.find((n) => n.type === 'TRIGGER') ?? flow.nodes?.[0];
+  const triggerNode =
+    flow.nodes?.find((n) => n.type === 'TRIGGER') ?? flow.nodes?.[0];
   const triggerData = parseJsonSafe(triggerNode?.data ?? null);
   const rawKeywords = Array.isArray(triggerData?.keywords)
     ? triggerData.keywords
     : [];
   const keywords = rawKeywords
-    .filter((k: unknown): k is string => typeof k === 'string' && k.trim().length > 0)
+    .filter(
+      (k: unknown): k is string => typeof k === 'string' && k.trim().length > 0
+    )
     .map((k: string) => k.trim());
 
   const postIdsParsed = parseJsonSafe(flow.triggerPostIds);
@@ -107,13 +110,19 @@ export const FlowListComponent: FC = () => {
       try {
         const res = await fetchApi(`/flows/${id}`, { method: 'DELETE' });
         if (!res.ok) {
-          toaster.show(t('failed_to_delete_flow', 'Falha ao excluir automação'), 'warning');
+          toaster.show(
+            t('failed_to_delete_flow', 'Falha ao excluir automação'),
+            'warning'
+          );
           return;
         }
         await mutate();
         toaster.show(t('flow_deleted', 'Automação excluída'), 'success');
       } catch {
-        toaster.show(t('failed_to_delete_flow', 'Falha ao excluir automação'), 'warning');
+        toaster.show(
+          t('failed_to_delete_flow', 'Falha ao excluir automação'),
+          'warning'
+        );
       }
     },
     [fetchApi, mutate, t, toaster]
@@ -233,23 +242,30 @@ interface RowProps {
   onDelete: () => void;
 }
 
-const STATUS_BADGE_STYLE: Record<
-  FlowStatus,
-  { bg: string; color: string }
-> = {
+const STATUS_BADGE_STYLE: Record<FlowStatus, { bg: string; color: string }> = {
   ACTIVE: { bg: 'rgba(34,197,94,0.15)', color: '#16a34a' },
   PAUSED: { bg: 'rgba(82,82,91,0.18)', color: '#a1a1aa' },
   DRAFT: { bg: 'rgba(245,158,11,0.15)', color: '#d97706' },
   ARCHIVED: { bg: 'rgba(82,82,91,0.18)', color: '#a1a1aa' },
 };
 
-const FlowRow: FC<RowProps> = ({ flow, isLast, onToggle, onEdit, onDelete }) => {
+const FlowRow: FC<RowProps> = ({
+  flow,
+  isLast,
+  onToggle,
+  onEdit,
+  onDelete,
+}) => {
   const t = useT();
   const isActive = flow.status === 'ACTIVE';
-  const isToggleDisabled = flow.status === 'DRAFT' || flow.status === 'ARCHIVED';
+  const isToggleDisabled =
+    flow.status === 'DRAFT' || flow.status === 'ARCHIVED';
   const execCount = flow._count?.executions ?? 0;
   const integration = flow.integration;
   const summary = buildTriggerSummary(flow);
+  const followerPreparation =
+    parseJsonSafe(flow.nodes?.find((n) => n.type === 'TRIGGER')?.data)
+      ?.triggerType === 'new_follower';
 
   const statusLabel =
     flow.status === 'ACTIVE'
@@ -262,19 +278,21 @@ const FlowRow: FC<RowProps> = ({ flow, isLast, onToggle, onEdit, onDelete }) => 
 
   const badgeStyle = STATUS_BADGE_STYLE[flow.status];
 
-  const keywordsPart =
-    summary.keywords.length === 0
-      ? t('flow_trigger_no_keywords', 'Sem palavras-chave')
-      : summary.keywords.slice(0, 2).join(', ') +
-        (summary.keywords.length > 2 ? ` +${summary.keywords.length - 2}` : '');
+  const keywordsPart = followerPreparation
+    ? t('flow_new_follower', 'New follower · preparation')
+    : summary.keywords.length === 0
+    ? t('flow_trigger_no_keywords', 'Sem palavras-chave')
+    : summary.keywords.slice(0, 2).join(', ') +
+      (summary.keywords.length > 2 ? ` +${summary.keywords.length - 2}` : '');
 
-  const postsPart =
-    summary.postsCount == null
-      ? t('flow_trigger_all_posts', 'Todos os posts')
-      : t('flow_trigger_posts_count', '{{count}} posts').replace(
-          '{{count}}',
-          String(summary.postsCount)
-        );
+  const postsPart = followerPreparation
+    ? t('flow_follower_blocked', 'Waiting for official Meta access')
+    : summary.postsCount == null
+    ? t('flow_trigger_all_posts', 'Todos os posts')
+    : t('flow_trigger_posts_count', '{{count}} posts').replace(
+        '{{count}}',
+        String(summary.postsCount)
+      );
 
   return (
     <tr
@@ -287,7 +305,7 @@ const FlowRow: FC<RowProps> = ({ flow, isLast, onToggle, onEdit, onDelete }) => 
           <button
             type="button"
             onClick={onToggle}
-            disabled={isToggleDisabled}
+            disabled={isToggleDisabled || followerPreparation}
             role="switch"
             aria-checked={isActive}
             aria-label={
@@ -319,7 +337,11 @@ const FlowRow: FC<RowProps> = ({ flow, isLast, onToggle, onEdit, onDelete }) => 
       </td>
 
       <td className="px-[16px] py-[14px]">
-        <button type="button" onClick={onEdit} className="text-left hover:underline">
+        <button
+          type="button"
+          onClick={onEdit}
+          className="text-left hover:underline"
+        >
           <div className="text-[13px] font-medium text-textColor truncate max-w-[360px]">
             {flow.name}
           </div>
@@ -352,7 +374,9 @@ const FlowRow: FC<RowProps> = ({ flow, isLast, onToggle, onEdit, onDelete }) => 
       </td>
 
       <td className="px-[16px] py-[14px]">
-        <span className="text-[14px] font-semibold text-textColor">{execCount}</span>
+        <span className="text-[14px] font-semibold text-textColor">
+          {execCount}
+        </span>
       </td>
 
       <td className="px-[16px] py-[14px] whitespace-nowrap">

@@ -48,6 +48,22 @@ export class FlowMessageService {
       flow.integrationId !== input.integrationId
     )
       throw new BadRequestException('Automation paused or unavailable.');
+    if (
+      flow.nodes?.some((node) => {
+        if (node.type !== 'TRIGGER') return false;
+        try {
+          return (
+            JSON.parse(node.data || '{}').triggerType === 'new_follower' ||
+            node.label === 'new_follower'
+          );
+        } catch {
+          return node.label === 'new_follower';
+        }
+      })
+    )
+      throw new BadRequestException(
+        'Follow to DM requires official Meta access. Preparation cannot send messages.'
+      );
     const integration = await this.integrations.getIntegrationById(
       input.organizationId,
       input.integrationId

@@ -1,3 +1,4 @@
+jest.mock('@gitroom/nestjs-libraries/database/prisma/flows/flows.service', () => ({ FlowsService: jest.fn() }));
 // Evita carregar integration.manager -> nostr.provider -> nostr-tools (ESM) na
 // cadeia transitiva de FlowsService; o service e totalmente mockado aqui.
 jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({}));
@@ -41,7 +42,7 @@ describe('CreateCommentAutomationTool', () => {
     });
 
     const res = await exec(
-      { name: 'Receita', integrationId: 'int-1', dmMessage: 'Aqui esta o link' },
+      { name: 'Receita', integrationId: 'int-1', dmMessage: 'Aqui esta o link', excludedPostIds: ['media-1'] },
       makeOptions({ id: 'org-1' }, 'perfil-A')
     );
 
@@ -50,6 +51,7 @@ describe('CreateCommentAutomationTool', () => {
       expect.objectContaining({
         integrationId: 'int-1',
         postMode: 'next_publication',
+        excludedPostIds: ['media-1'],
       }),
       'perfil-A'
     );

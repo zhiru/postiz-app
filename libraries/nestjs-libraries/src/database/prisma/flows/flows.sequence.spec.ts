@@ -228,3 +228,181 @@ describe('Sequence opt-in and response delivery', () => {
     expect(signal).not.toHaveBeenCalled();
   });
 });
+
+describe('New follower preparation remains non-executable', () => {
+  const body = () => graph([trigger('new_follower'), dm('a'), wait(), dm('b')]);
+  const setup = (status = 'PAUSED') => {
+    const repo = {
+      getFlow: jest.fn().mockResolvedValue({
+        status,
+        nodes: body().nodes,
+        edges: body().edges,
+        integrationId: 'ig',
+      }),
+      saveCanvas: jest.fn(),
+      updateFlowStatus: jest.fn(),
+      createExecution: jest.fn(),
+      findAliasesByIntegrationAndMedia: jest.fn().mockResolvedValue([]),
+      getActiveFlowsForIntegration: jest
+        .fn()
+        .mockResolvedValue([
+          { id: 'f', status: 'ACTIVE', nodes: body().nodes },
+        ]),
+    };
+    const service = new FlowsService(
+      repo as any,
+      null as any,
+      null as any,
+      null as any,
+      null as any,
+      null as any,
+      null as any,
+      {} as any,
+      {} as any
+    );
+    jest
+      .spyOn(service as any, 'persistUnmatchedComment')
+      .mockResolvedValue(undefined);
+    const subscribe = jest
+      .spyOn(service as any, 'ensureWebhookSubscription')
+      .mockResolvedValue(undefined);
+    return { repo, service, subscribe };
+  };
+  it('saves preparation with version two even when an old client omits the flag', async () => {
+    const { repo, service } = setup();
+    await service.saveCanvas('org', 'f', body() as any, 'profile');
+    expect(repo.getFlow).toHaveBeenCalledWith('org', 'f', 'profile');
+    expect(
+      JSON.parse(repo.saveCanvas.mock.calls[0][2][0].data).executionVersion
+    ).toBe(2);
+  });
+  it('cannot activate preparation or change webhook subscriptions', async () => {
+    const { repo, service, subscribe } = setup();
+    await expect(
+      service.updateFlowStatus('org', 'f', 'ACTIVE', 'profile')
+    ).rejects.toThrow(/Meta/);
+    expect(repo.updateFlowStatus).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
+  });
+  it('rejects editing an active flow into a follower draft', async () => {
+    const { repo, service } = setup('ACTIVE');
+    await expect(
+      service.saveCanvas('org', 'f', body() as any, 'profile')
+    ).rejects.toThrow(/Pause/);
+    expect(repo.saveCanvas).not.toHaveBeenCalled();
+  });
+  it('never treats a follower trigger as a comment trigger', async () => {
+    const { repo, service } = setup();
+    const result = await service.handleIncomingComment({
+      organizationId: 'org',
+      integrationId: 'ig',
+      igCommentId: 'c',
+      igCommenterId: 'u',
+      igMediaId: 'm',
+      commentText: 'hello',
+    });
+    expect(result).toEqual({ executions: [], retry: false });
+    expect(repo.createExecution).not.toHaveBeenCalled();
+  });
+  it('does not start follower preparation for a Story reply', async () => {
+    const { repo, service } = setup();
+    await service.handleIncomingStoryReply({
+      organizationId: 'org',
+      integrationId: 'ig',
+      igMessageId: 'mid',
+      igSenderId: 'u',
+      igStoryId: 's',
+      messageText: 'hello',
+    });
+    expect(repo.createExecution).not.toHaveBeenCalled();
+  });
+  it('rejects unsupported follower execution validation by default', () => {
+    expect(() => validateFlowSequence(body() as any)).toThrow(/Meta/);
+  });
+  it.each([
+    { ...trigger('new_follower'), label: 'story_reply' },
+    { ...trigger('story_reply'), label: 'new_follower' },
+  ])('blocks conflicting legacy trigger labels on activation', async (node) => {
+    const { repo, service, subscribe } = setup();
+    repo.getFlow.mockResolvedValue({
+      status: 'PAUSED',
+      nodes: [node, dm('a')],
+      edges: [],
+      integrationId: 'ig',
+    });
+    await expect(
+      service.updateFlowStatus('org', 'f', 'ACTIVE', 'profile')
+    ).rejects.toThrow(/Meta/);
+    expect(repo.updateFlowStatus).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
+  });
+  it('forces preparation validation for a conflicting follower canvas without version', async () => {
+    const { repo, service } = setup();
+    const node = {
+      ...n('t', 'TRIGGER', { triggerType: 'new_follower' }),
+      label: 'story_reply',
+    };
+    await service.saveCanvas(
+      'org',
+      'f',
+      graph([node, dm('a')]) as any,
+      'profile'
+    );
+    expect(
+      JSON.parse(repo.saveCanvas.mock.calls[0][2][0].data).executionVersion
+    ).toBe(2);
+  });
+  it('rejects a hidden second follower trigger instead of falling back to legacy', async () => {
+    const { repo, service } = setup();
+    repo.getFlow.mockResolvedValue({
+      status: 'PAUSED',
+      nodes: [],
+      edges: [],
+    } as any);
+    await expect(
+      service.saveCanvas(
+        'org',
+        'f',
+        graph([
+          n('t', 'TRIGGER', { triggerType: 'story_reply' }),
+          n('t2', 'TRIGGER', { triggerType: 'new_follower' }),
+          dm('a'),
+        ]) as any,
+        'profile'
+      )
+    ).rejects.toThrow(/one trigger/);
+    expect(repo.saveCanvas).not.toHaveBeenCalled();
+  });
+  it('does not resume a wait with conflicting follower labels', async () => {
+    const { service } = setup();
+    const signal = jest.fn();
+    (service as any)._temporalService = {
+      client: {
+        getRawClient: () => ({ workflow: { getHandle: () => ({ signal }) } }),
+      },
+    };
+    (service as any)._flowsRepository.findReplyWaits = jest
+      .fn()
+      .mockResolvedValue([
+        {
+          temporalWorkflowId: 'wf',
+          currentNodeId: 'w',
+          flow: {
+            nodes: [
+              { ...trigger('story_reply'), label: 'new_follower' },
+              wait(),
+            ],
+          },
+        },
+      ]);
+    await service.handleIncomingFlowReply({
+      organizationId: 'org',
+      integrationId: 'ig',
+      senderId: 'u',
+      eventId: 'mid',
+      at: Date.now(),
+      text: 'yes',
+    });
+    expect(signal).not.toHaveBeenCalled();
+  });
+});

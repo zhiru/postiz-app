@@ -1,7 +1,9 @@
+import { FlowExecutionsQueryDto } from '@gitroom/nestjs-libraries/dtos/flows/flow-executions-query.dto';
 import { randomUUID } from 'crypto';
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
+  Prisma,
   FlowStatus,
   FlowExecutionStatus,
   PendingPostbackStatus,
@@ -360,7 +362,11 @@ export class FlowsRepository {
         temporalWorkflowId: true,
         currentNodeId: true,
         flow: {
-          select: { nodes: { select: { id: true, type: true, data: true } } },
+          select: {
+            nodes: {
+              select: { id: true, type: true, data: true, label: true },
+            },
+          },
         },
       },
       take: 50,
@@ -481,6 +487,42 @@ export class FlowsRepository {
       skip: (page - 1) * limit,
       take: limit,
     });
+  }
+
+  async getExecutionsPage(
+    flowId: string,
+    orgId: string,
+    query: FlowExecutionsQueryDto,
+    profileId?: string
+  ) {
+    const { page = 1, limit = 20, status, since, until, order = 'desc' } = query;
+    const search = query.search?.trim();
+    const where: Prisma.FlowExecutionWhereInput = {
+      flowId,
+      flow: { organizationId: orgId, ...(profileId ? { profileId } : {}) },
+      ...(status ? { status } : {}),
+      ...(since || until ? {
+        startedAt: {
+          ...(since ? { gte: new Date(since) } : {}),
+          ...(until ? { lt: new Date(until) } : {}),
+        },
+      } : {}),
+      ...(search ? {
+        OR: ['commentText', 'igCommenterName', 'igCommenterId'].map((field) => ({
+          [field]: { contains: search, mode: 'insensitive' },
+        })),
+      } : {}),
+    };
+    const [items, total] = await Promise.all([
+      this._flowExecution.model.flowExecution.findMany({
+        where,
+        orderBy: [{ createdAt: order }, { id: order }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this._flowExecution.model.flowExecution.count({ where }),
+    ]);
+    return { items, total };
   }
 
   /**

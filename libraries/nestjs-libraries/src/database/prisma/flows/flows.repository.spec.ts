@@ -65,6 +65,42 @@ describe('FlowsRepository', () => {
     });
   });
 
+  describe('getExecutionsPage', () => {
+    it('filters before pagination and scopes rows and count to the same organization/profile', async () => {
+      const items = [{ id: 'execution-1' }];
+      flowExecution.model.flowExecution.findMany.mockResolvedValue(items);
+      flowExecution.model.flowExecution.count.mockResolvedValue(47);
+      const result = await repo.getExecutionsPage('flow-1', 'org-1', {
+        page: 2, limit: 10, status: 'FAILED', search: '  Ana  ',
+        since: '2026-11-01T03:00:00.000Z', until: '2026-11-03T03:00:00.000Z',
+        order: 'asc',
+      }, 'profile-1');
+      const where = {
+        flowId: 'flow-1', flow: { organizationId: 'org-1', profileId: 'profile-1' },
+        status: 'FAILED',
+        startedAt: { gte: new Date('2026-11-01T03:00:00.000Z'), lt: new Date('2026-11-03T03:00:00.000Z') },
+        OR: ['commentText', 'igCommenterName', 'igCommenterId'].map((field) => ({
+          [field]: { contains: 'Ana', mode: 'insensitive' },
+        })),
+      };
+      expect(flowExecution.model.flowExecution.findMany).toHaveBeenCalledWith({
+        where, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], skip: 10, take: 10,
+      });
+      expect(flowExecution.model.flowExecution.count).toHaveBeenCalledWith({ where });
+      expect(result).toEqual({ items, total: 47 });
+    });
+
+    it('uses bounded defaults without adding empty filters', async () => {
+      flowExecution.model.flowExecution.findMany.mockResolvedValue([]);
+      flowExecution.model.flowExecution.count.mockResolvedValue(0);
+      await repo.getExecutionsPage('flow-1', 'org-1', {});
+      expect(flowExecution.model.flowExecution.findMany).toHaveBeenCalledWith({
+        where: { flowId: 'flow-1', flow: { organizationId: 'org-1' } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: 0, take: 20,
+      });
+    });
+  });
+
   describe('getFailedExecutions', () => {
     it('filtra status=FAILED cross-flow por org e traz o perfil de origem', async () => {
       flowExecution.model.flowExecution.findMany.mockResolvedValue([]);
