@@ -71,14 +71,12 @@ function setup(ids: string[] = []) {
       onChange,
     })
   );
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Choose posts to ignore' })
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Mostrar Todos' }));
   return onChange;
 }
 it('selects a post without losing older exclusions outside the loaded pages', () => {
   const change = setup(['older-media']);
-  fireEvent.click(screen.getByRole('checkbox', { name: /Summit/ }));
+  fireEvent.click(screen.getAllByRole('checkbox', { name: /Summit/ })[0]);
   expect(change).toHaveBeenCalledWith(['older-media', 'media-1']);
 });
 it('removes an excluded ID even when it is not in the loaded page', () => {
@@ -93,7 +91,7 @@ it('searches loaded posts and requests the next cursor using the API contract', 
   fireEvent.change(screen.getByLabelText('Search loaded posts'), {
     target: { value: 'Summit' },
   });
-  expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+  expect(screen.getAllByRole('checkbox')).toHaveLength(3);
   fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
   expect(mockSetSize).toHaveBeenCalledWith(2);
   expect(mockKeys[mockKeys.length - 1](1, { nextCursor: 'page 2' })).toBe(

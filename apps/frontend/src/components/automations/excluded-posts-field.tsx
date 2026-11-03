@@ -22,8 +22,7 @@ export function ExcludedPostsField({
   const [manualId, setManualId] = useState('');
   const { data, error, size, setSize, isValidating, mutate } = useSWRInfinite(
     (index, previous) => {
-      if (!open || !integrationId || (index && !previous?.nextCursor))
-        return null;
+      if (!integrationId || (index && !previous?.nextCursor)) return null;
       const cursor = index
         ? `?cursor=${encodeURIComponent(previous.nextCursor)}`
         : '';
@@ -76,13 +75,26 @@ export function ExcludedPostsField({
           </button>
         ))}
       </div>
+      <div className="grid grid-cols-4 gap-[6px] mb-[8px]">
+        {posts.slice(0, 4).map((post) => (
+          <ExcludedPostCard
+            key={post.id}
+            post={post}
+            selected={value.includes(post.id)}
+            disabled={!value.includes(post.id) && value.length >= 100}
+            onClick={() => toggle(post.id)}
+          />
+        ))}
+      </div>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="text-sm text-btnPrimary focus-visible:ring-2 focus-visible:ring-btnPrimary"
+        className="text-[13px] text-btnPrimary hover:opacity-80 font-medium focus-visible:ring-2 focus-visible:ring-btnPrimary"
       >
-        {t('flow_choose_excluded_posts', 'Choose posts to ignore')}
+        {open
+          ? t('show_less', 'Show less')
+          : t('wizard_show_all_posts', 'Mostrar Todos')}
       </button>
       {open && (
         <div className="mt-3 space-y-3">
@@ -109,7 +121,7 @@ export function ExcludedPostsField({
               </button>
             </div>
           )}
-          <div className="max-h-72 space-y-2 overflow-y-auto">
+          <div className="grid grid-cols-3 gap-[10px] max-h-96 overflow-y-auto">
             {posts
               .filter((post) =>
                 `${post.caption || ''} ${post.id}`
@@ -117,30 +129,14 @@ export function ExcludedPostsField({
                   .includes(search.toLocaleLowerCase())
               )
               .map((post) => (
-                <label
+                <ExcludedPostCard
                   key={post.id}
-                  className="flex cursor-pointer items-center gap-2 rounded border border-newTableBorder p-2"
-                >
-                  <input
-                    type="checkbox"
-                    checked={value.includes(post.id)}
-                    disabled={!value.includes(post.id) && value.length >= 100}
-                    onChange={() => toggle(post.id)}
-                  />
-                  {(post.thumbnailUrl || post.mediaUrl) && (
-                    <img
-                      src={post.thumbnailUrl || post.mediaUrl}
-                      alt=""
-                      className="h-12 w-12 rounded object-cover"
-                    />
-                  )}
-                  <span className="min-w-0 text-xs">
-                    <span className="block truncate">
-                      {post.caption || t('no_caption', '(no caption)')}
-                    </span>
-                    <span className="text-tableText">{post.id}</span>
-                  </span>
-                </label>
+                  post={post}
+                  selected={value.includes(post.id)}
+                  disabled={!value.includes(post.id) && value.length >= 100}
+                  onClick={() => toggle(post.id)}
+                  showCaption
+                />
               ))}
           </div>
           {isValidating && (
@@ -189,5 +185,75 @@ export function ExcludedPostsField({
         </div>
       )}
     </fieldset>
+  );
+}
+
+function ExcludedPostCard({
+  post,
+  selected,
+  disabled,
+  onClick,
+  showCaption = false,
+}: {
+  post: {
+    id: string;
+    caption?: string;
+    thumbnailUrl?: string;
+    mediaUrl?: string;
+    mediaType?: string;
+  };
+  selected: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  showCaption?: boolean;
+}) {
+  const thumb = post.thumbnailUrl || post.mediaUrl;
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={selected}
+      aria-label={`${post.caption || post.id} — ${post.id}`}
+      disabled={disabled}
+      onClick={onClick}
+      className={`relative rounded-[6px] overflow-hidden border-2 text-left focus-visible:ring-2 focus-visible:ring-btnPrimary disabled:opacity-50 ${
+        selected
+          ? 'border-btnPrimary'
+          : 'border-transparent hover:border-btnPrimary/50'
+      }`}
+    >
+      <div className="relative aspect-square">
+        {thumb ? (
+          <img src={thumb} alt="" className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full bg-sixth flex items-center justify-center p-2 text-xs">
+            {post.caption || post.id}
+          </div>
+        )}
+        {post.mediaType === 'VIDEO' && (
+          <div className="absolute top-[4px] right-[4px]" aria-hidden="true">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="white">
+              <rect x="2" y="2" width="20" height="20" rx="3" />
+              <polygon points="10,8 16,12 10,16" fill="#000" />
+            </svg>
+          </div>
+        )}
+        {selected && (
+          <div
+            className="absolute inset-0 bg-btnPrimary/20 flex items-center justify-center"
+            aria-hidden="true"
+          >
+            <span className="rounded-full bg-btnPrimary text-white w-6 h-6 flex items-center justify-center">
+              ×
+            </span>
+          </div>
+        )}
+      </div>
+      {showCaption && (
+        <div className="p-[8px] bg-sixth">
+          <p className="text-[11px] truncate">{post.caption || post.id}</p>
+        </div>
+      )}
+    </button>
   );
 }
