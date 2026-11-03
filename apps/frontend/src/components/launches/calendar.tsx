@@ -1898,7 +1898,9 @@ export const CalendarItem: FC<{
       });
       return;
     }
-    actionPopup.current.querySelector('button')?.focus();
+    // Scrolling on focus would trigger the global scroll listener and close
+    // this portal immediately when opening it from a scrolled calendar/list.
+    actionPopup.current.querySelector('button')?.focus({ preventScroll: true });
   }, [actionPosition]);
   useEffect(() => {
     if (!actionPosition) return;
@@ -1914,7 +1916,7 @@ export const CalendarItem: FC<{
       if (event.key === 'Escape') {
         event.preventDefault();
         setActionPosition(null);
-        actionButton.current?.focus();
+        actionButton.current?.focus({ preventScroll: true });
       }
     };
     const resize = () => setActionPosition(null);
@@ -1946,7 +1948,7 @@ export const CalendarItem: FC<{
         onKeyDown={(event) => {
           if (event.key === 'Tab') {
             setActionPosition(null);
-            actionButton.current?.focus();
+            actionButton.current?.focus({ preventScroll: true });
             return;
           }
           const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
@@ -1969,7 +1971,7 @@ export const CalendarItem: FC<{
                   (event.key === 'ArrowDown' ? 1 : -1) +
                   items.length) %
                 items.length;
-          items[next]?.focus();
+          items[next]?.focus({ preventScroll: true });
         }}
       >
         {editable && (

@@ -141,6 +141,99 @@ it('opens an anchored portal menu, executes the chosen action and closes without
   expect(value.duplicatePost).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('menu')).toBeNull();
 });
+it.each(['day', 'week', 'month'])(
+  'keeps imported video actions open in %s when moving focus would scroll the page',
+  async (display: string) => {
+    const value: any = props();
+    value.display = display;
+    value.state = value.post.state = 'PUBLISHED';
+    Object.assign(value.post, {
+      importedFromPlatform: true,
+      releaseId: 'imported-video',
+      releaseURL: 'https://www.instagram.com/reel/example/',
+      format: 'video',
+      content: 'Video Abrasel',
+      mediaPreview: { src: '/abrasel.mp4', video: true },
+    });
+    // JSDOM does not scroll on focus. Model the browser's queued scroll event
+    // when focus moves from a scrolled list into a portal on document.body.
+    const originalFocus = dom.window.HTMLElement.prototype.focus;
+    const focus = jest
+      .spyOn(dom.window.HTMLElement.prototype, 'focus')
+      .mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+        originalFocus.call(this, options);
+        if (!options?.preventScroll) {
+          queueMicrotask(() => fireEvent.scroll(document));
+        }
+      });
+    try {
+      render(React.createElement(CalendarItem, value));
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+      });
+      expect(screen.getByRole('menu').parentElement).toBe(document.body);
+      expect(document.activeElement).toBe(
+        screen.getByRole('menuitem', { name: 'Preview post' })
+      );
+      await act(async () => {
+        fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+      });
+      expect(document.activeElement).toBe(
+        screen.getByRole('menuitem', { name: 'Copy caption' })
+      );
+      expect(screen.queryByRole('menuitem', { name: 'Edit post' })).toBeNull();
+      expect(screen.queryByRole('menuitem', { name: 'Duplicate post' })).toBeNull();
+      expect(
+        screen.queryByRole('menuitem', { name: 'Change date and time' })
+      ).toBeNull();
+      expect(
+        screen.getByRole('menuitem', { name: 'Remove from Mali Posts' })
+      ).not.toBeNull();
+      expect(mockModal).not.toHaveBeenCalled();
+      expect(value.editPost).not.toHaveBeenCalled();
+      expect(value.deletePost).not.toHaveBeenCalled();
+      // Manual scrolling of the list still dismisses the anchored menu.
+      fireEvent.scroll(document);
+      expect(screen.queryByRole('menu')).toBeNull();
+    } finally {
+      focus.mockRestore();
+    }
+  }
+);
+it('keeps imported video viewer actions read-only and copies the original link', async () => {
+  mockCanWrite = false;
+  const value: any = props();
+  value.display = 'day';
+  value.state = value.post.state = 'PUBLISHED';
+  Object.assign(value.post, {
+    importedFromPlatform: true,
+    releaseId: 'imported-video',
+    releaseURL: 'https://www.instagram.com/reel/example/',
+    remoteDeletionSupported: true,
+  });
+  render(React.createElement(CalendarItem, value));
+  fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+  for (const name of [
+    'Edit post',
+    'Change date and time',
+    'Duplicate post',
+    'Client review links',
+    'Delete from network',
+    'Remove from Mali Posts',
+  ]) {
+    expect(screen.queryByRole('menuitem', { name })).toBeNull();
+  }
+  expect(
+    screen.getByRole('menuitem', { name: 'View original publication' })
+  ).not.toBeNull();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy network link' }));
+  });
+  expect(mockClipboard).toHaveBeenCalledWith(value.post.releaseURL);
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(mockModal).not.toHaveBeenCalled();
+  expect(value.deletePost).not.toHaveBeenCalled();
+});
 it('supports menu keyboard navigation, Escape and outside clicks', () => {
   render(React.createElement(CalendarItem, props()));
   const button = screen.getByRole('button', { name: 'Post actions' });
