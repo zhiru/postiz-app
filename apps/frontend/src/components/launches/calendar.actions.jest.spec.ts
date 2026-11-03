@@ -1,5 +1,10 @@
 export {};
 jest.mock('canvas', () => null);
+jest.mock(
+  '@gitroom/nestjs-libraries/services/make.is',
+  () => ({ makeId: () => 'modal-id' }),
+  { virtual: true }
+);
 jest.mock('@gitroom/react/helpers/delete.dialog', () => ({
   deleteDialog: jest.fn(),
 }));
@@ -30,6 +35,7 @@ Object.defineProperty(global, 'navigator', {
 const React = require('react');
 const {
   render,
+  renderHook,
   screen,
   fireEvent,
   act,
@@ -37,8 +43,15 @@ const {
 } = require('@testing-library/react');
 const dayjs = require('dayjs');
 const mockModal = jest.fn();
+const mockCloseById = jest.fn();
 const mockClipboard = jest.fn().mockResolvedValue(undefined);
 let mockCanWrite = true;
+const mockFetch = jest.fn();
+const mockReload = jest.fn();
+const mockIntegrations = [
+  { id: 'source', name: 'Source' },
+  { id: 'target', name: 'Target' },
+];
 Object.defineProperty(global.navigator, 'clipboard', {
   value: { writeText: mockClipboard },
   configurable: true,
@@ -48,7 +61,7 @@ jest.mock('react-dnd', () => ({
   useDrop: () => [{}, () => {}],
 }));
 jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({
-  useModals: () => ({ openModal: mockModal }),
+  useModals: () => ({ openModal: mockModal, closeById: mockCloseById }),
 }));
 jest.mock('@gitroom/frontend/hooks/use-profile-permissions', () => ({
   useProfilePermissions: () => ({ canWrite: mockCanWrite }),
@@ -60,7 +73,7 @@ jest.mock('@gitroom/react/helpers/variable.context', () => ({
   useVariables: () => ({}),
 }));
 jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
-  useFetch: () => jest.fn(),
+  useFetch: () => mockFetch,
 }));
 jest.mock('@gitroom/react/toaster/toaster', () => ({
   useToaster: () => ({ show: jest.fn() }),
@@ -92,12 +105,17 @@ jest.mock(
 jest.mock('@gitroom/helpers/utils/sanitize.post.content', () => ({
   postContentPlainText: (v: string) => v,
 }));
-const { CalendarItem, PostPreviewFrame } = require('./calendar');
+const {
+  CalendarItem,
+  PostPreviewFrame,
+  usePostActions,
+} = require('./calendar');
 const props = () => ({
   date: dayjs(),
   isBeforeNow: false,
   editPost: jest.fn(),
   duplicatePost: jest.fn(),
+  copyToChannel: jest.fn(),
   deletePost: jest.fn(),
   statistics: jest.fn(),
   openPost: jest.fn(),
@@ -119,6 +137,35 @@ afterEach(() => {
   mockCanWrite = true;
 });
 afterAll(() => dom.window.close());
+it.each(['day', 'week', 'month'])(
+  'shows the explicit trial badge in the %s card, including imported posts',
+  (display: string) => {
+    const value: any = props();
+    value.display = display;
+    Object.assign(value.post, {
+      isTrialReel: true,
+      format: 'video',
+      importedFromPlatform: true,
+    });
+    render(React.createElement(CalendarItem, value));
+    const badge = screen.getByText('Trial Reel');
+    expect(badge.closest('.sr-only')).toBeNull();
+  }
+);
+it.each([false, undefined, 'false', 'true'])(
+  'does not show a trial badge without a boolean projection: %s',
+  (isTrialReel: unknown) => {
+    const value: any = props();
+    Object.assign(value.post, {
+      isTrialReel,
+      format: 'video',
+      importedFromPlatform: true,
+      releaseURL: 'https://www.instagram.com/reel/example/',
+    });
+    render(React.createElement(CalendarItem, value));
+    expect(screen.queryByText('Trial Reel')).toBeNull();
+  }
+);
 it('opens drafts for editing through click and keyboard, with one actions button', () => {
   const value = props();
   render(React.createElement(CalendarItem, value));
@@ -140,6 +187,116 @@ it('opens an anchored portal menu, executes the chosen action and closes without
   fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate post' }));
   expect(value.duplicatePost).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('menu')).toBeNull();
+});
+it.each(['day', 'week', 'month'])(
+  'keeps imported video actions open in %s when moving focus would scroll the page',
+  async (display: string) => {
+    const value: any = props();
+    value.display = display;
+    value.state = value.post.state = 'PUBLISHED';
+    Object.assign(value.post, {
+      importedFromPlatform: true,
+      releaseId: 'imported-video',
+      releaseURL: 'https://www.instagram.com/reel/example/',
+      format: 'video',
+      content: 'Video Abrasel',
+      mediaPreview: { src: '/abrasel.mp4', video: true },
+    });
+    // JSDOM does not scroll on focus. Model the browser's queued scroll event
+    // when focus moves from a scrolled list into a portal on document.body.
+    const originalFocus = dom.window.HTMLElement.prototype.focus;
+    const focus = jest
+      .spyOn(dom.window.HTMLElement.prototype, 'focus')
+      .mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+        originalFocus.call(this, options);
+        if (!options?.preventScroll) {
+          queueMicrotask(() => fireEvent.scroll(document));
+        }
+      });
+    try {
+      render(React.createElement(CalendarItem, value));
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+      });
+      expect(screen.getByRole('menu').parentElement).toBe(document.body);
+      const items = screen.getAllByRole('menuitem');
+      expect(items[0]).toBe(
+        screen.getByRole('menuitem', { name: 'Duplicate post' })
+      );
+      expect(document.activeElement).toBe(items[0]);
+      for (const name of [
+        'Copy to another network',
+        'Preview post',
+        'Copy caption',
+      ]) {
+        await act(async () => {
+          fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+        });
+        expect(document.activeElement).toBe(
+          screen.getByRole('menuitem', { name })
+        );
+      }
+      await act(async () => {
+        fireEvent.keyDown(document.activeElement!, { key: 'Home' });
+      });
+      expect(document.activeElement).toBe(
+        items[0]
+      );
+      await act(async () => {
+        fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+      });
+      expect(document.activeElement).toBe(items[items.length - 1]);
+      expect(screen.queryByRole('menuitem', { name: 'Edit post' })).toBeNull();
+      expect(
+        screen.queryByRole('menuitem', { name: 'Change date and time' })
+      ).toBeNull();
+      expect(
+        screen.getByRole('menuitem', { name: 'Remove from Mali Posts' })
+      ).not.toBeNull();
+      expect(mockModal).not.toHaveBeenCalled();
+      expect(value.editPost).not.toHaveBeenCalled();
+      expect(value.deletePost).not.toHaveBeenCalled();
+      // Manual scrolling of the list still dismisses the anchored menu.
+      fireEvent.scroll(document);
+      expect(screen.queryByRole('menu')).toBeNull();
+    } finally {
+      focus.mockRestore();
+    }
+  }
+);
+it('keeps imported video viewer actions read-only and copies the original link', async () => {
+  mockCanWrite = false;
+  const value: any = props();
+  value.display = 'day';
+  value.state = value.post.state = 'PUBLISHED';
+  Object.assign(value.post, {
+    importedFromPlatform: true,
+    releaseId: 'imported-video',
+    releaseURL: 'https://www.instagram.com/reel/example/',
+    remoteDeletionSupported: true,
+  });
+  render(React.createElement(CalendarItem, value));
+  fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+  for (const name of [
+    'Edit post',
+    'Change date and time',
+    'Duplicate post',
+    'Client review links',
+    'Delete from network',
+    'Remove from Mali Posts',
+  ]) {
+    expect(screen.queryByRole('menuitem', { name })).toBeNull();
+  }
+  expect(
+    screen.getByRole('menuitem', { name: 'View original publication' })
+  ).not.toBeNull();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy network link' }));
+  });
+  expect(mockClipboard).toHaveBeenCalledWith(value.post.releaseURL);
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(mockModal).not.toHaveBeenCalled();
+  expect(value.deletePost).not.toHaveBeenCalled();
 });
 it('supports menu keyboard navigation, Escape and outside clicks', () => {
   render(React.createElement(CalendarItem, props()));
@@ -175,7 +332,23 @@ it('opens published posts in a centered 80vw by 80vh preview', () => {
     size: '80vw',
     height: '80vh',
   });
-  expect(mockModal.mock.calls[0][0].children.type).toBe(PostPreviewFrame);
+  const preview = mockModal.mock.calls[0][0].children;
+  cleanup();
+  const { Component: ModalComponent } = jest.requireActual(
+    '@gitroom/frontend/components/layout/new-modal'
+  );
+  render(
+    React.createElement(ModalComponent, {
+      modal: mockModal.mock.calls[0][0],
+      isLast: true,
+      zIndex: 100,
+      closeModal: mockCloseById,
+    })
+  );
+  expect(screen.getByTitle('Preview post').getAttribute('src')).toBe(
+    '/p/post?private=true&share=true'
+  );
+  expect(screen.getByRole('group', { name: 'Post actions' })).not.toBeNull();
 });
 
 it('shows loading, timeout and retry instead of an empty preview', () => {
@@ -401,3 +574,204 @@ it.each(['unsupported', 'already_deleted', 'viewer'])(
     ).toBeNull();
   }
 );
+
+it.each(['month', 'week', 'day'])(
+  'opens the same actions on right click in %s without activating the card',
+  (display: string) => {
+    const value = { ...props(), display };
+    render(React.createElement(CalendarItem, value));
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Edit post' }), {
+      clientX: 100,
+      clientY: 120,
+    });
+    const contextItems = screen
+      .getAllByRole('menuitem')
+      .map((item: HTMLElement) => item.textContent);
+    expect(value.editPost).not.toHaveBeenCalled();
+    expect(mockModal).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+    expect(
+      screen
+        .getAllByRole('menuitem')
+        .map((item: HTMLElement) => item.textContent)
+    ).toEqual(contextItems);
+  }
+);
+
+it.each([{ key: 'ContextMenu' }, { key: 'F10', shiftKey: true }])(
+  'opens card actions with the keyboard context menu shortcut %o',
+  (shortcut: any) => {
+    const value = props();
+    render(React.createElement(CalendarItem, value));
+    fireEvent.keyDown(
+      screen.getByRole('button', { name: 'Edit post' }),
+      shortcut
+    );
+    expect(screen.getByRole('menu')).not.toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole('menuitem', { name: 'Edit post' })
+    );
+    expect(value.editPost).not.toHaveBeenCalled();
+  }
+);
+
+it.each([false, true])(
+  'reuses composer actions in the private preview (imported=%s)',
+  (imported: boolean) => {
+    const value: any = props();
+    value.state = value.post.state = 'PUBLISHED';
+    value.post.importedFromPlatform = imported;
+    render(React.createElement(CalendarItem, value));
+    fireEvent.click(screen.getByRole('button', { name: 'Preview post' }));
+    const preview = mockModal.mock.calls[0][0].children;
+    cleanup();
+    render(preview);
+    expect(screen.queryByRole('button', { name: 'Edit post' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate post' }));
+    expect(value.duplicatePost).toHaveBeenCalledTimes(1);
+    expect(mockCloseById).toHaveBeenCalledWith('post-preview-post');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Copy to another network' })
+    );
+    expect(value.copyToChannel).toHaveBeenCalledTimes(1);
+    expect(value.deletePost).not.toHaveBeenCalled();
+  }
+);
+
+it('keeps write actions out of the viewer preview and context menu', () => {
+  mockCanWrite = false;
+  const value: any = props();
+  value.post.importedFromPlatform = true;
+  render(React.createElement(CalendarItem, value));
+  const card = screen.getByRole('button', { name: 'Preview post' });
+  fireEvent.contextMenu(card);
+  expect(screen.queryByRole('menuitem', { name: 'Duplicate post' })).toBeNull();
+  expect(
+    screen.queryByRole('menuitem', { name: 'Copy to another network' })
+  ).toBeNull();
+  fireEvent.keyDown(document, { key: 'Escape' });
+  fireEvent.click(card);
+  const preview = mockModal.mock.calls[0][0].children;
+  cleanup();
+  render(preview);
+  expect(screen.queryByRole('button', { name: 'Duplicate post' })).toBeNull();
+  expect(
+    screen.queryByRole('button', { name: 'Copy to another network' })
+  ).toBeNull();
+  expect(
+    screen.queryByRole('button', { name: 'Remove from Mali Posts' })
+  ).toBeNull();
+  expect(screen.getByTitle('Preview post').getAttribute('src')).toBe(
+    '/p/post?private=true'
+  );
+});
+
+it.each([false, true])(
+  'opens a new composer from full post data, including imported posts (%s)',
+  async (importedFromPlatform: boolean) => {
+    const source = { group: 'group', importedFromPlatform };
+    const media = [{ id: 'media', path: '/photo.jpg' }];
+    const data = {
+      integration: 'source',
+      posts: [
+        {
+          id: 'original',
+          content: 'Complete caption',
+          image: media,
+          releaseId: 'remote',
+          settings: { sourceOnly: true },
+        },
+      ],
+      siblings: [{ integration: 'other' }],
+    };
+    mockFetch.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () =>
+        url === '/posts/find-slot' ? { date: '2030-01-01T12:00:00Z' } : data,
+    }));
+    const { CalendarContext } = require('./calendar.context');
+    const { result } = renderHook(() => usePostActions(), {
+      wrapper: ({ children }: any) =>
+        React.createElement(
+          CalendarContext.Provider,
+          {
+            value: {
+              integrations: mockIntegrations,
+              reloadCalendarView: mockReload,
+            },
+          },
+          children
+        ),
+    });
+    await act(async () => {
+      await result.current.editPost(source, true)();
+    });
+    const duplicate = mockModal.mock.calls[0][0].children;
+    expect(duplicate.type).toBe(React.Fragment);
+    expect(duplicate.props.children.props).toMatchObject({
+      selectedChannels: ['source'],
+      onlyValues: [{ content: 'Complete caption', image: media }],
+      integrations: mockIntegrations,
+      allIntegrations: mockIntegrations,
+    });
+    expect(duplicate.props.children.props.onlyValues[0]).toEqual({
+      content: 'Complete caption',
+      image: media,
+    });
+    mockModal.mockClear();
+    await act(async () => {
+      await result.current.editPost(source, true, true)();
+    });
+    const copy = mockModal.mock.calls[0][0].children;
+    expect(copy.type).toBe(React.Fragment);
+    expect(copy.props.children.props.selectedChannels).toBeUndefined();
+    expect(copy.props.children.props.onlyValues).toEqual([
+      { content: 'Complete caption', image: media },
+    ]);
+    expect(copy.props.children.props.integrations).toEqual(mockIntegrations);
+    expect(
+      mockFetch.mock.calls.every(
+        (args: any[]) => !args[1]?.method || args[1].method === 'GET'
+      )
+    ).toBe(true);
+    expect(mockReload).not.toHaveBeenCalled();
+  }
+);
+
+it('prevents repeated remote deletion from the private preview while a request is running', async () => {
+  const { deleteDialog } = require('@gitroom/react/helpers/delete.dialog');
+  deleteDialog.mockResolvedValue(true);
+  mockFetch.mockImplementation(async (_url: string, options: any) => ({
+    ok: true,
+    json: async () =>
+      options?.method === 'POST'
+        ? { status: 'deleted' }
+        : {
+            supported: true,
+            status: 'not_requested',
+            version: 1,
+            remoteId: 'remote',
+          },
+  }));
+  const value: any = props();
+  value.state = value.post.state = 'PUBLISHED';
+  Object.assign(value.post, {
+    releaseId: 'remote',
+    remoteDeletionSupported: true,
+  });
+  render(React.createElement(CalendarItem, value));
+  fireEvent.click(screen.getByRole('button', { name: 'Preview post' }));
+  render(mockModal.mock.calls[0][0].children);
+  const deletion = screen.getByRole('button', { name: 'Delete from network' });
+  await act(async () => {
+    fireEvent.click(deletion);
+    fireEvent.click(deletion);
+  });
+  expect(deleteDialog).toHaveBeenCalledTimes(1);
+  expect(mockFetch).toHaveBeenCalledTimes(2);
+  expect(mockFetch).toHaveBeenLastCalledWith('/posts/post/delete-remote', {
+    method: 'POST',
+    body: JSON.stringify({ version: 1, confirmRemoteId: 'remote' }),
+  });
+});

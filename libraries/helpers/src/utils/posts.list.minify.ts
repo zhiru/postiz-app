@@ -161,6 +161,19 @@ export function expandPosts(data: any) {
 
 export type PostFormat = 'post' | 'story' | 'video' | 'carousel';
 
+// Display evidence only; a video/reel URL alone does not identify a trial reel.
+export function isTrialReel(settings?: string | null): boolean {
+  try {
+    const value = JSON.parse(settings || '{}')?.is_trial_reel;
+    return (
+      value === true ||
+      (typeof value === 'string' && value.toLowerCase() === 'true')
+    );
+  } catch {
+    return false;
+  }
+}
+
 // Shared display classification; it never changes publishing settings.
 export function getPostFormat(post: {
   settings?: string | null;

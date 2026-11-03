@@ -7,7 +7,12 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Prévia do calendário mantém o modal em 80vw/80vh e o iframe preenchendo a área restante abaixo da barra de ações.
+
 - Prévia autenticada mostra nomes de contatos/grupos NeuralTalk salvos, com ID como fallback, e diferencia configuração, mensagem registrada, rejeição, resultado desconhecido e envio confirmado pelo provedor, sem afirmar entrega no aparelho; destinatários e configurações ficam fora do link público e da revisão.
+- Calendário/listagem: evita que a rolagem provocada pelo foco feche imediatamente o menu de três pontos, com regressão para vídeos importados e preservação das permissões de ações.
+- Calendário/listagem: selo traduzido “Reel de Teste” somente com `settings.is_trial_reel` explícito; respeita `"false"` legado e não deduz teste de vídeos ou Reels importados.
+- Prévia autenticada do calendário/listagem reutiliza as ações do card, incluindo duplicar e copiar para outra rede no composer com seleção de canal; aceita publicações importadas como origem e oferece o mesmo menu por clique direito ou teclado, sem publicação automática.
 
 - Etapas do Flow Builder com menu de três pontos para editar, duplicar sem conexões e excluir com limpeza das arestas; o gatilho permanece único e as ações não salvam nem enviam automaticamente.
 
