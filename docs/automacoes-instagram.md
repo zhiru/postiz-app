@@ -542,6 +542,13 @@ Para prosseguir com o beta, consulte o [pedido de acesso pronto para revisão](o
 
 No assistente de automação de comentários e no Flow Builder, use **Publicações
 excluídas** para selecionar posts/Reels que não devem disparar aquela automação.
+O switch aparece antes do seletor e inicia ligado ao editar uma automação com
+exclusões. Desligá-lo mantém a seleção durante a edição; religá-lo a restaura.
+Salvar com o switch desligado envia uma lista vazia e remove as exclusões.
+
+**Mostrar Todos** abre um modal com grade de cards e imagens. Use **Confirmar**
+para voltar ao formulário; o botão de fechar e a tecla Escape também fecham o
+modal. A seleção só é persistida ao salvar a automação ou o nó no Flow Builder.
 O seletor permite busca nas páginas carregadas, carregar mais e inserir IDs de
 mídia do Instagram para anúncios ou posts fora da lista. Remova uma seleção para
 voltar a permitir esse post. A exclusão é por automação, não exclui o post da rede
