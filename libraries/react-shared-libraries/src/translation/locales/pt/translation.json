@@ -1,4 +1,7 @@
 {
+  "flow_open_publication": "Abrir publicação em nova aba",
+  "flow_publication_loading": "Carregando link da publicação...",
+  "flow_publication_unavailable": "Link da publicação indisponível",
   "post_action_copy_channel": "Copiar para outra rede",
   "calendar": "Calendário",
   "webhooks": "Webhooks",

@@ -165,3 +165,32 @@ describe('FlowsRepository', () => {
     });
   });
 });
+
+
+describe('Execution publication metadata scope', () => {
+  it('limits stored metadata to the flow organization, profile and channel relation', async () => {
+    const findFirst = jest.fn().mockResolvedValue(null);
+    const repo = new FlowsRepository(
+      { model: { flow: { findFirst } } } as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any
+    );
+    await repo.getExecutionPublicationContext('org', 'flow', 'media', 'profile');
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: 'flow', organizationId: 'org', profileId: 'profile' },
+      select: {
+        integrationId: true, profileId: true,
+        integration: { select: {
+          posts: {
+            where: { organizationId: 'org', profileId: 'profile',
+              OR: [{ externalId: 'media' }, { releaseId: 'media' }] },
+            select: { releaseURL: true }, orderBy: { createdAt: 'desc' }, take: 1,
+          },
+          unmatchedComments: {
+            where: { organizationId: 'org', igMediaId: 'media', permalink: { not: null } },
+            select: { permalink: true }, orderBy: { enrichedAt: 'desc' }, take: 1,
+          },
+        } },
+      },
+    });
+  });
+});

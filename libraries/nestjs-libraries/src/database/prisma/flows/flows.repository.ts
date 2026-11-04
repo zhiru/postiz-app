@@ -471,6 +471,45 @@ export class FlowsRepository {
     });
   }
 
+  getExecutionPublicationContext(
+    orgId: string,
+    flowId: string,
+    mediaId: string,
+    profileId?: string
+  ) {
+    return this._flow.model.flow.findFirst({
+      where: {
+        id: flowId,
+        organizationId: orgId,
+        ...(profileId ? { profileId } : {}),
+      },
+      select: {
+        integrationId: true,
+        profileId: true,
+        integration: {
+          select: {
+            posts: {
+              where: {
+                organizationId: orgId,
+                ...(profileId ? { profileId } : {}),
+                OR: [{ externalId: mediaId }, { releaseId: mediaId }],
+              },
+              select: { releaseURL: true },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+            unmatchedComments: {
+              where: { organizationId: orgId, igMediaId: mediaId, permalink: { not: null } },
+              select: { permalink: true },
+              orderBy: { enrichedAt: 'desc' },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+  }
+
   getExecutions(
     flowId: string,
     orgId: string,

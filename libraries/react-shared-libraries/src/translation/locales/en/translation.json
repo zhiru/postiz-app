@@ -1,4 +1,7 @@
 {
+  "flow_open_publication": "Open publication in a new tab",
+  "flow_publication_loading": "Loading publication link...",
+  "flow_publication_unavailable": "Publication link unavailable",
   "post_action_copy_channel": "Copy to another network",
   "calendar": "Calendar",
   "webhooks": "Webhooks",

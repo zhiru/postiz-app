@@ -5,6 +5,7 @@ import { useFlowHistory } from './hooks/use-flow-history';
 import { FlowExecutionList } from './flow-execution-list.component';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFlowExecution } from '@gitroom/frontend/components/automations/hooks/use-flows';
+import { FlowExecutionPublication } from './flow-execution-publication.component';
 
 interface FlowExecutionsProps {
   flowId: string;
@@ -102,6 +103,8 @@ const ExecutionDetail: FC<{
       <p className="text-[12px] text-customColor18 mb-[16px]">
         &ldquo;{execution.commentText}&rdquo;
       </p>
+
+      <FlowExecutionPublication flowId={flowId} executionId={executionId} />
 
       {execution.error && (
         <div className="rounded-[4px] border border-customColor19/40 bg-customColor19/10 p-[12px] mb-[16px]">

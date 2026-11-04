@@ -18,6 +18,14 @@ os demais parâmetros da URL (inclusive parâmetros repetidos) e o fragmento.
 Um registro inexistente ou inacessível continua oferecendo retorno à lista.
 O link requer login e as permissões existentes da organização/perfil/automação.
 
+No detalhe, **Abrir publicação em nova aba** abre o permalink real do post/Reel.
+O sistema reaproveita o link salvo no calendário ou nos metadados do Inbox;
+quando necessário, consulta a API do Instagram com a integração autorizada da
+organização/perfil. O botão fica desabilitado durante a consulta e indica link
+indisponível se a mídia não tiver permalink válido ou a consulta falhar. Não
+monta links usando o ID numérico da mídia. A abertura mantém a execução, os
+filtros e a navegação do histórico na aba atual.
+
 ## Mensagem depois do comentário e follow-up
 
 Para a primeira DM após um comentário, escolha **Comentário em Feed/Reels** em

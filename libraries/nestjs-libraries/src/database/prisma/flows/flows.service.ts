@@ -1547,6 +1547,61 @@ export class FlowsService {
     return this._flowsRepository.getExecution(id, orgId, flowId, profileId);
   }
 
+  async getExecutionPublication(
+    orgId: string,
+    flowId: string,
+    executionId: string,
+    profileId?: string
+  ): Promise<{ permalink: string | null }> {
+    const unavailable = { permalink: null };
+    const execution = await this.getExecution(orgId, executionId, flowId, profileId);
+    if (!execution?.igMediaId || execution.triggerType === 'new_follower') return unavailable;
+    const context = await this._flowsRepository.getExecutionPublicationContext(
+      orgId, flowId, execution.igMediaId, profileId
+    );
+    if (!context) return unavailable;
+
+    const integration = await this.assertIntegrationAccess(
+      orgId, context.integrationId, profileId || context.profileId || undefined
+    );
+    if (!['instagram', 'instagram-standalone'].includes(integration.providerIdentifier)) {
+      return unavailable;
+    }
+    const safePermalink = (value: unknown): string | null => {
+      if (typeof value !== 'string') return null;
+      try {
+        const url = new URL(value);
+        return url.protocol === 'https:' &&
+          ['instagram.com', 'www.instagram.com'].includes(url.hostname) &&
+          !url.username && !url.password && !url.port &&
+          /^\/(p|reel|tv)\/[^/]+\/?$/.test(url.pathname)
+          ? url.href : null;
+      } catch {
+        return null;
+      }
+    };
+    for (const value of [
+      context.integration.posts[0]?.releaseURL,
+      context.integration.unmatchedComments[0]?.permalink,
+    ]) {
+      const permalink = safePermalink(value);
+      if (permalink) return { permalink };
+    }
+
+    try {
+      const provider = this._integrationManager.getSocialIntegration('instagram') as unknown as InstagramProvider;
+      const route = await resolveIgRoute({
+        ...integration,
+        token: decryptIntegrationToken(this._encryption, integration.token),
+      }, this._instagramMessaging);
+      const metadata = await provider.getMediaMetadata(execution.igMediaId, route.token, route.host);
+      return { permalink: metadata.id === execution.igMediaId ? safePermalink(metadata.permalink) : null };
+    } catch {
+      this._logger.warn('Could not resolve execution publication permalink');
+      return unavailable;
+    }
+  }
+
   appendExecutionLog(
     id: string,
     entry: {

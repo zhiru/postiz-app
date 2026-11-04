@@ -249,4 +249,14 @@ export class FlowsController {
       profile?.id
     );
   }
+
+  @Get('/:id/executions/:executionId/publication')
+  async getExecutionPublication(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') flowId: string,
+    @Param('executionId') executionId: string
+  ) {
+    return this._flowsService.getExecutionPublication(org.id, flowId, executionId, profile?.id);
+  }
 }

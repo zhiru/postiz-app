@@ -75,3 +75,16 @@ describe('FlowsController execution listing compatibility', () => {
     expect(flows.getExecutions).not.toHaveBeenCalled();
   });
 });
+
+
+describe('FlowsController execution publication', () => {
+  it('passes organization, flow, execution and selected profile to the resolver', async () => {
+    const flows = createMock<FlowsService>();
+    flows.getExecutionPublication.mockResolvedValue({ permalink: null });
+    const controller = new FlowsController(flows, createMock<CredentialService>());
+    await expect(controller.getExecutionPublication(
+      { id: 'org' } as any, { id: 'profile' } as any, 'flow', 'execution'
+    )).resolves.toEqual({ permalink: null });
+    expect(flows.getExecutionPublication).toHaveBeenCalledWith('org', 'flow', 'execution', 'profile');
+  });
+});
