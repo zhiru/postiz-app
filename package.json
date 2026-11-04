@@ -338,6 +338,7 @@
   },
   "pnpm": {
     "overrides": {
+      "prosemirror-model": "1.25.12",
       "multer": "^2.5.0",
       "next": "16.4.2",
       "react": "19.2.4",

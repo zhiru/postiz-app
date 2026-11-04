@@ -516,7 +516,12 @@ describe('PostsRepository recurring calendar range', () => {
     expect(posts.map(post => post.publishDate.toISOString())).toEqual([
       '2026-11-01T12:00:00.000Z', '2026-11-03T12:00:00.000Z',
     ]);
-    expect(posts[0]).toMatchObject({ id: 'template', format: 'image', actualDate: template.publishDate });
+    expect(posts[0]).toMatchObject({
+      id: 'template',
+      format: 'post',
+      mediaPreview: { src: 'a.jpg', video: false },
+      actualDate: template.publishDate,
+    });
     expect(posts[0]).not.toHaveProperty('image');
     expect(posts[0]).not.toHaveProperty('platformHistoryCovered');
     expect(prisma.model.post.findMany.mock.calls[1][0].where).toMatchObject({ organizationId: 'org-1', profileId: 'profile-1' });
