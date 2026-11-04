@@ -53,8 +53,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           extensionId={process.env.EXTENSION_ID || ''}
           mediaProcessing={
             process.env.STORAGE_PROVIDER === 'cloudflare' &&
-            !!process.env.RUNPOD_API_KEY &&
-            !!process.env.RUNPOD_ENDPOINT_ID
+            !!process.env.RUNPOD_API_KEY && !!process.env.RUNPOD_ENDPOINT_ID
           }
           transloadit={
             // Transloadit templates export to the R2 bucket and save-media builds

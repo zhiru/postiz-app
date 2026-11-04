@@ -40,6 +40,7 @@ import {
 } from '@gitroom/nestjs-libraries/integrations/social/meta.graph';
 import { META_GRAPH_API_VERSION } from '@gitroom/nestjs-libraries/integrations/social/facebook.provider';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 async function fetchWithTimeout(
@@ -648,6 +649,7 @@ export class InstagramProvider
 
   reusableAccountAuthorization = true;
 
+  @DashboardFunction()
   async pages(accessToken: string) {
     return this.discoverPages(accessToken);
   }
@@ -1882,6 +1884,9 @@ export class InstagramProvider
         return 'Trial Reels must be a video';
       }
     }
+    if (firstPost?.some((media) => (media?.alt?.length ?? 0) > 1000)) {
+      return 'Instagram alt text can be up to 1000 characters';
+    }
     if (settings?.audio?.id) {
       if (settings?.post_type === 'story') {
         return 'Audio can only be added to Reels, not to Stories';
@@ -2013,6 +2018,13 @@ export class InstagramProvider
           ? `image_url=${m.path}&media_type=STORIES`
           : `image_url=${m.path}`;
 
+        // alt_text is only supported on images (single or carousel item),
+        // not on videos or stories
+        const altText =
+          m.alt && !isStory && !hasExtension(m.path, 'mp4')
+            ? `&alt_text=${encodeURIComponent(m.alt)}`
+            : ``;
+
         const trialParams = isTrialReel
           ? `&trial_params=${encodeURIComponent(
               JSON.stringify({
@@ -2052,7 +2064,7 @@ export class InstagramProvider
 
         const { id: photoId } = await (
           await this.fetch(
-            `https://${type}/${META_GRAPH_API_VERSION}/${id}/media?${mediaType}${isCarousel}${itemCollaborators}${trialParams}${audioConfiguration}&access_token=${accessToken}${caption}`,
+            `https://${type}/${META_GRAPH_API_VERSION}/${id}/media?${mediaType}${altText}${isCarousel}${itemCollaborators}${trialParams}${audioConfiguration}&access_token=${accessToken}${caption}`,
             {
               method: 'POST',
             }
@@ -2252,14 +2264,46 @@ export class InstagramProvider
         ? pendingData.carouselId
         : pendingData.containers[0];
 
-    const { id: mediaId } = await (
-      await this.fetch(
-        `https://${pendingData.type}/${META_GRAPH_API_VERSION}/${igId}/media_publish?creation_id=${creationId}&access_token=${accessToken}&field=id`,
-        {
-          method: 'POST',
-        }
-      )
-    ).json();
+    let mediaId: string;
+    try {
+      ({ id: mediaId } = await (
+        await this.fetch(
+          `https://${pendingData.type}/${META_GRAPH_API_VERSION}/${igId}/media_publish?creation_id=${creationId}&access_token=${accessToken}&field=id`,
+          {
+            method: 'POST',
+          }
+        )
+      ).json());
+    } catch (err) {
+      // Instagram sometimes answers media_publish with 2207051 ("action is
+      // blocked") and still publishes the container: ask Instagram before
+      // failing a post that may already be live.
+      if (!(err instanceof BadBody) || !err.message.includes('blocked')) {
+        throw err;
+      }
+
+      let status: string;
+      try {
+        status = await this.igContainerStatus(
+          creationId!,
+          checkToken,
+          pendingData.type
+        );
+      } catch {
+        throw err;
+      }
+      if (status === 'PUBLISHED') {
+        // The latest account media can belong to a concurrent/manual send.
+        // Keep the result unconfirmed instead of persisting another post's ID.
+        throw new BadBody(
+          this.identifier,
+          JSON.stringify({ containerId: creationId, status }),
+          {} as any,
+          'Instagram reports this container as published, but its media ID could not be confirmed. Check Instagram before trying again'
+        );
+      }
+      throw err;
+    }
 
     return {
       status: 'completed',

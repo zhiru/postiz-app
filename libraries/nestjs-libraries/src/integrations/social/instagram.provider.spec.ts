@@ -1240,3 +1240,39 @@ describe('InstagramProvider media messages', () => {
     }
   );
 });
+
+describe('Instagram upstream publishing compatibility', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('does not attribute the latest unrelated account media after a blocked publish', async () => {
+    const { BadBody } = await import('../social.abstract');
+    const provider = new InstagramProvider();
+    const rejected = new BadBody('instagram', '{}', {} as any, 'action is blocked');
+    const fetchMock = jest.spyOn(provider, 'fetch')
+      .mockRejectedValueOnce(rejected)
+      .mockResolvedValueOnce({ json: async () => ({ status_code: 'PUBLISHED' }) } as Response)
+      .mockResolvedValueOnce({ json: async () => ({ data: [{ id: 'unrelated-media' }] }) } as Response)
+      .mockResolvedValueOnce({ json: async () => ({ permalink: 'https://instagram.example/unrelated' }) } as Response);
+
+    await expect(provider.finalizePost('page-token___user-token', {
+      type: 'graph.facebook.com', postType: 'single', containers: ['creation-1'],
+    }, { internalId: 'ig-1' } as any)).rejects.toThrow(/media ID.*confirmed/i);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/media_publish?'))).toHaveLength(1);
+  });
+
+  it.each([
+    ['https://cdn.example/image.jpg', 'post', true],
+    ['https://cdn.example/image.jpg', 'story', false],
+    ['https://cdn.example/video.mp4', 'post', false],
+  ])('sends image alt text only on supported containers (%s, %s)', async (path, postType, supported) => {
+    const provider = new InstagramProvider();
+    const fetchMock = jest.spyOn(provider, 'fetch').mockResolvedValue({ json: async () => ({ id: 'creation-1' }) } as Response);
+    await provider.postPending('ig-1', 'token', [{
+      id: 'post-1', message: 'Caption', media: [{ path, alt: 'Descrição & accessibilité' }],
+      settings: { post_type: postType },
+    }] as any, {} as any);
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.searchParams.get('alt_text')).toBe(supported ? 'Descrição & accessibilité' : null);
+  });
+});

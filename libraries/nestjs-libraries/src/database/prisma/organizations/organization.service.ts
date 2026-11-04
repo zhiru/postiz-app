@@ -185,9 +185,18 @@ export class OrganizationService {
     }
     const timeLimit = dayjs().add(1, 'hour').format('YYYY-MM-DD HH:mm:ss');
     const id = makeId(5);
+    // only the invite fields, the body can carry undeclared properties
     const url =
       process.env.FRONTEND_URL +
-      `/?org=${AuthService.signJWT({ ...body, orgId, timeLimit, id })}`;
+      `/?org=${AuthService.signJWT({
+        email: body.email,
+        role: body.role,
+        profileIds: body.profileIds,
+        profileRole: body.profileRole,
+        orgId,
+        timeLimit,
+        id,
+      })}`;
     if (body.sendEmail) {
       const lang = resolveOrgLang(
         await this._organizationRepository.getLanguage(orgId)

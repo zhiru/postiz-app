@@ -328,3 +328,63 @@ describe('AuthService.routeAuth - registro com DISABLE_REGISTRATION', () => {
     });
   });
 });
+
+describe('AuthService existing-user invite integration', () => {
+  let service: AuthService;
+  let deps: ReturnType<typeof makeDeps>;
+
+  beforeEach(() => {
+    deps = makeDeps();
+    service = new AuthService(
+      deps.userService as any,
+      deps.orgService as any,
+      deps.emailService as any,
+      deps.providerManager as any
+    );
+    jest.spyOn(AuthChecker, 'signJWT').mockReturnValue('signed-jwt');
+    jest.spyOn(AuthChecker, 'comparePassword').mockReturnValue(true);
+    deps.userService.getUserByEmail.mockResolvedValue({
+      id: 'local-existing', email: INVITE.email, activated: true,
+    });
+    deps.userService.getUserByProvider.mockResolvedValue({
+      id: 'oauth-existing', email: INVITE.email, activated: true,
+    });
+    deps.providerManager.getProvider.mockReturnValue({
+      getToken: jest.fn().mockResolvedValue('oauth-token'),
+      getUser: jest.fn().mockResolvedValue({ id: 'provider-id', email: INVITE.email }),
+    });
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each(['local', 'oauth'])('%s login rejects an invite for a different email', async (mode) => {
+    const invite = { ...INVITE, email: 'someone-else@example.com' };
+    const result = mode === 'local'
+      ? await service.routeAuth(Provider.LOCAL, { ...localBody() } as any, '127.0.0.1', 'agent', invite)
+      : await service.checkExists('GOOGLE', 'code', undefined, 'nonce', 'nonce', invite);
+    expect(result.jwt).toBe('signed-jwt');
+    expect(deps.orgService.addUserToOrg).not.toHaveBeenCalled();
+  });
+
+  it.each(['local', 'oauth'])('%s login keeps the invited profiles and role', async (mode) => {
+    if (mode === 'local') {
+      await service.routeAuth(Provider.LOCAL, { ...localBody() } as any, '127.0.0.1', 'agent', INVITE);
+    } else {
+      await service.checkExists('GOOGLE', 'code', undefined, 'nonce', 'nonce', INVITE);
+    }
+    expect(deps.orgService.addUserToOrg).toHaveBeenCalledWith(
+      `${mode}-existing`, INVITE.id, INVITE.orgId, INVITE.role,
+      INVITE.profileIds, INVITE.profileRole
+    );
+  });
+
+  it.each(['local', 'oauth'])('%s login does not reuse a consumed invite', async (mode) => {
+    deps.orgService.isInviteConsumed.mockResolvedValue(true);
+    if (mode === 'local') {
+      await service.routeAuth(Provider.LOCAL, { ...localBody() } as any, '127.0.0.1', 'agent', INVITE);
+    } else {
+      await service.checkExists('GOOGLE', 'code', undefined, 'nonce', 'nonce', INVITE);
+    }
+    expect(deps.orgService.addUserToOrg).not.toHaveBeenCalled();
+  });
+});

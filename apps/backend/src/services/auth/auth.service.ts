@@ -134,11 +134,24 @@ export class AuthService {
         throw new Error('Invalid user name or password');
       }
 
+      const joinInvite = await this.resolveInviteJoin(addToOrg, user.email);
+      const addedOrg =
+        joinInvite && addToOrg && typeof addToOrg !== 'boolean'
+          ? await this._organizationService.addUserToOrg(
+              user.id,
+              addToOrg.id,
+              addToOrg.orgId,
+              addToOrg.role,
+              addToOrg.profileIds,
+              addToOrg.profileRole
+            )
+          : false;
+
       if (!user.activated) {
         throw new Error('User is not activated');
       }
 
-      return { addedOrg: false, jwt: await this.jwt(user) };
+      return { addedOrg, jwt: await this.jwt(user) };
     }
 
     const { user, addedOrg } = await this.loginOrRegisterProvider(
@@ -217,7 +230,13 @@ export class AuthService {
 
     try {
       const getOrg: any = AuthChecker.verifyJWT(cookie);
-      if (dayjs(getOrg.timeLimit).isBefore(dayjs())) {
+      if (
+        typeof getOrg.orgId !== 'string' ||
+        typeof getOrg.id !== 'string' ||
+        !['USER', 'ADMIN'].includes(getOrg.role) ||
+        !getOrg.timeLimit ||
+        dayjs(getOrg.timeLimit).isBefore(dayjs())
+      ) {
         return false;
       }
 
@@ -421,7 +440,7 @@ export class AuthService {
       id: string;
       expires: string;
     };
-    if (dayjs(user.expires).isBefore(dayjs())) {
+    if (typeof user.id !== 'string' || dayjs(user.expires).isBefore(dayjs())) {
       return false;
     }
 
@@ -488,7 +507,15 @@ export class AuthService {
     code: string,
     redirectUri?: string,
     state?: string,
-    stateCookie?: string
+    stateCookie?: string,
+    addToOrg?: boolean | {
+      email?: string;
+      orgId: string;
+      role: 'USER' | 'ADMIN';
+      id: string;
+      profileIds?: string[];
+      profileRole?: 'MANAGER' | 'EDITOR' | 'VIEWER';
+    }
   ) {
     // the mobile app passes redirect_uri and keeps no cookies, the web flow
     // never passes it, so the state nonce is only enforced for the web flow
@@ -511,7 +538,19 @@ export class AuthService {
       provider as Provider
     );
     if (checkExists) {
-      return { jwt: await this.jwt(checkExists) };
+      const joinInvite = await this.resolveInviteJoin(addToOrg, user.email);
+      const addedOrg =
+        joinInvite && addToOrg && typeof addToOrg !== 'boolean'
+          ? await this._organizationService.addUserToOrg(
+              checkExists.id,
+              addToOrg.id,
+              addToOrg.orgId,
+              addToOrg.role,
+              addToOrg.profileIds,
+              addToOrg.profileRole
+            )
+          : false;
+      return { jwt: await this.jwt(checkExists), addedOrg };
     }
 
     return { token };

@@ -10,6 +10,7 @@ export const stripQuery = heartbeatEndpoint;
 export type ValidityMedia = {
   path: string;
   thumbnail?: string;
+  alt?: string;
   width?: number;
   height?: number;
   duration_seconds?: number;
@@ -29,6 +30,8 @@ import {
   ssrfSafeFetch,
 } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { AxiosInstance } from 'axios';
+import { resolve, sep } from 'path';
+import { DashboardFunction } from './dashboard.function.decorator';
 import { readFileSync } from 'fs';
 import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
 
@@ -296,7 +299,7 @@ export abstract class SocialAbstract {
   // classify a stall like the ranged reads below do.
   protected async readOrFetch(path: string, retried = false): Promise<Buffer> {
     if (path.indexOf('http') !== 0) {
-      return readFileSync(path);
+      return readFileSync(this.localMediaPath(path));
     }
 
     try {
@@ -366,7 +369,28 @@ export abstract class SocialAbstract {
       return length;
     }
 
-    return statSync(path).size;
+    return statSync(this.localMediaPath(path, identifier)).size;
+  }
+
+  // Media that isn't a remote url is read from the worker's disk. The stored
+  // path is user-influenced, so only a file inside UPLOAD_DIRECTORY is ever
+  // opened: resolve() collapses any `..` segments before the comparison, the
+  // same check the frontend /api/uploads route makes.
+  protected localMediaPath(path: string, identifier = '') {
+    const base = process.env.UPLOAD_DIRECTORY
+      ? resolve(process.env.UPLOAD_DIRECTORY)
+      : '';
+    const filePath = resolve(path);
+    if (!base || !filePath.startsWith(base + sep)) {
+      throw new BadBody(
+        identifier,
+        JSON.stringify({ path }),
+        Buffer.from('{}'),
+        'The media for this post is not in the upload directory, so it was not published'
+      );
+    }
+
+    return filePath;
   }
 
   // Reads a single [start, end] byte range into memory. Used by providers whose
@@ -452,9 +476,10 @@ export abstract class SocialAbstract {
       }
     }
 
+    const filePath = this.localMediaPath(path, identifier);
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
-      createReadStream(path, { start, end })
+      createReadStream(filePath, { start, end })
         .on('data', (chunk) => chunks.push(chunk as Buffer))
         .on('end', () => resolve(Buffer.concat(chunks)))
         .on('error', reject);
@@ -469,7 +494,7 @@ export abstract class SocialAbstract {
     identifier = ''
   ): Promise<Readable> {
     if (path.indexOf('http') !== 0) {
-      return createReadStream(path);
+      return createReadStream(this.localMediaPath(path, identifier));
     }
 
     // identity encoding so the streamed byte count matches the size mediaSize
@@ -551,6 +576,7 @@ export abstract class SocialAbstract {
     }
   }
 
+  @DashboardFunction()
   public async mention(
     token: string,
     d: { query: string },
@@ -572,16 +598,16 @@ export abstract class SocialAbstract {
     try {
       value = await func();
     } catch (err) {
-      // Log cru do erro antes de passar por handleErrors — caso contrario
-      // o wrapper do runInConcurrent joga fora o stack e a mensagem original
-      // do provider (ex.: resposta da API do X/Twitter), dificultando
-      // diagnosticar falhas no worker do Temporal. Divergencia documentada
-      // em .claude/skills/sync-upstream/SKILL.md.
-      console.error(
-        '[runInConcurrent] provider error:',
-        (err as any)?.data || (err as any)?.message || err,
-        (err as any)?.stack || ''
-      );
+      // Already classified by the provider (e.g. mediaSize/mediaChunk): keep
+      // its message instead of re-wrapping it as 'Unknown Error'.
+      if (
+        err instanceof BadBody ||
+        err instanceof RefreshToken ||
+        err instanceof Disconnect ||
+        err instanceof PublishedWithError
+      ) {
+        throw err;
+      }
       const handle = this.handleErrors(safeStringify(err), 200);
       value = { err: true, value: 'Unknown Error', ...(handle || {}) };
       globalErr = err;

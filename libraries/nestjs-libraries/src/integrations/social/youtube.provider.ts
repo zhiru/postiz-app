@@ -24,13 +24,14 @@ import {
 import * as process from 'node:process';
 import dayjs from 'dayjs';
 import { GaxiosResponse } from 'gaxios/build/src/common';
-import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 import { Integration } from '@prisma/client';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { createReadStream, statSync } from 'fs';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
+import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 
 import Schema$Video = youtube_v3.Schema$Video;
 
@@ -372,6 +373,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  @DashboardFunction()
   async pages(accessToken: string) {
     const { client, youtube } = clientAndYoutube();
     client.setCredentials({ access_token: accessToken });
@@ -744,7 +746,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       return length;
     }
 
-    return statSync(path).size;
+    return statSync(this.localMediaPath(path, this.identifier)).size;
   }
 
   private async youtubeChunkStream(
@@ -795,7 +797,10 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       return response.body;
     }
 
-    return createReadStream(path, { start, end });
+    return createReadStream(this.localMediaPath(path, this.identifier), {
+      start,
+      end,
+    });
   }
 
   private async probeUploadSession(

@@ -579,21 +579,28 @@ export class IntegrationRepository {
       },
     });
   }
-
-  refreshNeeded(org: string, id: string) {
-    return this._integration.model.integration.update({
+  // Only the attempt that flips the flag reports it, so parallel failed
+  // refreshes of an already flagged channel do not notify again
+  async refreshNeeded(org: string, id: string) {
+    const { count } = await this._integration.model.integration.updateMany({
       where: {
         id,
         organizationId: org,
+        refreshNeeded: false,
       },
       data: {
         refreshNeeded: true,
       },
     });
+
+    return count === 1;
   }
 
   updateNameAndUrl(id: string, name: string, url: string) {
     return this._integration.model.integration.update({
+      select: {
+        id: true,
+      },
       where: {
         id,
       },
@@ -698,6 +705,9 @@ export class IntegrationRepository {
         }));
 
     return this._integration.model.integration.update({
+      select: {
+        id: true,
+      },
       where: {
         id,
         organizationId: org,
@@ -716,6 +726,9 @@ export class IntegrationRepository {
 
   updateIntegrationGroup(org: string, id: string, group: string) {
     return this._integration.model.integration.update({
+      select: {
+        id: true,
+      },
       where: {
         id,
         organizationId: org,
