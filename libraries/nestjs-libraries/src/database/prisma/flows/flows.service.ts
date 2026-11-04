@@ -1,4 +1,5 @@
 import { FlowExecutionsQueryDto } from '@gitroom/nestjs-libraries/dtos/flows/flow-executions-query.dto';
+import { RedispatchExecutionDto } from '@gitroom/nestjs-libraries/dtos/flows/redispatch-execution.dto';
 import { createHash } from 'crypto';
 import {
   Injectable,
@@ -1545,6 +1546,104 @@ export class FlowsService {
 
   getExecution(orgId: string, id: string, flowId?: string, profileId?: string) {
     return this._flowsRepository.getExecution(id, orgId, flowId, profileId);
+  }
+
+  private async prepareRedispatch(orgId: string, flowId: string, id: string, profileId?: string) {
+    const execution = await this._flowsRepository.getExecution(id, orgId, flowId, profileId);
+    const flow = await this._flowsRepository.getFlow(orgId, flowId, profileId);
+    const blocked = () => new BadRequestException(
+      'Redispatch blocked. Check current rules, execution and delivery history before taking any manual action.'
+    );
+    if (!execution || !flow || flow.status !== 'ACTIVE' || flow.deletedAt ||
+      !['COMPLETED', 'FAILED', 'CANCELLED'].includes(execution.status) ||
+      (execution.triggerType && execution.triggerType !== 'comment_on_post') ||
+      !execution.igCommentId || !execution.igMediaId || !execution.igCommenterId ||
+      !execution.temporalWorkflowId || execution.temporalWorkflowId.startsWith('flow-redispatch-')) throw blocked();
+
+    // Only the original engine's unambiguous, pre-send keyword skip is eligible.
+    // Missing, malformed, extra or send-related log entries fail closed.
+    let log: Array<{ nodeId: string; nodeType: string; status: string; error?: string }>;
+    let triggerConfig: Record<string, any>;
+    try {
+      log = JSON.parse(execution.executionLog || 'null');
+      const triggers = flow.nodes.filter((n) => n.type === 'TRIGGER');
+      if (triggers.length !== 1) throw blocked();
+      triggerConfig = JSON.parse(triggers[0].data || '{}');
+      if (!triggerConfig || typeof triggerConfig !== 'object' || Array.isArray(triggerConfig)) throw blocked();
+      // Parse every current node before asking the user to confirm its effects.
+      for (const node of flow.nodes) {
+        const data = JSON.parse(node.data || '{}');
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw blocked();
+      }
+      if (!Array.isArray(log) || log.length !== 2 ||
+        log[0]?.nodeType !== 'TRIGGER' || log[0]?.status !== 'entered' || log[0]?.error ||
+        log[1]?.nodeType !== 'TRIGGER' || log[1]?.status !== 'skipped' ||
+        log[1]?.error !== 'keywords_not_matched' || !log[0].nodeId || log[0].nodeId !== log[1].nodeId) throw blocked();
+    } catch { throw blocked(); }
+
+    await this.assertIntegrationAccess(orgId, flow.integrationId, profileId || flow.profileId || undefined);
+    if (this.getTriggerType(flow) !== 'comment_on_post' ||
+      this.isPendingNextPublication(flow) || this.isPostExcluded(flow, execution.igMediaId) ||
+      await this._flowsRepository.findIgnoredMedia(flow.integrationId, execution.igMediaId)) throw blocked();
+    let postIds: string[];
+    try {
+      postIds = JSON.parse(flow.triggerPostIds || '[]');
+      if (!Array.isArray(postIds) || postIds.some((v) => typeof v !== 'string')) throw blocked();
+    } catch { throw blocked(); }
+    if (postIds.length && !postIds.includes(execution.igMediaId)) {
+      const aliases = await this._flowsRepository.findAliasesByIntegrationAndMedia(flow.integrationId, execution.igMediaId);
+      if (!aliases.some((alias) => alias.flowId === flow.id)) throw blocked();
+    }
+
+    const client = this._temporalService.client.getRawClient();
+    if (!client) throw new ServiceUnavailableException('Could not confirm the previous execution. Redispatch blocked.');
+    try {
+      const previous = await client.workflow.getHandle(execution.temporalWorkflowId).describe();
+      if (previous.status.name !== 'COMPLETED') throw blocked();
+    } catch {
+      throw new BadRequestException('Previous workflow is active or its result is unknown. Redispatch blocked.');
+    }
+    const configurationToken = createHash('sha256').update(JSON.stringify({
+      execution, flow: { ...flow, nodes: [...flow.nodes].sort((a, b) => a.id.localeCompare(b.id)),
+        edges: [...flow.edges].sort((a, b) => a.id.localeCompare(b.id)) },
+    })).digest('hex');
+    return { execution, flow, client, preview: {
+      configurationToken,
+      publicReply: flow.nodes.some((n) => n.type === 'REPLY_COMMENT'),
+      directMessage: !!triggerConfig.requireFollow || flow.nodes.some((n) => n.type === 'SEND_DM'),
+    } };
+  }
+
+  async previewRedispatch(orgId: string, flowId: string, id: string, profileId?: string) {
+    return (await this.prepareRedispatch(orgId, flowId, id, profileId)).preview;
+  }
+
+  async redispatchExecution(orgId: string, flowId: string, id: string, body: RedispatchExecutionDto, profileId?: string) {
+    if (body.confirmed !== true) throw new BadRequestException('Explicit confirmation is required.');
+    const { execution, flow, client, preview } = await this.prepareRedispatch(orgId, flowId, id, profileId);
+    if (body.configurationToken !== preview.configurationToken)
+      throw new BadRequestException('Configuration changed. Review and confirm the current public reply and DM again.');
+    const workflowId = `flow-redispatch-${execution.id}`;
+    if (!await this._flowsRepository.claimRedispatch(orgId, profileId, execution, flow, workflowId))
+      throw new BadRequestException('Redispatch already claimed, delivery recorded or state changed. Reload and check history.');
+    try {
+      await client.workflow.start(
+        flow.nodes.some((n) => n.type === 'TRIGGER' && JSON.parse(n.data || '{}').executionVersion === 2)
+          ? 'flowExecutionWorkflowV2' : 'flowExecutionWorkflow',
+        {
+          workflowId, workflowIdReusePolicy: 'REJECT_DUPLICATE' as any, taskQueue: 'main',
+          args: [{ executionId: execution.id, flowId, integrationId: flow.integrationId,
+            triggerType: 'comment_on_post', igCommentId: execution.igCommentId,
+            igCommenterId: execution.igCommenterId, igCommenterName: execution.igCommenterName,
+            igMediaId: execution.igMediaId, commentText: execution.commentText, receivedAt: Date.now() }],
+          typedSearchAttributes: new TypedSearchAttributes([{ key: orgSearchAttr, value: orgId }]),
+        }
+      );
+    } catch {
+      // Never reopen the durable claim: start may have succeeded before a timeout.
+      throw new ServiceUnavailableException('Redispatch result unknown. Check execution history; another redispatch is blocked.');
+    }
+    return { executionId: execution.id };
   }
 
   appendExecutionLog(

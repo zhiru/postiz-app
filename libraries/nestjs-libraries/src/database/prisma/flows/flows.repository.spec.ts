@@ -50,6 +50,72 @@ describe('FlowsRepository', () => {
     });
   });
 
+  describe('claimRedispatch', () => {
+    const execution = { id: 'e', flowId: 'f', igCommentId: 'c', status: 'COMPLETED',
+      temporalWorkflowId: 'original', updatedAt: new Date('2026-11-01'),
+      executionLog: '[{"status":"entered"},{"status":"skipped","error":"keywords_not_matched"}]' } as any;
+    const flow = { id: 'f', organizationId: 'org', profileId: 'profile', integrationId: 'i',
+      status: 'ACTIVE', deletedAt: null, triggerPostIds: null, nodes: [], edges: [] } as any;
+    let tx: any;
+    let transaction: jest.Mock;
+    beforeEach(() => {
+      tx = Object.assign({}, ...['flow', 'automationDelivery', 'pendingPostback', 'flowExecution'].map((name) => createPrismaRepositoryMock(name).model));
+      tx.flow.findFirst.mockResolvedValue(flow);
+      tx.automationDelivery.findFirst.mockResolvedValue(null);
+      tx.pendingPostback.findFirst.mockResolvedValue(null);
+      tx.flowExecution.findFirst.mockResolvedValue(null);
+      tx.flowExecution.updateMany.mockResolvedValue({ count: 1 });
+      transaction = jest.fn((callback) => callback(tx));
+      repo = new FlowsRepository({ model: { $transaction: transaction } } as any,
+        {} as any, {} as any, flowExecution as any, {} as any, {} as any, {} as any, {} as any);
+    });
+
+    it('keeps the original log and workflow reference under a scoped serializable compare-and-swap', async () => {
+      // getFlow's credential-free integration summary must not affect configuration comparison.
+      expect(await repo.claimRedispatch('org', 'profile', execution, { ...flow, integration: { id: 'i' } }, 'manual')).toBe(true);
+      expect(transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+      expect(tx.flow.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: {
+        id: 'f', organizationId: 'org', profileId: 'profile', integrationId: 'i', status: 'ACTIVE', deletedAt: null,
+      } }));
+      const { where, data } = tx.flowExecution.updateMany.mock.calls[0][0] as any;
+      expect(where).toMatchObject({ id: 'e', status: 'COMPLETED', temporalWorkflowId: 'original', updatedAt: execution.updatedAt,
+        flow: { organizationId: 'org', profileId: 'profile', status: 'ACTIVE', deletedAt: null } });
+      expect(data).toMatchObject({ status: 'RUNNING', temporalWorkflowId: 'manual', completedAt: null });
+      const history = JSON.parse(data.executionLog);
+      expect(history.slice(0, 2)).toEqual(JSON.parse(execution.executionLog));
+      expect(JSON.parse(history[2].error)).toMatchObject({ previousWorkflowId: 'original', previousStatus: 'COMPLETED' });
+      expect(tx.automationDelivery.findFirst).toHaveBeenCalledWith({ where: { OR: [
+        { key: { startsWith: '["i","c",' } }, { key: { startsWith: '["i","e",' } },
+      ] }, select: { id: true } });
+    });
+
+    it.each(['SENT', 'SENDING', 'UNKNOWN', 'REJECTED'])('blocks any %s receipt before claiming', async (status) => {
+      tx.automationDelivery.findFirst.mockResolvedValue({ id: 'receipt', status } as any);
+      expect(await repo.claimRedispatch('org', 'profile', execution, flow, 'manual')).toBe(false);
+      expect(tx.flowExecution.updateMany).not.toHaveBeenCalled();
+    });
+
+    it.each(['postback', 'other-execution', 'configuration', 'scope'])('blocks %s', async (scenario) => {
+      if (scenario === 'postback') tx.pendingPostback.findFirst.mockResolvedValue({ id: 'pb' } as any);
+      if (scenario === 'other-execution') tx.flowExecution.findFirst.mockResolvedValue({ id: 'other' } as any);
+      if (scenario === 'configuration') tx.flow.findFirst.mockResolvedValue({ ...flow, triggerPostIds: '["excluded"]' });
+      if (scenario === 'scope') tx.flow.findFirst.mockResolvedValue(null);
+      expect(await repo.claimRedispatch('org', 'profile', execution, flow, 'manual')).toBe(false);
+      expect(tx.flowExecution.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('allows only one claim for concurrent callers', async () => {
+      let claimed = false;
+      tx.flowExecution.updateMany.mockImplementation(async () => {
+        if (claimed) return { count: 0 };
+        claimed = true;
+        return { count: 1 };
+      });
+      const results = await Promise.all([1, 2].map(() => repo.claimRedispatch('org', 'profile', execution, flow, 'manual')));
+      expect(results.sort()).toEqual([false, true]);
+    });
+  });
+
   describe('getExecutions', () => {
     it('filtra por flowId e organizationId do flow para isolar o tenant', async () => {
       flowExecution.model.flowExecution.findMany.mockResolvedValue([]);

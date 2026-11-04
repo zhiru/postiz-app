@@ -1,4 +1,5 @@
 import { FlowExecutionsQueryDto } from '@gitroom/nestjs-libraries/dtos/flows/flow-executions-query.dto';
+import { RedispatchExecutionDto } from '@gitroom/nestjs-libraries/dtos/flows/redispatch-execution.dto';
 import {
   Body,
   Controller,
@@ -248,5 +249,26 @@ export class FlowsController {
       flowId,
       profile?.id
     );
+  }
+
+  @Get('/:id/executions/:executionId/redispatch')
+  previewRedispatch(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') flowId: string,
+    @Param('executionId') executionId: string
+  ) {
+    return this._flowsService.previewRedispatch(org.id, flowId, executionId, profile?.id);
+  }
+
+  @Post('/:id/executions/:executionId/redispatch')
+  redispatchExecution(
+    @GetOrgFromRequest() org: Organization,
+    @GetProfileFromRequest() profile: Profile | null,
+    @Param('id') flowId: string,
+    @Param('executionId') executionId: string,
+    @Body() body: RedispatchExecutionDto
+  ) {
+    return this._flowsService.redispatchExecution(org.id, flowId, executionId, body, profile?.id);
   }
 }

@@ -18,6 +18,35 @@ os demais parâmetros da URL (inclusive parâmetros repetidos) e o fragmento.
 Um registro inexistente ou inacessível continua oferecendo retorno à lista.
 O link requer login e as permissões existentes da organização/perfil/automação.
 
+## Redisparar um comentário ignorado por palavras-chave
+
+No detalhe de uma execução ignorada por `keywords_not_matched`, use **Redisparar**.
+O botão também aparece quando o status é **Concluído**: nesse caso, o motor terminou
+sem executar as ações porque o comentário não correspondeu às palavras-chave.
+Revise a confirmação, que informa separadamente a possibilidade de **resposta pública**
+e **DM**, e escolha **Confirmar redisparo**. Abrir os detalhes, revisar ou cancelar não envia mensagens.
+
+O comentário original é reavaliado pelo motor existente com as regras atuais. Edite
+as palavras-chave primeiro, se necessário: o redisparo não força correspondência nem
+contorna exclusões de posts, mídia ignorada, seleção de posts/aliases, exigência de
+seguir ou permissões de organização/perfil. O fluxo e o canal precisam estar ativos.
+Se a configuração mudar durante a confirmação, será preciso revisar novamente.
+
+Por segurança, só é aceita uma nova tentativa manual por execução, com log inequívoco
+de entrada no gatilho e descarte por palavras-chave, sem outras etapas, e encerramento
+anterior confirmado no Temporal. Históricos ausentes/inconsistentes, workflows fora
+da retenção, outra execução do mesmo comentário no mesmo canal, postbacks e qualquer
+registro de entrega (inclusive envio pendente, rejeitado ou resultado desconhecido)
+bloqueiam a tentativa. Solicitações simultâneas disputam uma reserva durável única.
+Se houver timeout ou queda após a reserva, o sistema mantém o bloqueio: confira o
+histórico antes de qualquer ação manual. Uma resposta de solicitação aceita não
+confirma entrega da mensagem.
+
+O log anterior é preservado; a nova entrada registra a solicitação e o status,
+datas e workflow anteriores. A identidade original do comentário é mantida.
+Os workflows Temporal publicados permanecem inalterados, e nenhum teste deste
+recurso exige comentários ou DMs reais.
+
 ## Mensagem depois do comentário e follow-up
 
 Para a primeira DM após um comentário, escolha **Comentário em Feed/Reels** em

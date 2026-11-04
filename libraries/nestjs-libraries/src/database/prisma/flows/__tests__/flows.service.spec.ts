@@ -24,6 +24,8 @@ const mockRepository = {
   updateFlowStatus: jest.fn(),
   getExecutions: jest.fn(),
   getExecutionsPage: jest.fn(),
+  getExecution: jest.fn(),
+  claimRedispatch: jest.fn(),
   createExecution: jest.fn(),
   updateExecution: jest.fn(),
   getExecutionEventContext: jest.fn(),
@@ -62,6 +64,7 @@ const mockWorkflowStart = jest.fn().mockResolvedValue({ workflowId: 'wf-1' });
 const mockRawClient = {
   workflow: {
     start: mockWorkflowStart,
+    getHandle: jest.fn(),
   },
 };
 const mockTemporalService = {
@@ -169,6 +172,89 @@ describe('FlowsService', () => {
       {} as any,
       mockStatusEventService as any // statusEventService
     );
+  });
+
+  describe('manual comment redispatch', () => {
+    const log = JSON.stringify([
+      { nodeId: 'old-trigger', nodeType: 'TRIGGER', status: 'entered' },
+      { nodeId: 'old-trigger', nodeType: 'TRIGGER', status: 'skipped', error: 'keywords_not_matched' },
+    ]);
+    beforeEach(() => {
+      mockRepository.getExecution.mockResolvedValue({
+        id: 'exec-1', flowId: 'flow-1', status: 'COMPLETED', triggerType: 'comment_on_post',
+        igCommentId: 'comment-1', igMediaId: 'media-1', igCommenterId: 'person-1',
+        commentText: 'hello', executionLog: log, temporalWorkflowId: 'original-workflow',
+      });
+      mockRepository.getFlow.mockResolvedValue(makeFlow({ status: 'ACTIVE', nodes: [
+        { id: 'trigger', type: 'TRIGGER', data: '{"keywords":["hello"]}' },
+        { id: 'reply', type: 'REPLY_COMMENT', data: '{"message":"Hello"}' },
+        { id: 'dm', type: 'SEND_DM', data: '{"message":"Private hello"}' },
+      ] }));
+      mockRawClient.workflow.getHandle.mockReturnValue({ describe: jest.fn().mockResolvedValue({ status: { name: 'COMPLETED' } }) });
+      mockRepository.claimRedispatch.mockResolvedValue(true);
+    });
+
+    it('previews public reply and DM for a COMPLETED keyword skip, then starts the existing engine', async () => {
+      const preview = await service.previewRedispatch('org-1', 'flow-1', 'exec-1', 'profile-1');
+      expect(preview).toMatchObject({ publicReply: true, directMessage: true });
+      await service.redispatchExecution('org-1', 'flow-1', 'exec-1', { confirmed: true, configurationToken: preview.configurationToken }, 'profile-1');
+      expect(mockRepository.getExecution).toHaveBeenCalledWith('exec-1', 'org-1', 'flow-1', 'profile-1');
+      expect(mockRepository.claimRedispatch).toHaveBeenCalledWith('org-1', 'profile-1', expect.objectContaining({ executionLog: log }), expect.anything(), 'flow-redispatch-exec-1');
+      expect(mockWorkflowStart).toHaveBeenCalledWith('flowExecutionWorkflow', expect.objectContaining({
+        workflowId: 'flow-redispatch-exec-1', workflowIdReusePolicy: 'REJECT_DUPLICATE',
+        args: [expect.objectContaining({ executionId: 'exec-1', igCommentId: 'comment-1', commentText: 'hello' })],
+      }));
+    });
+
+    it.each(['RUNNING', 'WAITING_POSTBACK'])('blocks %s executions', async (status) => {
+      mockRepository.getExecution.mockResolvedValue({ ...(await mockRepository.getExecution()), status });
+      await expect(service.previewRedispatch('org-1', 'flow-1', 'exec-1')).rejects.toThrow();
+      expect(mockWorkflowStart).not.toHaveBeenCalled();
+    });
+
+    it.each(['SENT', 'UNKNOWN', 'error', 'redispatch_requested'])('rejects logs with any extra %s step', async (status) => {
+      mockRepository.getExecution.mockResolvedValue({ ...(await mockRepository.getExecution()), executionLog: JSON.stringify([...JSON.parse(log), { nodeType: 'SEND_DM', status }]) });
+      await expect(service.previewRedispatch('org-1', 'flow-1', 'exec-1')).rejects.toThrow();
+    });
+
+    it.each(['paused', 'excluded', 'ignored', 'wrong-media', 'story', 'pending', 'missing', 'bad-json'])('blocks current rule: %s', async (scenario) => {
+      const flow = await mockRepository.getFlow();
+      if (scenario === 'paused') flow.status = 'PAUSED';
+      if (scenario === 'excluded') flow.nodes[0].data = '{"excludedPostIds":["media-1"]}';
+      if (scenario === 'ignored') mockRepository.findIgnoredMedia.mockResolvedValue({ id: 'ignored' });
+      if (scenario === 'wrong-media') flow.triggerPostIds = '["other-media"]';
+      if (scenario === 'story') flow.nodes[0].data = '{"triggerType":"story_reply"}';
+      if (scenario === 'pending') flow.nodes[0].data = '{"mode":"next_publication"}';
+      if (scenario === 'missing') mockRepository.getExecution.mockResolvedValue(null);
+      if (scenario === 'bad-json') flow.nodes[0].data = '{';
+      await expect(service.previewRedispatch('org-1', 'flow-1', 'exec-1')).rejects.toThrow();
+    });
+
+    it.each(['RUNNING', 'FAILED', 'TERMINATED', 'unknown'])('requires a confirmed COMPLETED Temporal result, rejecting %s', async (name) => {
+      mockRawClient.workflow.getHandle.mockReturnValue({ describe: jest.fn().mockResolvedValue({ status: { name } }) });
+      await expect(service.previewRedispatch('org-1', 'flow-1', 'exec-1')).rejects.toThrow();
+    });
+
+    it('requires explicit confirmation of the current configuration', async () => {
+      await expect(service.redispatchExecution('org-1', 'flow-1', 'exec-1', { confirmed: false, configurationToken: '' } as any)).rejects.toThrow();
+      await expect(service.redispatchExecution('org-1', 'flow-1', 'exec-1', { confirmed: true, configurationToken: 'stale' })).rejects.toThrow();
+      expect(mockRepository.claimRedispatch).not.toHaveBeenCalled();
+    });
+
+    it('blocks concurrent claims and delivery uncertainty', async () => {
+      const preview = await service.previewRedispatch('org-1', 'flow-1', 'exec-1');
+      mockRepository.claimRedispatch.mockResolvedValue(false);
+      await expect(service.redispatchExecution('org-1', 'flow-1', 'exec-1', { confirmed: true, configurationToken: preview.configurationToken })).rejects.toThrow();
+      expect(mockWorkflowStart).not.toHaveBeenCalled();
+    });
+
+    it('retains the claim when Temporal start has an uncertain outcome', async () => {
+      const preview = await service.previewRedispatch('org-1', 'flow-1', 'exec-1');
+      mockWorkflowStart.mockRejectedValue(new Error('timeout with secret'));
+      await expect(service.redispatchExecution('org-1', 'flow-1', 'exec-1', { confirmed: true, configurationToken: preview.configurationToken })).rejects.toThrow(/unknown/i);
+      expect(mockRepository.updateExecution).not.toHaveBeenCalled();
+      expect(mockWorkflowStart).toHaveBeenCalledTimes(1);
+    });
   });
 
   // --- Issue 1: roteamento de host/token via resolveIgRoute ---
