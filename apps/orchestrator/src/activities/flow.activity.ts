@@ -310,18 +310,21 @@ export class FlowActivity {
 
       if (keywords.length === 0) return true;
 
-      const lowerComment = commentText.toLowerCase();
+      // Normalize both sides without trimming: exact still compares the whole text.
+      const normalize = (text: string) => text.toLowerCase().replace(/\s+/g, ' ');
+      const normalizedComment = normalize(commentText);
+      const normalizedKeywords = keywords.map(normalize);
 
       if (matchMode === 'all') {
-        return keywords.every((kw) => lowerComment.includes(kw.toLowerCase()));
+        return normalizedKeywords.every((kw) => normalizedComment.includes(kw));
       }
 
       if (matchMode === 'exact') {
-        return keywords.some((kw) => lowerComment === kw.toLowerCase());
+        return normalizedKeywords.some((kw) => normalizedComment === kw);
       }
 
       // Default: 'any' — at least one keyword matches
-      return keywords.some((kw) => lowerComment.includes(kw.toLowerCase()));
+      return normalizedKeywords.some((kw) => normalizedComment.includes(kw));
     } catch {
       return false;
     }

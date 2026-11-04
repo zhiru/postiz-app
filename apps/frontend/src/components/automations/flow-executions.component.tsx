@@ -1,10 +1,13 @@
 'use client';
 
-import { FC } from 'react';
+import { FC, useRef, useState } from 'react';
+import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
+import { useFlowRedispatch } from './hooks/use-flow-redispatch';
 import { useFlowHistory } from './hooks/use-flow-history';
 import { FlowExecutionList } from './flow-execution-list.component';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFlowExecution } from '@gitroom/frontend/components/automations/hooks/use-flows';
+import { FlowExecutionPublication } from './flow-execution-publication.component';
 
 interface FlowExecutionsProps {
   flowId: string;
@@ -28,13 +31,57 @@ const NODE_TYPE_COLORS: Record<string, string> = {
   GATE_RESOLVE: '#eab308',
 };
 
+const RedispatchExecution: FC<{ flowId: string; executionId: string; onStarted: () => Promise<unknown> }> = ({ flowId, executionId, onStarted }) => {
+  const t = useT();
+  const fetch = useFetch();
+  const [review, setReview] = useState(false);
+  const [result, setResult] = useState<'sending' | 'started' | 'blocked' | null>(null);
+  const inFlight = useRef(false);
+  const { data: preview, error, isLoading } = useFlowRedispatch(flowId, executionId, review);
+  const send = async () => {
+    if (!preview || inFlight.current) return;
+    inFlight.current = true;
+    setResult('sending');
+    try {
+      const response = await fetch(`/flows/${flowId}/executions/${executionId}/redispatch`, {
+        method: 'POST', body: JSON.stringify({ confirmed: true, configurationToken: preview.configurationToken }),
+      });
+      if (!response.ok) throw new Error('Redispatch blocked');
+      setResult('started');
+      await onStarted();
+    } catch {
+      // A lost response can follow a successful start. Require a fresh history read.
+      setResult('blocked');
+    }
+  };
+  const buttonClass = 'rounded px-3 py-2 border border-[var(--new-border)] text-[12px] disabled:opacity-50 focus-visible:ring-2';
+  return <div className="mb-4 text-[12px]">
+    {!review && <button className={buttonClass} onClick={() => setReview(true)}>{t('flow_redispatch', 'Redispatch')}</button>}
+    {review && <div className="rounded border border-[var(--new-border)] p-3" aria-live="polite">
+      {isLoading && <p role="status">{t('flow_redispatch_checking', 'Checking current rules and previous execution...')}</p>}
+      {(error || result === 'blocked') && <p role="alert">{t('flow_redispatch_blocked', 'Redispatch blocked or result unknown. Reload and check execution and delivery history before taking any manual action.')}</p>}
+      {preview && !error && !result && <>
+        <p>{t('flow_redispatch_confirmation', 'Redispatch this comment using the current rules? Matching keywords, exclusions and follow requirements still apply. This can send real messages:')}</p>
+        <ul className="my-2 list-disc pl-5">
+          <li>{preview.publicReply ? t('flow_redispatch_public_yes', 'Public reply: may be sent to the comment.') : t('flow_redispatch_public_no', 'Public reply: none configured.')}</li>
+          <li>{preview.directMessage ? t('flow_redispatch_dm_yes', 'DM: may be sent privately to the commenter, including the follow gate.') : t('flow_redispatch_dm_no', 'DM: none configured.')}</li>
+        </ul>
+        <button className={buttonClass} onClick={send}>{t('flow_redispatch_confirm', 'Confirm redispatch')}</button>
+      </>}
+      {result === 'sending' && <p role="status">{t('flow_redispatch_sending', 'Requesting redispatch...')}</p>}
+      {result === 'started' && <p role="status">{t('flow_redispatch_started', 'Redispatch requested. Follow the execution history for the result.')}</p>}
+      {!result && <button className={`${buttonClass} ml-2`} onClick={() => setReview(false)}>{t('cancel', 'Cancel')}</button>}
+    </div>}
+  </div>;
+};
+
 const ExecutionDetail: FC<{
   flowId: string;
   executionId: string;
   onBack: () => void;
 }> = ({ flowId, executionId, onBack }) => {
   const t = useT();
-  const { data: execution, isLoading } = useFlowExecution(flowId, executionId);
+  const { data: execution, isLoading, mutate } = useFlowExecution(flowId, executionId);
 
   const backToList = (
     <button
@@ -69,7 +116,16 @@ const ExecutionDetail: FC<{
     status: string;
     timestamp: string;
     error?: string;
-  }> = execution.executionLog ? JSON.parse(execution.executionLog) : [];
+  }> = (() => {
+    try {
+      const parsed = JSON.parse(execution.executionLog || '[]');
+      return Array.isArray(parsed) ? parsed.filter((entry) => entry && typeof entry === 'object') : [];
+    } catch { return []; }
+  })();
+  const canRedispatch = ['COMPLETED', 'FAILED', 'CANCELLED'].includes(execution.status) &&
+    (!execution.triggerType || execution.triggerType === 'comment_on_post') &&
+    log.some((entry) => entry.nodeType === 'TRIGGER' && entry.status === 'skipped' && entry.error === 'keywords_not_matched') &&
+    !log.some((entry) => entry.status === 'redispatch_requested');
 
   return (
     <div className="p-[16px]">
@@ -103,11 +159,15 @@ const ExecutionDetail: FC<{
         &ldquo;{execution.commentText}&rdquo;
       </p>
 
+      <FlowExecutionPublication flowId={flowId} executionId={executionId} />
+
       {execution.error && (
         <div className="rounded-[4px] border border-customColor19/40 bg-customColor19/10 p-[12px] mb-[16px]">
           <p className="text-[12px] text-customColor19">{execution.error}</p>
         </div>
       )}
+
+      {canRedispatch && <RedispatchExecution key={executionId} flowId={flowId} executionId={executionId} onStarted={() => mutate()} />}
 
       {/* Timeline */}
       {log.length > 0 ? (
@@ -166,7 +226,7 @@ const ExecutionDetail: FC<{
                   <span className="text-[10px] text-customColor18">
                     {new Date(entry.timestamp).toLocaleTimeString()}
                   </span>
-                  {entry.error && entry.status !== 'completed' && (
+                  {entry.error && entry.status !== 'completed' && entry.status !== 'redispatch_requested' && (
                     <p className="text-[10px] text-customColor19 mt-[2px]">
                       {entry.error}
                     </p>
