@@ -7,6 +7,16 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Corrige o dimensionamento do conteúdo no gerenciador real de modais com altura definida: a prévia de métricas e a do calendário reservam a altura restante ao iframe, com teste da cadeia real e fixture de browser sem mock do modal.
+- Edição no calendário/listagem: rascunhos, fila e erros sem identidade publicada mantêm o editor local em qualquer canal; publicados/importados com link oferecem “Editar na plataforma original”, respeitando permissão de escrita e exclusão remota. A edição direta de uma identidade já publicada não abre o composer de agendamento; duplicação continua uma ação explícita independente.
+
+- Automações de comentários do Instagram: normaliza sequências de espaços no comentário e nas palavras-chave, corrigindo `Eu  vou` versus `Eu vou` sem alterar os modos de correspondência nem os workflows Temporal existentes.
+- Automações de comentários: ação Redisparar no detalhe de execuções ignoradas por `keywords_not_matched`, inclusive `COMPLETED`, com confirmação de resposta pública/DM, reavaliação das regras atuais e bloqueios duráveis contra duplicidade, concorrência, entrega anterior ou resultado incerto; preserva logs e workflows existentes.
+
+- Integração do redisparo: revalida canal, mídia ignorada e aliases dentro da reserva serializável e impede que reentregas do webhook retomem o workflow original após uma reserva manual; regressões cobrem concorrência e `Eu  vou` com resposta pública e DM sem envio duplicado.
+- Detalhe da execução Instagram: botão “Abrir publicação em nova aba” usa permalink real do calendário/Inbox ou da API autorizada, com validação de URL e indicação quando indisponível, preservando o histórico.
+- Publicações excluídas no assistente e Flow Builder: switch inicia ligado quando há exclusões, mantém a seleção durante alternâncias e salva lista vazia quando desligado; “Mostrar Todos” abre modal com cards, busca, paginação, IDs manuais e fechamento acessível.
+
 - Prévia do calendário mantém o modal em 80vw/80vh e o iframe preenchendo a área restante abaixo da barra de ações.
 - Prévia autenticada mostra nomes de contatos/grupos NeuralTalk salvos, com ID como fallback, e diferencia configuração, mensagem registrada, rejeição, resultado desconhecido e envio confirmado pelo provedor, sem afirmar entrega no aparelho; destinatários e configurações ficam fora do link público e da revisão.
 - Calendário/listagem: evita que a rolagem provocada pelo foco feche imediatamente o menu de três pontos, com regressão para vídeos importados e preservação das permissões de ações.

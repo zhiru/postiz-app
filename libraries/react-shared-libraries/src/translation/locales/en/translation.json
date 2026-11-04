@@ -1,4 +1,9 @@
 {
+  "post_edit_original": "Edit on original platform",
+  "post_edit_original_description": "Edit this publication on the original platform, if editing is available there. Saving in the composer would not update the published post.",
+  "flow_open_publication": "Open publication in a new tab",
+  "flow_publication_loading": "Loading publication link...",
+  "flow_publication_unavailable": "Publication link unavailable",
   "post_action_copy_channel": "Copy to another network",
   "calendar": "Calendar",
   "webhooks": "Webhooks",
@@ -2601,5 +2606,17 @@
   "flow_comments_retry": "Try again",
   "flow_comments_no_matches": "No comments match these filters.",
   "flow_comments_open": "Open comment by {{name}}",
-  "flow_execution_status_cancelled": "CANCELLED"
+  "flow_execution_status_cancelled": "CANCELLED",
+  "flow_redispatch": "Redispatch",
+  "flow_redispatch_checking": "Checking current rules and previous execution...",
+  "flow_redispatch_blocked": "Redispatch blocked or result unknown. Reload and check execution and delivery history before taking any manual action.",
+  "flow_redispatch_confirmation": "Redispatch this comment using the current rules? Matching keywords, exclusions and follow requirements still apply. This can send real messages:",
+  "flow_redispatch_public_yes": "Public reply: may be sent to the comment.",
+  "flow_redispatch_public_no": "Public reply: none configured.",
+  "flow_redispatch_dm_yes": "DM: may be sent privately to the commenter, including the follow gate.",
+  "flow_redispatch_dm_no": "DM: none configured.",
+  "flow_redispatch_confirm": "Confirm redispatch",
+  "flow_redispatch_sending": "Requesting redispatch...",
+  "flow_redispatch_started": "Redispatch requested. Follow the execution history for the result.",
+  "flow_log_status_redispatch_requested": "Redispatch requested"
 }

@@ -18,6 +18,49 @@ os demais parâmetros da URL (inclusive parâmetros repetidos) e o fragmento.
 Um registro inexistente ou inacessível continua oferecendo retorno à lista.
 O link requer login e as permissões existentes da organização/perfil/automação.
 
+## Redisparar um comentário ignorado por palavras-chave
+
+No detalhe de uma execução ignorada por `keywords_not_matched`, use **Redisparar**.
+O botão também aparece quando o status é **Concluído**: nesse caso, o motor terminou
+sem executar as ações porque o comentário não correspondeu às palavras-chave.
+Revise a confirmação, que informa separadamente a possibilidade de **resposta pública**
+e **DM**, e escolha **Confirmar redisparo**. Abrir os detalhes, revisar ou cancelar não envia mensagens.
+
+O comentário original é reavaliado pelo motor existente com as regras atuais. Edite
+as palavras-chave primeiro, se necessário: o redisparo não força correspondência nem
+contorna exclusões de posts, mídia ignorada, seleção de posts/aliases, exigência de
+seguir ou permissões de organização/perfil. O fluxo e o canal precisam estar ativos.
+Se a configuração mudar durante a confirmação, será preciso revisar novamente.
+
+Por segurança, só é aceita uma nova tentativa manual por execução, com log inequívoco
+de entrada no gatilho e descarte por palavras-chave, sem outras etapas, e encerramento
+anterior confirmado no Temporal. Históricos ausentes/inconsistentes, workflows fora
+da retenção, outra execução do mesmo comentário no mesmo canal, postbacks e qualquer
+registro de entrega (inclusive envio pendente, rejeitado ou resultado desconhecido)
+bloqueiam a tentativa. Solicitações simultâneas disputam uma reserva durável única.
+A reserva revalida o canal ativo, a mídia ignorada e os aliases na mesma transação
+serializável. Reentregas do webhook não reiniciam o workflow original quando já
+existe uma reserva manual, mesmo se o redisparo estiver em execução, falhar ou
+tiver resultado desconhecido.
+Se houver timeout ou queda após a reserva, o sistema mantém o bloqueio: confira o
+histórico antes de qualquer ação manual. Uma resposta de solicitação aceita não
+confirma entrega da mensagem.
+
+O log anterior é preservado; a nova entrada registra a solicitação e o status,
+datas e workflow anteriores. A identidade original do comentário é mantida.
+Os workflows Temporal publicados permanecem inalterados, e nenhum teste deste
+recurso exige comentários ou DMs reais.
+
+## Abrir a publicação original
+
+No detalhe, **Abrir publicação em nova aba** abre o permalink real do post/Reel.
+O sistema reaproveita o link salvo no calendário ou nos metadados do Inbox;
+quando necessário, consulta a API do Instagram com a integração autorizada da
+organização/perfil. O botão fica desabilitado durante a consulta e indica link
+indisponível se a mídia não tiver permalink válido ou a consulta falhar. Não
+monta links usando o ID numérico da mídia. A abertura mantém a execução, os
+filtros e a navegação do histórico na aba atual.
+
 ## Mensagem depois do comentário e follow-up
 
 Para a primeira DM após um comentário, escolha **Comentário em Feed/Reels** em
@@ -193,6 +236,14 @@ Arraste nos do sidebar para o canvas e conecte-os:
 | **Responder Comentario** | Responde no comentario original (use `{{nome}}` para citar o usuario) |
 | **Enviar DM** | Envia mensagem direta ao comentarista |
 | **Atraso** | Aguarda X segundos/minutos antes do proximo no |
+
+No gatilho de comentários e nos nós de condição, a comparação ignora maiúsculas
+e minúsculas e trata sequências de espaços (incluindo tabulações, quebras de linha
+e espaços não separáveis) como um único espaço, tanto no comentário quanto nas
+palavras-chave. Por exemplo, `Eu  vou` corresponde a `Eu vou`. O modo `any`
+exige ao menos uma palavra-chave como trecho do texto; `all` exige todas;
+`exact` exige que o comentário inteiro corresponda a uma delas. Espaços nas
+extremidades continuam fazendo parte da comparação em `exact`.
 
 **Exemplo basico:**
 
@@ -542,6 +593,13 @@ Para prosseguir com o beta, consulte o [pedido de acesso pronto para revisão](o
 
 No assistente de automação de comentários e no Flow Builder, use **Publicações
 excluídas** para selecionar posts/Reels que não devem disparar aquela automação.
+O switch aparece antes do seletor e inicia ligado ao editar uma automação com
+exclusões. Desligá-lo mantém a seleção durante a edição; religá-lo a restaura.
+Salvar com o switch desligado envia uma lista vazia e remove as exclusões.
+
+**Mostrar Todos** abre um modal com grade de cards e imagens. Use **Confirmar**
+para voltar ao formulário; o botão de fechar e a tecla Escape também fecham o
+modal. A seleção só é persistida ao salvar a automação ou o nó no Flow Builder.
 O seletor permite busca nas páginas carregadas, carregar mais e inserir IDs de
 mídia do Instagram para anúncios ou posts fora da lista. Remova uma seleção para
 voltar a permitir esse post. A exclusão é por automação, não exclui o post da rede

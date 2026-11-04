@@ -77,6 +77,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
   const creationId = useRef<string | undefined>(undefined);
   const [postMode, setPostMode] = useState<'all' | 'specific' | 'next_publication'>(initialIntegrationIds.length > 1 ? 'all' : 'specific');
   const [excludedPostIds, setExcludedPostIds] = useState<string[]>([]);
+  const [exclusionsEnabled, setExclusionsEnabled] = useState(false);
   const [selectedPostIds, setSelectedPostIds] = useState<string[]>([]);
   const [keywordMode, setKeywordMode] = useState<'any_word' | 'specific'>('any_word');
   const [keywords, setKeywords] = useState<string[]>([]);
@@ -129,6 +130,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
     const dmNode = initialFlow.nodes?.find((n: any) => n.type === 'SEND_DM');
     const triggerCfg = safeJson(triggerNode?.data);
     setExcludedPostIds(triggerCfg.excludedPostIds || []);
+    setExclusionsEnabled(!!triggerCfg.excludedPostIds?.length);
     const replyCfg = safeJson(replyNode?.data);
     const dmCfg = safeJson(dmNode?.data);
     if (triggerCfg.mode === 'next_publication' && !triggerCfg.postIds?.length) {
@@ -280,7 +282,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
         integrationId,
         triggerType: 'comment_on_post',
         postMode,
-        excludedPostIds,
+        excludedPostIds: exclusionsEnabled ? excludedPostIds : [],
         enableDm,
         aiReplyEnabled: enableReply && aiReplyEnabled,
         aiDmEnabled: enableDm && aiDmEnabled,
@@ -356,7 +358,7 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
       setSaving(false);
     }
   }, [
-    saving, integrationIds, activateAfterSave,
+    saving, integrationIds, activateAfterSave, excludedPostIds, exclusionsEnabled,
     canSave, name, integrationId, postMode, selectedPostIds,
     keywordMode, keywords, matchMode, enableReply, replyMessages,
     enableDm, dmMessage, dmButtonText, dmButtonUrl, aiReplyEnabled, aiDmEnabled, aiFollowGateEnabled,
@@ -539,8 +541,14 @@ export const AutomationWizardComponent: FC<Props> = ({ flowId, initialFlow, init
               </div>
 
               {integrationIds.length === 1 && integrationId && (
-                <ExcludedPostsField key={integrationId} integrationId={integrationId}
-                  value={excludedPostIds} onChange={setExcludedPostIds} />
+                <ExcludedPostsField
+                  key={integrationId}
+                  integrationId={integrationId}
+                  value={excludedPostIds}
+                  onChange={setExcludedPostIds}
+                  enabled={exclusionsEnabled}
+                  onEnabledChange={setExclusionsEnabled}
+                />
               )}
 
               {/* Aliases de dark posts (anuncios) — aditivo a qualquer modo */}

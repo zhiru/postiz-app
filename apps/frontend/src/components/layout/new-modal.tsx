@@ -215,7 +215,16 @@ export const Component: FC<{
               {...((!!modal.size || !!modal.height || !!modal.maxSize) && {
                 style: {
                   ...(modal.size ? { width: modal.size } : {}),
-                  ...(modal.height ? { height: modal.height } : {}),
+                  ...(modal.height
+                    ? {
+                        height: modal.height,
+                        // A bounded content track also sizes direct iframe children
+                        // (analytics) without relying on a percentage-height chain.
+                        display: 'grid',
+                        gridTemplateRows: 'auto minmax(0, 1fr)',
+                        overflow: 'hidden',
+                      }
+                    : {}),
                   ...(modal.maxSize ? { maxWidth: modal.maxSize } : {}),
                 },
               })}
@@ -254,7 +263,7 @@ export const Component: FC<{
               <div
                 className={clsx(
                   'whitespace-pre-line',
-                  !!modal.height && !!modal.size && 'flex min-h-0 flex-1 flex-col'
+                  !!modal.height && 'flex min-h-0 flex-col overflow-auto'
                 )}
               >
                 {RenderComponent}
