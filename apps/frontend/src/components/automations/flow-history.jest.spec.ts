@@ -10,6 +10,7 @@ jest.mock('./hooks/use-flow-executions-page', () => ({
 jest.mock('use-debounce', () => ({ useDebounce: (value: string) => [value] }));
 jest.mock('./hooks/use-flows', () => ({
   useFlowExecution: jest.fn(),
+  useFlowExecutionPublication: () => ({ data: { permalink: null }, isLoading: false }),
 }));
 
 // Model the App Router's reactive URL hooks and client-side push navigation.

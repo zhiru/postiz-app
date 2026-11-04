@@ -376,6 +376,76 @@ export class FlowsRepository {
 
   // --- Executions ---
 
+  async claimRedispatch(
+    orgId: string,
+    profileId: string | undefined,
+    execution: Prisma.FlowExecutionGetPayload<{}>,
+    flow: Prisma.FlowGetPayload<{ include: { nodes: true; edges: true } }>,
+    workflowId: string
+  ) {
+    return this._flow.model.$transaction(async (tx) => {
+      const current = await tx.flow.findFirst({
+        where: { id: flow.id, organizationId: orgId, ...(profileId ? { profileId } : {}),
+          integrationId: flow.integrationId, status: 'ACTIVE', deletedAt: null },
+        include: { nodes: true, edges: true },
+      });
+      const config = (value: typeof flow) => JSON.stringify({
+        id: value.id, organizationId: value.organizationId, profileId: value.profileId,
+        integrationId: value.integrationId, status: value.status, deletedAt: value.deletedAt,
+        triggerPostIds: value.triggerPostIds,
+        nodes: [...value.nodes].sort((a, b) => a.id.localeCompare(b.id)),
+        edges: [...value.edges].sort((a, b) => a.id.localeCompare(b.id)),
+      });
+      if (!current || config(current) !== config(flow)) return false;
+      // Recheck mutable eligibility in the same serializable transaction as the claim.
+      if (!await tx.integration.findFirst({
+        where: { id: flow.integrationId, organizationId: orgId,
+          ...(profileId || flow.profileId ? { profileId: profileId || flow.profileId } : {}),
+          disabled: false, deletedAt: null },
+        select: { id: true },
+      })) return false;
+      if (await tx.ignoredMedia.findUnique({ where: {
+        integrationId_igMediaId: { integrationId: flow.integrationId, igMediaId: execution.igMediaId },
+      }, select: { id: true } })) return false;
+      const postIds: string[] = JSON.parse(current.triggerPostIds || '[]');
+      if (postIds.length && !postIds.includes(execution.igMediaId) &&
+        !await tx.flowMediaAlias.findFirst({ where: {
+          flowId: flow.id, integrationId: flow.integrationId, aliasMediaId: execution.igMediaId,
+        }, select: { id: true } })) return false;
+      // Any receipt, including REJECTED/SENDING/UNKNOWN, prevents a manual send.
+      const prefixes = [execution.igCommentId, execution.id].map((identity) =>
+        JSON.stringify([flow.integrationId, identity]).slice(0, -1) + ','
+      );
+      if (await tx.automationDelivery.findFirst({ where: {
+        OR: prefixes.map((prefix) => ({ key: { startsWith: prefix } })),
+      }, select: { id: true } })) return false;
+      if (await tx.pendingPostback.findFirst({ where: {
+        integrationId: flow.integrationId, igCommentId: execution.igCommentId,
+      }, select: { id: true } })) return false;
+      // Legacy sends may predate delivery receipts. Fail closed across flows too.
+      if (await tx.flowExecution.findFirst({ where: {
+        id: { not: execution.id }, igCommentId: execution.igCommentId,
+        flow: { organizationId: orgId, integrationId: flow.integrationId },
+      }, select: { id: true } })) return false;
+      const log = JSON.parse(execution.executionLog!);
+      log.push({ nodeId: '', nodeType: 'TRIGGER', status: 'redispatch_requested',
+        timestamp: new Date().toISOString(), error: JSON.stringify({
+          previousWorkflowId: execution.temporalWorkflowId, previousStatus: execution.status,
+          previousStartedAt: execution.startedAt, previousCompletedAt: execution.completedAt,
+          previousError: execution.error, previousCurrentNodeId: execution.currentNodeId, workflowId,
+        }) });
+      const claimed = await tx.flowExecution.updateMany({
+        where: { id: execution.id, flowId: flow.id, status: execution.status,
+          temporalWorkflowId: execution.temporalWorkflowId, executionLog: execution.executionLog,
+          updatedAt: execution.updatedAt,
+          flow: { organizationId: orgId, ...(profileId ? { profileId } : {}), status: 'ACTIVE', deletedAt: null } },
+        data: { status: 'RUNNING', temporalWorkflowId: workflowId, completedAt: null,
+          executionLog: JSON.stringify(log) },
+      });
+      return claimed.count === 1;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
   createExecution(data: {
     flowId: string;
     temporalWorkflowId?: string;
@@ -467,6 +537,45 @@ export class FlowsRepository {
         id,
         ...(flowId ? { flowId } : {}),
         flow: { organizationId: orgId, ...(profileId ? { profileId } : {}) },
+      },
+    });
+  }
+
+  getExecutionPublicationContext(
+    orgId: string,
+    flowId: string,
+    mediaId: string,
+    profileId?: string
+  ) {
+    return this._flow.model.flow.findFirst({
+      where: {
+        id: flowId,
+        organizationId: orgId,
+        ...(profileId ? { profileId } : {}),
+      },
+      select: {
+        integrationId: true,
+        profileId: true,
+        integration: {
+          select: {
+            posts: {
+              where: {
+                organizationId: orgId,
+                ...(profileId ? { profileId } : {}),
+                OR: [{ externalId: mediaId }, { releaseId: mediaId }],
+              },
+              select: { releaseURL: true },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+            unmatchedComments: {
+              where: { organizationId: orgId, igMediaId: mediaId, permalink: { not: null } },
+              select: { permalink: true },
+              orderBy: { enrichedAt: 'desc' },
+              take: 1,
+            },
+          },
+        },
       },
     });
   }

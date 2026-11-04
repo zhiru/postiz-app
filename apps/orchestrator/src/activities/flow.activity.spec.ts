@@ -1,3 +1,6 @@
+jest.mock('@gitroom/nestjs-libraries/database/prisma/flows/flow-message.service', () => ({
+  FlowMessageService: class {},
+}));
 jest.mock('@gitroom/nestjs-libraries/ai/ai-text.service', () => ({
   AiTextService: class {},
 }));
@@ -159,6 +162,89 @@ describe('FlowActivity delivery guards and workflow replay', () => {
     sleep.mockResolvedValue(undefined);
   });
   afterEach(() => jest.restoreAllMocks());
+
+  it('redispatches a historical keyword skip through the unchanged workflow using normalized spaces and one delivery', async () => {
+    flow.nodes = [
+      node('trigger', 'TRIGGER', { keywords: ['Eu vou'], matchMode: 'exact' }),
+      node('reply', 'REPLY_COMMENT', { message: 'Confirmed' }),
+      node('dm', 'SEND_DM', { message: 'Private confirmation' }),
+    ];
+    flow.edges = [
+      { sourceNodeId: 'trigger', targetNodeId: 'reply' },
+      { sourceNodeId: 'reply', targetNodeId: 'dm' },
+    ];
+    const replay = { ...input, commentText: 'Eu  vou' };
+    await flowExecutionWorkflow(replay);
+    expect(provider.replyToComment).toHaveBeenCalledTimes(1);
+    expect(provider.sendPrivateReply).toHaveBeenCalledTimes(1);
+    expect(flows.appendExecutionLog).not.toHaveBeenCalledWith(input.executionId,
+      expect.objectContaining({ error: 'keywords_not_matched' }));
+    await flowExecutionWorkflow(replay);
+    expect(provider.replyToComment).toHaveBeenCalledTimes(1);
+    expect(provider.sendPrivateReply).toHaveBeenCalledTimes(1);
+  });
+
+  describe('evaluateCondition', () => {
+    it.each(['any', 'all', 'exact'])(
+      'matches the production double-space comment in %s mode',
+      async (matchMode) => {
+        expect(
+          await activity.evaluateCondition(
+            JSON.stringify({ keywords: ['Eu vou'], matchMode }),
+            'Eu  vou'
+          )
+        ).toBe(true);
+      }
+    );
+
+    it.each(['any', 'all', 'exact'])(
+      'normalizes whitespace in both input and keywords in %s mode',
+      async (matchMode) => {
+        expect(
+          await activity.evaluateCondition(
+            JSON.stringify({ keywords: ['EU   VOU\tSIM'], matchMode }),
+            'Eu\t vou\n\u00a0sim'
+          )
+        ).toBe(true);
+      }
+    );
+
+    it.each([
+      ['any', ['ausente', 'Eu vou'], 'Hoje Eu  vou sim', true],
+      ['all', ['Eu vou', 'sim'], 'Hoje Eu  vou sim', true],
+      ['all', ['Eu vou', 'ausente'], 'Eu  vou sim', false],
+      ['exact', ['Eu vou'], 'Hoje Eu  vou', false],
+      ['exact', ['ausente', 'Eu vou'], 'Eu  vou', true],
+      ['any', ['Eu vou'], 'Eu volto', false],
+      ['all', ['Eu vou'], 'Eu volto', false],
+      ['exact', ['Eu vou'], 'Eu volto', false],
+      ['any', ['Eu vou'], 'Euvou', false],
+      ['exact', ['Eu vou'], ' Eu  vou ', false],
+      ['exact', ['Eu vou'], 'Eu  vou!', false],
+      ['any', ['acao'], 'ação', false],
+      ['any', ['vou'], 'voltou', false],
+      ['any', ['vou'], 'vouloir', true],
+      [undefined, ['ausente', 'Eu vou'], 'Hoje Eu  vou', true],
+      ['unknown', ['Eu vou'], 'Hoje Eu  vou', true],
+      ['all', [], '', true],
+    ])(
+      'preserves %s matching for %j against %j (expected %s)',
+      async (matchMode, keywords, commentText, expected) => {
+        expect(
+          await activity.evaluateCondition(
+            JSON.stringify({ keywords, matchMode }),
+            commentText as string
+          )
+        ).toBe(expected);
+      }
+    );
+
+    it('fails closed for invalid configuration', async () => {
+      expect(await activity.evaluateCondition('invalid-json', 'Eu  vou')).toBe(
+        false
+      );
+    });
+  });
 
   const graph = (...nodes: any[]) => {
     flow.nodes = [node('trigger', 'TRIGGER'), ...nodes];

@@ -1,5 +1,7 @@
 export {};
 jest.mock('canvas', () => null);
+// Keyboard events are covered separately; keep the real modal/store in integration tests.
+jest.mock('react-hotkeys-hook', () => ({ useHotkeys: jest.fn() }));
 jest.mock(
   '@gitroom/nestjs-libraries/services/make.is',
   () => ({ makeId: () => 'modal-id' }),
@@ -46,6 +48,7 @@ const mockModal = jest.fn();
 const mockCloseById = jest.fn();
 const mockClipboard = jest.fn().mockResolvedValue(undefined);
 let mockCanWrite = true;
+let mockRealModals = false;
 const mockFetch = jest.fn();
 const mockReload = jest.fn();
 const mockIntegrations = [
@@ -61,7 +64,14 @@ jest.mock('react-dnd', () => ({
   useDrop: () => [{}, () => {}],
 }));
 jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({
-  useModals: () => ({ openModal: mockModal, closeById: mockCloseById }),
+  useModals: () => {
+    const actual = jest
+      .requireActual('@gitroom/frontend/components/layout/new-modal')
+      .useModals();
+    return mockRealModals
+      ? actual
+      : { openModal: mockModal, closeById: mockCloseById };
+  },
 }));
 jest.mock('@gitroom/frontend/hooks/use-profile-permissions', () => ({
   useProfilePermissions: () => ({ canWrite: mockCanWrite }),
@@ -135,6 +145,7 @@ afterEach(() => {
   cleanup();
   jest.clearAllMocks();
   mockCanWrite = true;
+  mockRealModals = false;
 });
 afterAll(() => dom.window.close());
 it.each(['day', 'week', 'month'])(
@@ -221,10 +232,11 @@ it.each(['day', 'week', 'month'])(
       expect(screen.getByRole('menu').parentElement).toBe(document.body);
       const items = screen.getAllByRole('menuitem');
       expect(items[0]).toBe(
-        screen.getByRole('menuitem', { name: 'Duplicate post' })
+        screen.getByRole('menuitem', { name: 'Edit on original platform' })
       );
       expect(document.activeElement).toBe(items[0]);
       for (const name of [
+        'Duplicate post',
         'Copy to another network',
         'Preview post',
         'Copy caption',
@@ -239,9 +251,7 @@ it.each(['day', 'week', 'month'])(
       await act(async () => {
         fireEvent.keyDown(document.activeElement!, { key: 'Home' });
       });
-      expect(document.activeElement).toBe(
-        items[0]
-      );
+      expect(document.activeElement).toBe(items[0]);
       await act(async () => {
         fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
       });
@@ -291,7 +301,9 @@ it('keeps imported video viewer actions read-only and copies the original link',
     screen.getByRole('menuitem', { name: 'View original publication' })
   ).not.toBeNull();
   await act(async () => {
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy network link' }));
+    fireEvent.click(
+      screen.getByRole('menuitem', { name: 'Copy network link' })
+    );
   });
   expect(mockClipboard).toHaveBeenCalledWith(value.post.releaseURL);
   expect(screen.queryByRole('menu')).toBeNull();
@@ -775,3 +787,222 @@ it('prevents repeated remote deletion from the private preview while a request i
     body: JSON.stringify({ version: 1, confirmRemoteId: 'remote' }),
   });
 });
+
+it.each([
+  'instagram',
+  'instagram-standalone',
+  'facebook',
+  'linkedin',
+  'x',
+  'youtube',
+  'tiktok',
+  'pinterest',
+  'neuraltalk',
+])(
+  '%s keeps local editing for drafts/queue/errors and offers original-platform editing for published posts',
+  (provider: string) => {
+    for (const state of ['DRAFT', 'QUEUE', 'ERROR', 'PUBLISHED']) {
+      const value: any = props();
+      value.state = value.post.state = state;
+      value.post.integration.providerIdentifier = provider;
+      value.post.releaseURL = 'https://example.com/original';
+      value.post.releaseId = state === 'PUBLISHED' ? 'remote' : null;
+      render(React.createElement(CalendarItem, value));
+      fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+      const published = state === 'PUBLISHED';
+      fireEvent.click(
+        screen.getByRole('menuitem', {
+          name: published ? 'Edit on original platform' : 'Edit post',
+        })
+      );
+      expect(value.editPost).toHaveBeenCalledTimes(published ? 0 : 1);
+      expect(value.openPost).toHaveBeenCalledTimes(published ? 1 : 0);
+      expect(value.duplicatePost).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+      if (published) {
+        fireEvent.click(screen.getByRole('button', { name: 'Preview post' }));
+        render(mockModal.mock.calls.at(-1)[0].children);
+        fireEvent.click(
+          screen.getByRole('button', { name: 'Edit on original platform' })
+        );
+        expect(value.openPost).toHaveBeenCalledTimes(2);
+        expect(value.editPost).not.toHaveBeenCalled();
+      }
+      cleanup();
+    }
+  }
+);
+
+it.each(['viewer', 'deleted', 'no-link', 'unsafe-link'])(
+  'hides original-platform editing for %s',
+  (kind: string) => {
+    const value: any = props();
+    value.state = value.post.state = 'PUBLISHED';
+    value.post.releaseId = 'remote';
+    value.post.releaseURL =
+      kind === 'unsafe-link'
+        ? 'javascript:alert(1)'
+        : kind === 'no-link'
+        ? null
+        : 'https://example.com/post';
+    value.post.remoteDeleted = kind === 'deleted';
+    mockCanWrite = kind !== 'viewer';
+    render(React.createElement(CalendarItem, value));
+    fireEvent.click(screen.getByRole('button', { name: 'Post actions' }));
+    expect(
+      screen.queryByRole('menuitem', { name: 'Edit on original platform' })
+    ).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Edit post' })).toBeNull();
+  }
+);
+
+it.each([
+  { state: 'PUBLISHED' },
+  { importedFromPlatform: true },
+  { state: 'ERROR', releaseId: 'partial-thread' },
+])(
+  'never opens the scheduling composer for an existing publication %j',
+  async (publication: any) => {
+    const { result } = renderHook(() => usePostActions());
+    await act(async () =>
+      result.current.editPost(
+        {
+          ...publication,
+          content: 'Caption',
+          releaseURL: 'https://example.com/original',
+          publishDate: '2030-01-01',
+        },
+        false
+      )()
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+    render(mockModal.mock.calls[0][0].children);
+    expect(
+      screen
+        .getByRole('link', { name: 'Edit on original platform' })
+        .getAttribute('href')
+    ).toBe('https://example.com/original');
+    expect(
+      screen.getByText(/Saving in the composer would not update/)
+    ).not.toBeNull();
+  }
+);
+
+it.each([true, false])(
+  'uses the real modal manager/store/content chain in the calendar (writer=%s)',
+  (writer: boolean) => {
+    mockRealModals = true;
+    mockCanWrite = writer;
+    const actual = jest.requireActual(
+      '@gitroom/frontend/components/layout/new-modal'
+    );
+    const value: any = props();
+    value.state = value.post.state = 'PUBLISHED';
+    render(
+      React.createElement(
+        actual.ModalManager,
+        null,
+        React.createElement(CalendarItem, value)
+      )
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Preview post' }));
+    const frame = screen.getByTitle('Preview post');
+    expect(frame.getAttribute('src')).toBe(
+      '/p/post?private=true' + (writer ? '&share=true' : '')
+    );
+    const panel = frame.closest('[style*="80vh"]');
+    expect(panel.style.display).toBe('grid');
+    expect(panel.style.gridTemplateRows).toBe('auto minmax(0, 1fr)');
+    expect(panel.style.width).toBe('80vw');
+    expect(panel.lastElementChild.className).toContain('min-h-0');
+    expect(
+      panel.lastElementChild.contains(
+        screen.getByRole('group', { name: 'Post actions' })
+      )
+    ).toBe(true);
+    expect(mockModal).not.toHaveBeenCalled();
+    const { result } = renderHook(actual.useModals);
+    act(() => result.current.closeAll());
+    expect(screen.queryByTitle('Preview post')).toBeNull();
+  }
+);
+
+it.each([true, false])(
+  'opens Visualizar publicação from real analytics through the real modal manager (writer=%s)',
+  async (writer: boolean) => {
+    mockRealModals = true;
+    mockCanWrite = writer;
+    const actual = jest.requireActual(
+      '@gitroom/frontend/components/layout/new-modal'
+    );
+    const {
+      WorkspaceAnalytics,
+    } = require('../platform-analytics/workspace.analytics');
+    const { SWRConfig } = require('swr');
+    const post = {
+      id: 'insight-post',
+      content: 'Analytics caption',
+      publishDate: '2030-01-01',
+      format: 'post',
+      channelName: 'Instagram',
+      platform: 'instagram',
+      metrics: {},
+      engagementRate: { value: null, formula: null },
+      status: 'available',
+    };
+    mockFetch.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () =>
+        url === '/integrations/list'
+          ? { integrations: [] }
+          : {
+              total: 1,
+              posts: [post],
+              topReactions: [],
+              topComments: [],
+              summary: {
+                availablePosts: 1,
+                metrics: {},
+                coverage: Object.fromEntries(
+                  [
+                    'reactions',
+                    'comments',
+                    'views',
+                    'reach',
+                    'impressions',
+                  ].map((k) => [k, { known: 0, total: 1 }])
+                ),
+              },
+              weekdays: [],
+              channels: [],
+            },
+    }));
+    render(
+      React.createElement(
+        SWRConfig,
+        { value: { provider: () => new Map(), dedupingInterval: 0 } },
+        React.createElement(
+          actual.ModalManager,
+          null,
+          React.createElement(WorkspaceAnalytics)
+        )
+      )
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Analytics caption/ })
+    );
+    const frame = screen.getByTitle('Preview post');
+    expect(screen.getByText('View publication')).not.toBeNull();
+    expect(frame.getAttribute('src')).toBe(
+      '/p/insight-post?private=true' + (writer ? '&share=true' : '')
+    );
+    const panel = frame.closest('[style*="80vh"]');
+    expect(panel.style.display).toBe('grid');
+    expect(panel.style.gridTemplateRows).toBe('auto minmax(0, 1fr)');
+    expect(panel.lastElementChild.firstElementChild).toBe(frame.parentElement);
+    expect(mockModal).not.toHaveBeenCalled();
+    const { result } = renderHook(actual.useModals);
+    act(() => result.current.closeAll());
+    expect(screen.queryByTitle('Preview post')).toBeNull();
+  }
+);

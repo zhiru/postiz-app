@@ -55,6 +55,32 @@ export const useFlowExecution = (flowId: string, executionId: string | null) => 
   );
 };
 
+export const useFlowExecutionPublication = (flowId: string, executionId: string) => {
+  const fetch = useFetch();
+  const load = useCallback(async (path: string) => {
+    const response = await fetch(path);
+    if (!response.ok) throw new Error('Unable to load publication');
+    const data = await response.json();
+    if (typeof data?.permalink !== 'string') return { permalink: null };
+    try {
+      const url = new URL(data.permalink);
+      if (
+        url.protocol === 'https:' &&
+        ['instagram.com', 'www.instagram.com'].includes(url.hostname) &&
+        !url.username && !url.password && !url.port
+      ) return { permalink: url.href };
+    } catch {
+      return { permalink: null };
+    }
+    return { permalink: null };
+  }, [fetch]);
+
+  return useSWR(`/flows/${flowId}/executions/${executionId}/publication`, load, {
+    revalidateOnFocus: false,
+    shouldRetryOnError: false,
+  });
+};
+
 export const readIntegrationMediaResponse = async (
   response: Response,
   field: 'posts' | 'stories'

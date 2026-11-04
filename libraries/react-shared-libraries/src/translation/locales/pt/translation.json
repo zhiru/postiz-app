@@ -1,4 +1,9 @@
 {
+  "post_edit_original": "Editar na plataforma original",
+  "post_edit_original_description": "Edite esta publicação na plataforma original, se a edição estiver disponível lá. Salvar no editor não atualizaria o post publicado.",
+  "flow_open_publication": "Abrir publicação em nova aba",
+  "flow_publication_loading": "Carregando link da publicação...",
+  "flow_publication_unavailable": "Link da publicação indisponível",
   "post_action_copy_channel": "Copiar para outra rede",
   "calendar": "Calendário",
   "webhooks": "Webhooks",
@@ -2601,5 +2606,17 @@
   "flow_comments_retry": "Tentar novamente",
   "flow_comments_no_matches": "Nenhum comentário corresponde a estes filtros.",
   "flow_comments_open": "Abrir comentário de {{name}}",
-  "flow_execution_status_cancelled": "CANCELADO"
+  "flow_execution_status_cancelled": "CANCELADO",
+  "flow_redispatch": "Redisparar",
+  "flow_redispatch_checking": "Verificando regras atuais e execução anterior...",
+  "flow_redispatch_blocked": "Redisparo bloqueado ou resultado desconhecido. Recarregue e confira o histórico de execução e entrega antes de qualquer ação manual.",
+  "flow_redispatch_confirmation": "Redisparar este comentário usando as regras atuais? Palavras-chave, exclusões e exigência de seguir continuam valendo. Isso pode enviar mensagens reais:",
+  "flow_redispatch_public_yes": "Resposta pública: pode ser enviada ao comentário.",
+  "flow_redispatch_public_no": "Resposta pública: nenhuma configurada.",
+  "flow_redispatch_dm_yes": "DM: pode ser enviada em privado para quem comentou, incluindo a confirmação de seguir.",
+  "flow_redispatch_dm_no": "DM: nenhuma configurada.",
+  "flow_redispatch_confirm": "Confirmar redisparo",
+  "flow_redispatch_sending": "Solicitando redisparo...",
+  "flow_redispatch_started": "Redisparo solicitado. Acompanhe o resultado no histórico da execução.",
+  "flow_log_status_redispatch_requested": "Redisparo solicitado"
 }

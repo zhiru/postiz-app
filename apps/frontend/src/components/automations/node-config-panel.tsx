@@ -146,6 +146,7 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
   const t = useT();
   const modals = useModals();
   const [config, setConfig] = useState<Record<string, any>>({});
+  const [exclusionsEnabled, setExclusionsEnabled] = useState(false);
 
   useEffect(() => {
     try {
@@ -154,8 +155,10 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
           ? JSON.parse(node.data.config)
           : node.data?.config || {};
       setConfig(parsed);
+      setExclusionsEnabled(!!parsed.excludedPostIds?.length);
     } catch {
       setConfig({});
+      setExclusionsEnabled(false);
     }
   }, [node]);
 
@@ -184,8 +187,17 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
     });
 
   const handleSave = useCallback(() => {
-    onUpdate(node.id, config);
-  }, [node.id, config, onUpdate]);
+    onUpdate(
+      node.id,
+      node.type === 'trigger' &&
+        (config.triggerType || 'comment_on_post') === 'comment_on_post'
+        ? {
+            ...config,
+            excludedPostIds: exclusionsEnabled ? config.excludedPostIds || [] : [],
+          }
+        : config
+    );
+  }, [node.id, node.type, config, exclusionsEnabled, onUpdate]);
 
   const inputClass =
     'w-full bg-transparent outline-none text-[14px] text-textColor px-[16px] py-[10px]';
@@ -401,6 +413,8 @@ export const NodeConfigPanel: FC<NodeConfigPanelProps> = ({
                 <ExcludedPostsField
                   key={flowSummary.integrationId}
                   integrationId={flowSummary.integrationId}
+                  enabled={exclusionsEnabled}
+                  onEnabledChange={setExclusionsEnabled}
                   value={config.excludedPostIds || []}
                   onChange={(ids) =>
                     setConfig({ ...config, excludedPostIds: ids })
