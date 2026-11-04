@@ -444,7 +444,18 @@ export class NoAuthIntegrationsController {
     }
 
     const { integrationId, organizationId, internalId, provider } = payload;
-    if (!integrationId || !organizationId || !internalId || !provider) {
+    if (
+      !integrationId ||
+      typeof integrationId !== 'string' ||
+      !organizationId ||
+      typeof organizationId !== 'string' ||
+      !internalId ||
+      typeof internalId !== 'string' ||
+      !provider ||
+      typeof provider !== 'string' ||
+      'timeLimit' in payload || // team invite token
+      'expires' in payload // password reset token
+    ) {
       throw new HttpException('Invalid token payload', 400);
     }
 
@@ -452,7 +463,11 @@ export class NoAuthIntegrationsController {
       organizationId,
       integrationId
     );
-    if (!integration || integration.internalId !== internalId) {
+    if (
+      !integration ||
+      integration.internalId !== internalId ||
+      integration.providerIdentifier !== provider
+    ) {
       throw new HttpException('Integration not found', 404);
     }
 
@@ -495,8 +510,8 @@ export class NoAuthIntegrationsController {
       false,
       undefined,
       undefined,
-      AuthService.signJWT(
-        JSON.parse(Buffer.from(body.cookies, 'base64').toString())
+      AuthService.fixedEncryption(
+        Buffer.from(body.cookies, 'base64').toString()
       ),
       integration.profileId || undefined
     );

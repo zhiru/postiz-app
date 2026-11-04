@@ -18,6 +18,7 @@ import {
 import * as process from 'node:process';
 import dayjs from 'dayjs';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 import { GmbSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/gmb.settings.dto';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 
@@ -219,6 +220,7 @@ export class GmbProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  @DashboardFunction()
   async pages(accessToken: string) {
     // Get all accounts with pagination
     const allAccounts: any[] = [];

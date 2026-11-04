@@ -38,6 +38,7 @@ import { withTrend } from '@gitroom/nestjs-libraries/integrations/social/analyti
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 
 async function fetchWithTimeout(
   url: string,
@@ -384,6 +385,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  @DashboardFunction()
   async pages(accessToken: string) {
     const seenIds = new Set<string>();
     const allPages: any[] = [];

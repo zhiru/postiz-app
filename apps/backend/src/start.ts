@@ -69,7 +69,7 @@ async function start() {
 
   app.getHttpAdapter().getInstance().set('query parser', 'extended');
 
-  app.use(['/copilot', '/posts'], (req: any, res: any, next: any) => {
+  app.use(['/copilot/{*splat}', '/posts'], (req: any, res: any, next: any) => {
     json({ limit: '50mb' })(req, res, next);
   });
 
@@ -86,6 +86,12 @@ async function start() {
 
   try {
     await app.listen(port);
+
+    // Keep connections alive longer than the upstream load balancer.
+    const server = app.getHttpServer();
+    server.keepAliveTimeout = 905_000;
+    server.headersTimeout = 906_000;
+
     console.log('Backend started successfully on port ' + port);
 
     checkConfiguration(); // Do this last, so that users will see obvious issues at the end of the startup log without having to scroll up.

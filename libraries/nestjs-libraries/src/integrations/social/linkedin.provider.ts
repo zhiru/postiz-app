@@ -27,6 +27,7 @@ import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id'
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 
 const mediaPathname = (path: string) => {
   try {
@@ -258,6 +259,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  @DashboardFunction()
   async company(token: string, data: { url: string }) {
     const { url } = data;
     const getCompanyVanity = url.match(

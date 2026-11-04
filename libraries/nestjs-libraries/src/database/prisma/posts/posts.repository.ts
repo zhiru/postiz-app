@@ -507,8 +507,15 @@ export class PostsRepository {
           `${post.recurringSourceId}:${post.recurringSlotDate?.getTime()}`
       )
     );
-    return list
-      .map(({ image, ...post }) => ({
+    const rangeStart = dayjs.utc(startDate);
+    const rangeEnd = dayjs.utc(endDate);
+    const now = dayjs.utc();
+    const result: any[] = [];
+
+    // Bound recurrence expansion to the requested window without dropping
+    // materialized slots or the fork's private calendar metadata.
+    for (const { image, platformHistoryCovered, ...post } of list) {
+      const visible = {
         ...post,
         ...(includeAttachments ? { image } : {}),
         ...(includeFormat
@@ -519,42 +526,37 @@ export class PostsRepository {
             }
           : {}),
         error: this.curatedError(post.error),
-      }))
-      .reduce((all, post) => {
-        const { platformHistoryCovered, ...visible } = post;
-        if (!post.intervalInDays) {
-          return [...all, visible];
+      };
+      if (!post.intervalInDays || post.intervalInDays < 1) {
+        result.push(visible);
+        continue;
+      }
+
+      const firstDate = dayjs.utc(post.publishDate);
+      const skip = Math.max(
+        0,
+        Math.ceil(rangeStart.diff(firstDate, 'day', true) / post.intervalInDays)
+      );
+      let occurrence = firstDate.add(skip * post.intervalInDays, 'days');
+      while (!occurrence.isAfter(rangeEnd)) {
+        const historicalTemplate =
+          platformHistoryCovered &&
+          post.state === 'PUBLISHED' &&
+          occurrence.isBefore(now);
+        const materialized = materializedSlots.has(
+          `${post.id}:${occurrence.valueOf()}`
+        );
+        if (!historicalTemplate && !materialized) {
+          result.push({
+            ...visible,
+            publishDate: occurrence.toDate(),
+            actualDate: post.publishDate,
+          });
         }
-
-        const addMorePosts = [];
-        let startingDate = dayjs.utc(post.publishDate);
-        while (dayjs.utc(endDate).isSameOrAfter(startingDate)) {
-          // Once actual history is available, past virtual occurrences of a
-          // recurring template must not masquerade as separate publications.
-          const historicalTemplate =
-            platformHistoryCovered &&
-            post.state === 'PUBLISHED' &&
-            startingDate.isBefore(dayjs.utc());
-          const materialized = materializedSlots.has(
-            `${post.id}:${startingDate.valueOf()}`
-          );
-          if (
-            !historicalTemplate &&
-            !materialized &&
-            dayjs(startingDate).isSameOrAfter(dayjs.utc(post.publishDate))
-          ) {
-            addMorePosts.push({
-              ...visible,
-              publishDate: startingDate.toDate(),
-              actualDate: post.publishDate,
-            });
-          }
-
-          startingDate = startingDate.add(post.intervalInDays, 'days');
-        }
-
-        return [...all, ...addMorePosts];
-      }, [] as any[]);
+        occurrence = occurrence.add(post.intervalInDays, 'days');
+      }
+    }
+    return result;
   }
 
   async getPostsList(

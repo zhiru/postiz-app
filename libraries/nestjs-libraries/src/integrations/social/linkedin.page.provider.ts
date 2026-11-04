@@ -246,6 +246,7 @@ export interface SocialActionsResponse {
     commentsState: string;
   };
 }
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 
 @Rules(
   'LinkedIn can have maximum one attachment when selecting video, when choosing a carousel on LinkedIn minimum amount of attachment must be two, and only pictures, if uploading a video, LinkedIn can have only one attachment'
@@ -374,6 +375,7 @@ export class LinkedinPageProvider
     };
   }
 
+  @DashboardFunction()
   async companies(accessToken: string) {
     const { elements, ...all } = await (
       await fetch(

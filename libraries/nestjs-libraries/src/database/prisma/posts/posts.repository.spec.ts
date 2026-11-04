@@ -497,3 +497,33 @@ describe('PostsRepository recipient preview scope', () => {
     });
   });
 });
+
+describe('PostsRepository recurring calendar range', () => {
+  it('bounds expansion to the requested dates and keeps materialized history and private formats', async () => {
+    const prisma = createPrismaRepositoryMock('post');
+    const template = {
+      id: 'template', publishDate: new Date('2000-01-01T12:00:00Z'),
+      state: 'PUBLISHED', intervalInDays: 1, image: '[{"path":"a.jpg"}]',
+      error: null as string | null, settings: '{}', platformHistoryCovered: false,
+    };
+    prisma.model.post.findMany
+      .mockResolvedValueOnce([template] as any)
+      .mockResolvedValueOnce([{ recurringSourceId: 'template', recurringSlotDate: new Date('2026-11-02T12:00:00Z') }] as any);
+    const repo = new PostsRepository(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const posts = await repo.getPosts('org-1', {
+      startDate: '2026-11-01T00:00:00Z', endDate: '2026-11-03T23:59:59Z',
+    } as any, false, 'profile-1', true);
+    expect(posts.map(post => post.publishDate.toISOString())).toEqual([
+      '2026-11-01T12:00:00.000Z', '2026-11-03T12:00:00.000Z',
+    ]);
+    expect(posts[0]).toMatchObject({
+      id: 'template',
+      format: 'post',
+      mediaPreview: { src: 'a.jpg', video: false },
+      actualDate: template.publishDate,
+    });
+    expect(posts[0]).not.toHaveProperty('image');
+    expect(posts[0]).not.toHaveProperty('platformHistoryCovered');
+    expect(prisma.model.post.findMany.mock.calls[1][0].where).toMatchObject({ organizationId: 'org-1', profileId: 'profile-1' });
+  });
+});

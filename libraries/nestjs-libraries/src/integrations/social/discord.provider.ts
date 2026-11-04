@@ -352,6 +352,13 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
       };
     }
 
+    if (body.includes('401: Unauthorized')) {
+      return {
+        type: 'bad-body',
+        value: 'Discord rejected the Postiz bot token, reconnecting will not help',
+      };
+    }
+
     return undefined;
   }
 
