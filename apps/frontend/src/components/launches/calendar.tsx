@@ -234,9 +234,15 @@ export const usePostActions = (onMutate?: () => void) => {
   const editPost = useCallback(
     (load: any, isDuplicate?: boolean, copy = false) =>
       async () => {
-        if (load.importedFromPlatform && !isDuplicate) {
+        // Existing published identities must never enter the scheduling composer.
+        if (
+          !isDuplicate &&
+          (load.importedFromPlatform ||
+            load.state === 'PUBLISHED' ||
+            load.releaseId)
+        ) {
           modal.openModal({
-            title: t('posts_sync_imported', 'Published on the social platform'),
+            title: t('post_edit_original', 'Edit on original platform'),
             withCloseButton: true,
             children: (
               <div className="flex flex-col gap-4">
@@ -244,18 +250,20 @@ export const usePostActions = (onMutate?: () => void) => {
                   {postContentPlainText(load.content)}
                 </p>
                 <p>{newDayjs(load.publishDate).format('DD/MM/YYYY HH:mm')}</p>
-                <a
-                  href={load.releaseURL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  {t('posts_sync_view_original', 'View original publication')}
-                </a>
+                {/^https?:\/\//i.test(load.releaseURL || '') && (
+                  <a
+                    href={load.releaseURL.split(',')[0]}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    {t('post_edit_original', 'Edit on original platform')}
+                  </a>
+                )}
                 <p>
                   {t(
-                    'posts_sync_read_only',
-                    'This publication was imported. Manage it on the social platform.'
+                    'post_edit_original_description',
+                    'Edit this publication on the original platform, if editing is available there. Saving in the composer would not update the published post.'
                   )}
                 </p>
               </div>
@@ -1617,7 +1625,9 @@ export const PostPreviewFrame: FC<{ postId: string; share: boolean }> = ({
         key={attempt}
         className="absolute inset-0 h-full w-full border-0"
         title={t('preview_post', 'Preview post')}
-        src={`/p/${encodeURIComponent(postId)}?private=true${share ? '&share=true' : ''}`}
+        src={`/p/${encodeURIComponent(postId)}?private=true${
+          share ? '&share=true' : ''
+        }`}
         onLoad={(event) => {
           const frame = event.currentTarget;
           // An iframe fires an initial about:blank load before the actual page.
@@ -1957,6 +1967,20 @@ export const CalendarItem: FC<{
   }, [actionPosition]);
   const renderActionItems = (includePreview = true) => (
     <>
+      {editOriginal && (
+        <button
+          type="button"
+          role={includePreview ? 'menuitem' : undefined}
+          className="p-2 text-start hover:bg-newColColor"
+          title={t(
+            'post_edit_original_description',
+            'Edit this publication on the original platform, if editing is available there. Saving in the composer would not update the published post.'
+          )}
+          onClick={openPost}
+        >
+          {t('post_edit_original', 'Edit on original platform')}
+        </button>
+      )}
       {editable && (
         <button
           type="button"
@@ -2155,6 +2179,12 @@ export const CalendarItem: FC<{
     !post.importedFromPlatform &&
     state !== 'PUBLISHED' &&
     !post.releaseId;
+  const editOriginal =
+    canWrite &&
+    !editable &&
+    !remoteDeleted &&
+    (state === 'PUBLISHED' || post.importedFromPlatform || !!post.releaseId) &&
+    /^https?:\/\//i.test(post.releaseURL || '');
   const activate = editable ? editPost : preview;
   const openReviewLinks = useCallback(() => {
     modals.openModal({

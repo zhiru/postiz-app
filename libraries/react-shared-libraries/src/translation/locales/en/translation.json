@@ -1,4 +1,6 @@
 {
+  "post_edit_original": "Edit on original platform",
+  "post_edit_original_description": "Edit this publication on the original platform, if editing is available there. Saving in the composer would not update the published post.",
   "post_action_copy_channel": "Copy to another network",
   "calendar": "Calendar",
   "webhooks": "Webhooks",

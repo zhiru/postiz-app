@@ -7,6 +7,9 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Corrige o dimensionamento do conteúdo no gerenciador real de modais com altura definida: a prévia de métricas e a do calendário reservam a altura restante ao iframe, com teste da cadeia real e fixture de browser sem mock do modal.
+- Edição no calendário/listagem: rascunhos, fila e erros sem identidade publicada mantêm o editor local em qualquer canal; publicados/importados com link oferecem “Editar na plataforma original”, respeitando permissão de escrita e exclusão remota. A edição direta de uma identidade já publicada não abre o composer de agendamento; duplicação continua uma ação explícita independente.
+
 - Prévia do calendário mantém o modal em 80vw/80vh e o iframe preenchendo a área restante abaixo da barra de ações.
 - Prévia autenticada mostra nomes de contatos/grupos NeuralTalk salvos, com ID como fallback, e diferencia configuração, mensagem registrada, rejeição, resultado desconhecido e envio confirmado pelo provedor, sem afirmar entrega no aparelho; destinatários e configurações ficam fora do link público e da revisão.
 - Calendário/listagem: evita que a rolagem provocada pelo foco feche imediatamente o menu de três pontos, com regressão para vídeos importados e preservação das permissões de ações.
