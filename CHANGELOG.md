@@ -7,6 +7,7 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Automações de comentários do Instagram: normaliza sequências de espaços no comentário e nas palavras-chave, corrigindo `Eu  vou` versus `Eu vou` sem alterar os modos de correspondência nem os workflows Temporal existentes.
 - Prévia do calendário mantém o modal em 80vw/80vh e o iframe preenchendo a área restante abaixo da barra de ações.
 - Prévia autenticada mostra nomes de contatos/grupos NeuralTalk salvos, com ID como fallback, e diferencia configuração, mensagem registrada, rejeição, resultado desconhecido e envio confirmado pelo provedor, sem afirmar entrega no aparelho; destinatários e configurações ficam fora do link público e da revisão.
 - Calendário/listagem: evita que a rolagem provocada pelo foco feche imediatamente o menu de três pontos, com regressão para vídeos importados e preservação das permissões de ações.

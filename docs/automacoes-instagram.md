@@ -194,6 +194,14 @@ Arraste nos do sidebar para o canvas e conecte-os:
 | **Enviar DM** | Envia mensagem direta ao comentarista |
 | **Atraso** | Aguarda X segundos/minutos antes do proximo no |
 
+No gatilho de comentários e nos nós de condição, a comparação ignora maiúsculas
+e minúsculas e trata sequências de espaços (incluindo tabulações, quebras de linha
+e espaços não separáveis) como um único espaço, tanto no comentário quanto nas
+palavras-chave. Por exemplo, `Eu  vou` corresponde a `Eu vou`. O modo `any`
+exige ao menos uma palavra-chave como trecho do texto; `all` exige todas;
+`exact` exige que o comentário inteiro corresponda a uma delas. Espaços nas
+extremidades continuam fazendo parte da comparação em `exact`.
+
 **Exemplo basico:**
 
 ```
