@@ -49,7 +49,7 @@ No painel, adicione a pessoa, selecione seu nome e clique na imagem para posicio
 
 A implementação oferece marcações em imagens de feed e imagens de carrossel dos dois provedores Instagram. Mídias de outro canal, vídeos, Stories e comentários da sequência com marcações retornam erro de campo antes do envio. Esses formatos podem ter capacidades adicionais na Meta e ficam fora desta implementação.
 
-Exemplo de edição parcial pela API pública. Use o ID real da imagem e a versão recém-lida. Omitir `user_tags` preserva as marcações, e `user_tags:[]` limpa somente as marcações da imagem indicada. A edição da legenda isolada também as preserva.
+Exemplo de edição parcial pela API pública para um post de imagem única. Use o ID real da imagem e a versão recém-lida. Em carrosséis, a lista media deve conter TODAS as imagens, na ordem desejada, mesmo que apenas uma receba marcações. Uma mídia omitida da lista será removida do post. Para preservar as outras imagens, inclua seus IDs com os demais campos omitidos. Omitir `user_tags` preserva as marcações, e `user_tags:[]` limpa somente as marcações da imagem indicada. A edição da legenda isolada também as preserva.
 
 ```json
 {
