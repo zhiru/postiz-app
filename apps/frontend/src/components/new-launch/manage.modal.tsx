@@ -613,12 +613,20 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
           delay: value.delay || 0,
           image:
             (value?.media || []).map(
-              ({ id, path, alt, thumbnail, thumbnailTimestamp }: any) => ({
+              ({
                 id,
                 path,
                 alt,
                 thumbnail,
                 thumbnailTimestamp,
+                user_tags,
+              }: any) => ({
+                id,
+                path,
+                alt,
+                thumbnail,
+                thumbnailTimestamp,
+                user_tags,
               })
             ) || [],
         })),

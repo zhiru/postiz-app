@@ -424,7 +424,7 @@
   "label_search_subreddit": "Search Subreddit",
   "label_delay": "Delay",
   "label_post_type": "Post Type",
-  "label_collaborators": "Collaborators (max 3) - accounts can't be private",
+  "label_collaborators": "Collaborators (max 5) - accounts can't be private",
   "label_community": "Community",
   "label_search_community": "Search Community",
   "label_channel": "Channel",
@@ -2630,5 +2630,18 @@
   "filter_channel": "Filter by {{name}}",
   "all_channels": "All channels",
   "sidebar_channel_filter_help": "Click an account to filter it. Shift + click selects several accounts.",
-  "could_not_load_post": "Could not load the post. Try again."
+  "could_not_load_post": "Could not load the post. Try again.",
+  "instagram_collaborators_label": "Collaborators (max 5) - accounts cannot be private",
+  "instagram_tags_position": "Click to position the selected person; use X/Y fields with a keyboard",
+  "instagram_tags_preview": "Image to tag people",
+  "instagram_tags_unsupported": "People tags are supported only on feed images. Remove tags before switching to a story or video.",
+  "instagram_tags_x": "X (0 left, 1 right)",
+  "instagram_tags_y": "Y (0 top, 1 bottom)",
+  "instagram_tags_remove": "Remove person",
+  "instagram_tags_coordinates_error": "X and Y must be numbers between 0 and 1.",
+  "instagram_tags_username": "Instagram username",
+  "instagram_tags_username_error": "Enter a valid username that is not already tagged on this image.",
+  "instagram_tags_add": "Add person",
+  "instagram_tags_title": "People tagged in images",
+  "instagram_tags_description": "Tags appear on each image and do not invite collaborators. Select a person, then click the image or edit X/Y."
 }

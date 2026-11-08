@@ -33,6 +33,14 @@ export class InstagramStandaloneProvider
   extends SocialAbstract
   implements SocialProvider
 {
+  override supportsImageUserTags(
+    settings: any,
+    media: ValidityMedia,
+    postIndex: number
+  ): boolean {
+    return instagramProvider.supportsImageUserTags(settings, media, postIndex);
+  }
+
   identifier = 'instagram-standalone';
 
   name = 'Instagram\n(Standalone)';

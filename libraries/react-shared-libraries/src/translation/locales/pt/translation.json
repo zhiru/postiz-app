@@ -424,7 +424,7 @@
   "label_search_subreddit": "Buscar Subreddit",
   "label_delay": "Atraso",
   "label_post_type": "Tipo de postagem",
-  "label_collaborators": "Colaboradores (máx. 3) - contas não podem ser privadas",
+  "label_collaborators": "Colaboradores (máx. 5) - contas não podem ser privadas",
   "label_community": "Comunidade",
   "label_search_community": "Pesquisar comunidade",
   "label_channel": "Canal",
@@ -2630,5 +2630,18 @@
   "filter_channel": "Filtrar por {{name}}",
   "all_channels": "Todos os canais",
   "sidebar_channel_filter_help": "Clique em uma conta para filtrar. Shift + clique seleciona várias contas.",
-  "could_not_load_post": "Não foi possível carregar a publicação. Tente novamente."
+  "could_not_load_post": "Não foi possível carregar a publicação. Tente novamente.",
+  "instagram_collaborators_label": "Colaboradores (máx. 5) - as contas não podem ser privadas",
+  "instagram_tags_position": "Clique para posicionar a pessoa selecionada; use os campos X/Y com o teclado",
+  "instagram_tags_preview": "Imagem para marcar pessoas",
+  "instagram_tags_unsupported": "Marcações de pessoas estão disponíveis apenas em imagens do feed. Remova as marcações antes de mudar para story ou vídeo.",
+  "instagram_tags_x": "X (0 esquerda, 1 direita)",
+  "instagram_tags_y": "Y (0 topo, 1 base)",
+  "instagram_tags_remove": "Remover pessoa",
+  "instagram_tags_coordinates_error": "X e Y devem ser números entre 0 e 1.",
+  "instagram_tags_username": "Nome de usuário do Instagram",
+  "instagram_tags_username_error": "Informe um usuário válido que ainda não esteja marcado nesta imagem.",
+  "instagram_tags_add": "Adicionar pessoa",
+  "instagram_tags_title": "Pessoas marcadas nas imagens",
+  "instagram_tags_description": "As marcações aparecem em cada imagem e não convidam colaboradores. Selecione uma pessoa e clique na imagem ou edite X/Y."
 }

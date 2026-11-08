@@ -13,6 +13,7 @@ import { InstagramCollaboratorsTags } from '@gitroom/frontend/components/new-lau
 import { InstagramAudioSelector } from '@gitroom/frontend/components/new-launch/providers/instagram/instagram.audio';
 import { useIntegration } from '@gitroom/frontend/components/launches/helpers/use.integration';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { InstagramImageTags } from '@gitroom/frontend/components/new-launch/providers/instagram/instagram.image.tags';
 import { InstagramPreview } from '@gitroom/frontend/components/new-launch/providers/instagram/instagram.preview';
 import { MediaComponent } from '@gitroom/frontend/components/media/media.component';
 const postType = [
@@ -64,12 +65,17 @@ const InstagramCollaborators: FC<{
 
       {postCurrentType !== 'story' && (
         <InstagramCollaboratorsTags
-          label="Collaborators (max 3) - accounts can't be private"
+          label={t(
+            'instagram_collaborators_label',
+            'Collaborators (max 5) - accounts cannot be private'
+          )}
           {...register('collaborators', {
             value: [],
           })}
         />
       )}
+
+      <InstagramImageTags isStory={postCurrentType === 'story'} />
 
       {postCurrentType === 'post' && (
         <div className="mt-[18px]">
@@ -90,7 +96,10 @@ const InstagramCollaborators: FC<{
             {...register('is_trial_reel', {
               value: false,
             })}
-            label={t('trial_reel', 'Trial Reel (share only to non-followers first)')}
+            label={t(
+              'trial_reel',
+              'Trial Reel (share only to non-followers first)'
+            )}
           />
 
           {isTrialReel && (
@@ -131,5 +140,5 @@ export default withProvider<InstagramDto>({
   CustomPreviewComponent: InstagramPreview,
   dto: InstagramDto,
   maximumCharacters: 2200,
-  comments: 'no-media'
+  comments: 'no-media',
 });

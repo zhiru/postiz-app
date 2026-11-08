@@ -159,3 +159,17 @@ describe('MCP post management contracts', () => {
     );
   });
 });
+
+it('keeps image people tags in the MCP update schema and rejects invalid coordinates', () => {
+  const tool = new UpdatePostTool({} as any).run() as any;
+  const input = {
+    id: 'post',
+    version,
+    media: [{ id: 'image', user_tags: [{ username: '@Person', x: 0, y: 1 }] }],
+  };
+  expect(tool.inputSchema.parse(input).media[0].user_tags).toEqual([
+    { username: 'Person', x: 0, y: 1 },
+  ]);
+  input.media[0].user_tags[0].x = 2;
+  expect(tool.inputSchema.safeParse(input).success).toBe(false);
+});

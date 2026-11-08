@@ -39,10 +39,19 @@ export const InstagramCollaboratorsTags: FC<{
   );
   const onAddition = useCallback(
     (newTag: any) => {
-      if (tagValue.length >= 3) {
+      if (tagValue.length >= 5) {
         return;
       }
-      const modify = [...tagValue, newTag];
+      const label = newTag.label?.trim().replace(/^@/, '');
+      if (
+        !/^[A-Za-z0-9._]{1,30}$/.test(label || '') ||
+        tagValue.some(
+          (tag) =>
+            tag.label.replace(/^@/, '').toLowerCase() === label.toLowerCase()
+        )
+      )
+        return;
+      const modify = [...tagValue, { ...newTag, label, value: label }];
       setTagValue(modify);
       onChange({
         target: {

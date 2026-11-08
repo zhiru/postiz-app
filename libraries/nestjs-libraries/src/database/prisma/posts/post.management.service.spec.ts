@@ -1,3 +1,4 @@
+jest.mock('../social-comments/social.comments.service', () => ({ SocialCommentsService: class {} }));
 jest.mock('./posts.service', () => ({ PostsService: class {} }));
 jest.mock('../media/media.service', () => ({ MediaService: class {} }));
 jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
@@ -19,7 +20,8 @@ const row = (): any => ({
   publishDate: new Date('2027-01-01T16:00:00Z'),
   updatedAt: new Date('2026-01-01T00:00:00Z'),
   content: '<p>Original</p>',
-  image: '[{"id":"m1","path":"https://media.test/a.jpg","alt":"original"}]',
+  image:
+    '[{"id":"m1","path":"https://media.test/a.jpg","alt":"original","user_tags":[{"username":"person","x":0.2,"y":0.8}]}]',
   settings:
     '{"__type":"instagram","post_type":"post","collaborators":[{"label":"@parceiro"}]}',
   releaseId: null,
@@ -153,6 +155,7 @@ describe('management preservation and bulk results', () => {
         path: 'https://media.test/a.jpg',
         alt: 'A',
         thumbnail: 'https://media.test/cover.jpg',
+        user_tags: [{ username: 'person', x: 0.25, y: 0.75 }],
       },
       { id: 'b', path: 'https://media.test/b.jpg', alt: 'B' },
     ]);
@@ -303,4 +306,19 @@ it('reports confirmed remote deletion instead of claiming a live publication', a
   const result = await service.get('o1', 'profile1', 'p1');
   expect(result.executionState).toBe('REMOTE_DELETED');
   expect(result.remoteDeletion.status).toBe('deleted');
+});
+
+it('clears image tags explicitly while preserving alt text and caption', async () => {
+  const { service, repo, media } = setup();
+  (media as any).resolvePostMedia = jest.fn(async (_org, entry) => entry);
+  await service.update('o1', 'profile1', 'p1', {
+    version: row().updatedAt.toISOString(),
+    media: [{ id: 'm1', user_tags: [] }],
+  });
+  const change = repo.patchManagedPost.mock.calls[0][4];
+  expect(JSON.parse(change.image as string)[0]).toMatchObject({
+    alt: 'original',
+    user_tags: [],
+  });
+  expect(change.content).toBeUndefined();
 });

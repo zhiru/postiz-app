@@ -1,3 +1,4 @@
+import { imageUserTagsSchema } from '@gitroom/nestjs-libraries/dtos/posts/manage.post.dto';
 import { remoteDeletePostSchema } from '@gitroom/nestjs-libraries/dtos/posts/manage.post.dto';
 import { createHash } from 'crypto';
 import {
@@ -1365,7 +1366,11 @@ export class PostsService {
       integration: { id: string };
       value: Array<{
         content?: string;
-        image?: Array<{ path: string; thumbnail?: string }>;
+        image?: Array<{
+          path: string;
+          thumbnail?: string;
+          user_tags?: import('@gitroom/nestjs-libraries/dtos/media/media.dto').ImageUserTag[];
+        }>;
       }>;
       settings?: any;
       intervalInDays?: number | null;
@@ -1462,6 +1467,41 @@ export class PostsService {
           settingsError ||= recurrenceError.message;
           valid = false;
         }
+
+        for (const [postIndex, items] of media.entries()) {
+          for (const [mediaIndex, item] of items.entries()) {
+            if (item.user_tags === undefined) continue;
+            const field = `value.${postIndex}.image.${mediaIndex}.user_tags`;
+            const parsed = imageUserTagsSchema.safeParse(item.user_tags);
+            if (!parsed.success) {
+              fieldErrors.push(
+                ...parsed.error.issues.map((issue) => ({
+                  field: `${field}${
+                    issue.path.length ? '.' + issue.path.join('.') : ''
+                  }`,
+                  code: issue.code,
+                  message: issue.message,
+                }))
+              );
+              valid = false;
+            } else if (
+              parsed.data.length &&
+              !provider.supportsImageUserTags?.(settings, item, postIndex)
+            ) {
+              fieldErrors.push({
+                field,
+                code: 'UNSUPPORTED_IMAGE_TAGS',
+                message:
+                  'People tags are supported only on feed images for this channel.',
+              });
+              valid = false;
+            }
+          }
+        }
+
+        settingsError ||= fieldErrors
+          .map((error) => `${error.field}: ${error.message}`)
+          .join(' ');
 
         // Provider-specific media validation (the old client `checkValidity`).
         let errors: string | true = true;

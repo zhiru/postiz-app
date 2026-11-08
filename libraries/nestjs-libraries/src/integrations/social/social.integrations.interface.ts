@@ -221,6 +221,7 @@ export type PollDetails = {
 };
 
 export type MediaContent = {
+  user_tags?: import('@gitroom/nestjs-libraries/dtos/media/media.dto').ImageUserTag[];
   type: 'image' | 'video'; // Type of the media content
   path: string;
   alt?: string;
@@ -275,6 +276,11 @@ export interface SocialProvider
   noNativeRefresh?: boolean;
   requiresCredentialFreeWorkflow?: boolean;
   supportsRecurringPosts?: boolean;
+  supportsImageUserTags?(
+    settings: any,
+    media: import('@gitroom/nestjs-libraries/integrations/social.abstract').ValidityMedia,
+    postIndex: number
+  ): boolean;
   dto?: any;
   maxLength: (additionalSettings?: any, settings?: any) => number;
   checkValidity(

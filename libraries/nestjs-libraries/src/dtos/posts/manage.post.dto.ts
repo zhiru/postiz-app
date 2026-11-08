@@ -1,10 +1,39 @@
 import { z } from 'zod';
 
+export const imageUserTagsSchema = z
+  .array(
+    z
+      .object({
+        username: z
+          .string()
+          .trim()
+          .transform((value) => value.replace(/^@/, ''))
+          .pipe(z.string().regex(/^[A-Za-z0-9._]{1,30}$/)),
+        x: z.number().finite().min(0).max(1),
+        y: z.number().finite().min(0).max(1),
+      })
+      .strict()
+  )
+  .superRefine((tags, ctx) => {
+    const seen = new Set<string>();
+    tags.forEach((tag, index) => {
+      const username = tag.username.toLowerCase();
+      if (seen.has(username))
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index, 'username'],
+          message: 'Tag each username only once per image',
+        });
+      seen.add(username);
+    });
+  });
+
 export const managedMediaSchema = z
   .object({
     id: z.string().min(1).optional(),
     path: z.string().url().optional(),
     alt: z.string().max(10000).optional(),
+    user_tags: imageUserTagsSchema.optional(),
     thumbnail: z.string().url().nullable().optional(),
     thumbnailTimestamp: z.number().int().min(0).nullable().optional(),
   })

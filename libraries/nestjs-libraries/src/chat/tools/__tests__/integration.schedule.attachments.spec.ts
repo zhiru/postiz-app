@@ -36,6 +36,7 @@ describe('MCP attachments after upstream merge', () => {
       alt: 'Description',
       thumbnail: 'https://example.com/cover.jpg',
       thumbnailTimestamp: 1200,
+      user_tags: [{ username: 'person', x: 0, y: 1 }],
     };
     const input = {
       idempotencyKey: 'fixture-request-key',

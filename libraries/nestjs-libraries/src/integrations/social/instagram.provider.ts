@@ -23,6 +23,7 @@ import {
   Disconnect,
   ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import { imageUserTagsSchema } from '@gitroom/nestjs-libraries/dtos/posts/manage.post.dto';
 import { InstagramDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/instagram.dto';
 import { Integration } from '@prisma/client';
 import {
@@ -87,6 +88,19 @@ export class InstagramProvider
   extends SocialAbstract
   implements SocialProvider
 {
+  override supportsImageUserTags(
+    settings: any,
+    media: ValidityMedia,
+    postIndex: number
+  ): boolean {
+    return (
+      postIndex === 0 &&
+      settings?.post_type !== 'story' &&
+      !hasExtension(media.path, 'mp4') &&
+      (!media.content_type || media.content_type.startsWith('image/'))
+    );
+  }
+
   identifier = 'instagram';
 
   name = 'Instagram\n(Facebook Business)';
@@ -1975,6 +1989,17 @@ export class InstagramProvider
     const [accessToken] = token.split('___');
     const [firstPost] = postDetails;
     const isStory = firstPost.settings.post_type === 'story';
+    for (const [index, media] of (firstPost.media || []).entries()) {
+      if (media.user_tags === undefined) continue;
+      const parsed = imageUserTagsSchema.safeParse(media.user_tags);
+      if (!parsed.success)
+        throw new Error(`media.${index}.user_tags: ${parsed.error.message}`);
+      if (parsed.data.length && (isStory || hasExtension(media.path, 'mp4'))) {
+        throw new Error(
+          `media.${index}.user_tags: supported only on feed images`
+        );
+      }
+    }
     const collaborators =
       firstPost?.settings?.collaborators?.length && !isStory
         ? `&collaborators=${encodeURIComponent(
@@ -2025,6 +2050,12 @@ export class InstagramProvider
             ? `&alt_text=${encodeURIComponent(m.alt)}`
             : ``;
 
+        const userTags = m.user_tags?.length
+          ? `&user_tags=${encodeURIComponent(
+              JSON.stringify(imageUserTagsSchema.parse(m.user_tags))
+            )}`
+          : '';
+
         const trialParams = isTrialReel
           ? `&trial_params=${encodeURIComponent(
               JSON.stringify({
@@ -2064,7 +2095,7 @@ export class InstagramProvider
 
         const { id: photoId } = await (
           await this.fetch(
-            `https://${type}/${META_GRAPH_API_VERSION}/${id}/media?${mediaType}${altText}${isCarousel}${itemCollaborators}${trialParams}${audioConfiguration}&access_token=${accessToken}${caption}`,
+            `https://${type}/${META_GRAPH_API_VERSION}/${id}/media?${mediaType}${altText}${userTags}${isCarousel}${itemCollaborators}${trialParams}${audioConfiguration}&access_token=${accessToken}${caption}`,
             {
               method: 'POST',
             }

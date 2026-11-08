@@ -1276,3 +1276,191 @@ describe('Instagram upstream publishing compatibility', () => {
     expect(url.searchParams.get('alt_text')).toBe(supported ? 'Descrição & accessibilité' : null);
   });
 });
+
+describe('Instagram image people tags', () => {
+  afterEach(() => jest.restoreAllMocks());
+  it.each(['graph.facebook.com', 'graph.instagram.com'])(
+    'keeps tags on their own carousel image (%s)',
+    async (host) => {
+      const provider = new InstagramProvider();
+      const fetchMock = jest
+        .spyOn(provider, 'fetch')
+        .mockResolvedValue({
+          json: async () => ({ id: 'container' }),
+        } as Response);
+      const first = [{ username: '@First', x: 0, y: 1 }];
+      const second = [{ username: 'second', x: 0.7, y: 0.2 }];
+      const result = await provider.postPending(
+        'ig',
+        'token',
+        [
+          {
+            id: 'post',
+            message: 'Caption',
+            settings: {
+              post_type: 'post',
+              collaborators: ['one', 'two', 'three', 'four', 'five'].map(
+                (label) => ({ label })
+              ),
+            },
+            media: [
+              {
+                path: 'https://cdn.example/a.jpg',
+                alt: 'Alt',
+                user_tags: first,
+              },
+              { path: 'https://cdn.example/b.jpg', user_tags: second },
+            ],
+          },
+        ] as any,
+        {} as any,
+        host
+      );
+      const urls = fetchMock.mock.calls.map(([url]) => new URL(String(url)));
+      expect(JSON.parse(urls[0].searchParams.get('user_tags')!)).toEqual([
+        { username: 'First', x: 0, y: 1 },
+      ]);
+      expect(JSON.parse(urls[1].searchParams.get('user_tags')!)).toEqual(
+        second
+      );
+      expect(urls[0].searchParams.get('alt_text')).toBe('Alt');
+      expect(urls.every((u) => !u.searchParams.has('collaborators'))).toBe(
+        true
+      );
+      const pending = result[0].pendingData;
+      expect(pending.collaborators).toEqual([
+        'one',
+        'two',
+        'three',
+        'four',
+        'five',
+      ]);
+      await provider.finalizePost('token', pending, {
+        internalId: 'ig',
+      } as any);
+      const parent = new URL(String(fetchMock.mock.calls[2][0]));
+      expect(JSON.parse(parent.searchParams.get('collaborators')!)).toEqual(
+        pending.collaborators
+      );
+      expect(parent.searchParams.has('user_tags')).toBe(false);
+    }
+  );
+  it('sends image tags independently of collaborators on a single image', async () => {
+    const provider = new InstagramProvider();
+    const fetchMock = jest
+      .spyOn(provider, 'fetch')
+      .mockResolvedValue({
+        json: async () => ({ id: 'container' }),
+      } as Response);
+    await provider.postPending(
+      'ig',
+      'token',
+      [
+        {
+          id: 'post',
+          message: 'Caption',
+          settings: { post_type: 'post' },
+          media: [
+            {
+              path: 'https://cdn.example/a.jpg',
+              user_tags: [{ username: 'person', x: 0.5, y: 0.5 }],
+            },
+          ],
+        },
+      ] as any,
+      {} as any
+    );
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(JSON.parse(url.searchParams.get('user_tags')!)).toEqual([
+      { username: 'person', x: 0.5, y: 0.5 },
+    ]);
+    expect(url.searchParams.has('collaborators')).toBe(false);
+  });
+  it.each(['story', 'video'])(
+    'rejects unsupported %s tags before HTTP',
+    async (format) => {
+      const provider = new InstagramProvider();
+      const fetchMock = jest.spyOn(provider, 'fetch');
+      await expect(
+        provider.postPending(
+          'ig',
+          'token',
+          [
+            {
+              id: 'post',
+              message: '',
+              settings: { post_type: format === 'story' ? 'story' : 'post' },
+              media: [
+                {
+                  path: format === 'video' ? 'a.mp4' : 'a.jpg',
+                  user_tags: [{ username: 'person', x: 0.5, y: 0.5 }],
+                },
+              ],
+            },
+          ] as any,
+          {} as any
+        )
+      ).rejects.toThrow(/user_tags/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+});
+
+it.each([4, 5])(
+  'sends all %i collaborators on a single image without truncation',
+  async (count) => {
+    const provider = new InstagramProvider();
+    const fetchMock = jest
+      .spyOn(provider, 'fetch')
+      .mockResolvedValue({
+        json: async () => ({ id: 'container' }),
+      } as Response);
+    const collaborators = Array.from({ length: count }, (_, i) => ({
+      label: `@person${i}`,
+    }));
+    await provider.postPending(
+      'ig',
+      'token',
+      [
+        {
+          id: 'post',
+          message: 'Caption',
+          settings: { post_type: 'post', collaborators },
+          media: [{ path: 'a.jpg' }],
+        },
+      ] as any,
+      {} as any
+    );
+    expect(
+      JSON.parse(
+        new URL(String(fetchMock.mock.calls[0][0])).searchParams.get(
+          'collaborators'
+        )!
+      )
+    ).toEqual(collaborators.map((c) => c.label.slice(1)));
+    fetchMock.mockRestore();
+  }
+);
+
+it('propagates a Meta collaborator rejection without retrying or truncating', async () => {
+  const provider = new InstagramProvider();
+  const rejection = new Error('Meta rejected collaborators');
+  const fetchMock = jest.spyOn(provider, 'fetch').mockRejectedValue(rejection);
+  await expect(
+    provider.postPending(
+      'ig',
+      'token',
+      [
+        {
+          id: 'post',
+          message: '',
+          settings: { post_type: 'post', collaborators: [{ label: 'person' }] },
+          media: [{ path: 'a.jpg' }],
+        },
+      ] as any,
+      {} as any
+    )
+  ).rejects.toBe(rejection);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  fetchMock.mockRestore();
+});

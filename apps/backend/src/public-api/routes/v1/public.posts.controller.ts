@@ -47,6 +47,20 @@ const updateSchema: any = {
           id: { type: 'string' },
           path: { type: 'string', format: 'uri' },
           alt: { type: 'string' },
+          user_tags: {
+            type: 'array',
+            description:
+              'People tagged on this Instagram feed image; independent of collaborators. [] clears tags.',
+            items: {
+              type: 'object',
+              required: ['username', 'x', 'y'],
+              properties: {
+                username: { type: 'string', example: 'person' },
+                x: { type: 'number', minimum: 0, maximum: 1 },
+                y: { type: 'number', minimum: 0, maximum: 1 },
+              },
+            },
+          },
           thumbnail: { type: 'string', nullable: true },
           thumbnailTimestamp: { type: 'integer', nullable: true },
         },
