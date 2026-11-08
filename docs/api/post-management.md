@@ -71,7 +71,7 @@ Exemplo de edição parcial pela API pública para um post de imagem única. Use
 }
 ```
 
-No `updatePostTool`, envie a lista em `mediaJson` e as configurações em `settingsJson`. O `getPostTool` devolve `media[].user_tags`. Para uma nova publicação no `integrationSchedulePostTool`, cada objeto de `attachments` aceita o mesmo `user_tags` junto de `path`, `alt` e capa.
+No `updatePostTool`, envie a lista como array em `media` e as configurações como string JSON em `settingsJson`. O `getPostTool` devolve `media[].user_tags`. Para uma nova publicação no `integrationSchedulePostTool`, cada objeto de `attachments` aceita o mesmo `user_tags` junto de `path`, `alt` e capa.
 
 ```json
 {
