@@ -1,4 +1,8 @@
 'use client';
+import {
+  CalendarWeekProvider,
+  useCalendar,
+} from '@gitroom/frontend/components/launches/calendar.context';
 
 import {
   AddProviderButton,
@@ -8,7 +12,7 @@ import {
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import SafeImage from '@gitroom/react/helpers/safe.image';
 import { capitalize, groupBy, orderBy } from 'lodash';
-import { CalendarWeekProvider } from '@gitroom/frontend/components/launches/calendar.context';
+
 import { Filters } from '@gitroom/frontend/components/launches/filters';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
@@ -346,6 +350,16 @@ export const MenuComponent: FC<
   } = props;
   const user = useUser();
   const t = useT();
+  const { selectedChannels, setSelectedChannels } = useCalendar();
+  const selectChannel = (event: { shiftKey: boolean }) => {
+    const selected = selectedChannels || [];
+    const next = event.shiftKey
+      ? selected.includes(integration.id)
+        ? selected.filter((id) => id !== integration.id)
+        : [...selected, integration.id]
+      : [integration.id];
+    setSelectedChannels(next.length ? next : null);
+  };
   const [collected, drag, dragPreview] = useDrag(() => ({
     type: 'menu',
     item: {
@@ -357,11 +371,10 @@ export const MenuComponent: FC<
       // @ts-ignore
       ref={dragPreview}
       {...(integration.refreshNeeded && {
-        onClick: refreshChannel(integration),
         'data-tooltip-id': 'tooltip',
         'data-tooltip-content': t(
           'channel_disconnected_click_to_reconnect',
-          'Channel disconnected, click to reconnect.'
+          'Channel disconnected. Use the red indicator or channel menu to reconnect.'
         ),
       })}
       {...(collapsed
@@ -371,71 +384,89 @@ export const MenuComponent: FC<
           }
         : {})}
       className={clsx(
-        'flex min-h-[48px] gap-[12px] items-center bg-newBgColorInner hover:bg-boxHover group/profile transition-all rounded-[8px]',
+        'relative flex min-h-[48px] gap-[12px] items-center bg-newBgColorInner hover:bg-boxHover group/profile transition-all rounded-[8px]',
         collapsed && 'relative w-[52px] mx-auto justify-center !gap-0',
-        integration.refreshNeeded && 'cursor-pointer'
+        'cursor-pointer focus-visible:ring-2 focus-visible:ring-btnPrimary',
+        selectedChannels?.includes(integration.id) &&
+          'bg-boxHover ring-2 ring-btnPrimary'
       )}
     >
-      <div
-        className={clsx(
-          'relative gap-[6px] flex justify-center items-center',
-          integration.disabled && 'opacity-50'
-        )}
-      >
-        <div className="h-full w-[4px] -ms-[12px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity">
-          <SVGLine />
-        </div>
-        {(integration.inBetweenSteps || integration.refreshNeeded) && (
-          <div
-            className="absolute start-0 top-0 w-[39px] h-[46px] cursor-pointer"
-            onClick={
-              integration.refreshNeeded
-                ? refreshChannel(integration)
-                : continueIntegration(integration)
-            }
-          >
-            <div className="bg-red-500 w-[15px] h-[15px] rounded-full start-[5px] top-[5px] absolute z-[200] text-[10px] flex justify-center items-center">
-              !
-            </div>
-            <div className="bg-primary/60 w-[39px] h-[46px] start-0 top-0 absolute rounded-full z-[199]" />
+      {(integration.inBetweenSteps || integration.refreshNeeded) && (
+        <button
+          type="button"
+          aria-label={t('reconnect_channel', 'Reconnect channel')}
+          className="absolute z-20 start-0 top-0 w-[39px] h-[46px] cursor-pointer"
+          onClick={(event) => {
+            event.stopPropagation();
+            (integration.refreshNeeded
+              ? refreshChannel(integration)
+              : continueIntegration(integration))();
+          }}
+        >
+          <div className="bg-red-500 w-[15px] h-[15px] rounded-full start-[5px] top-[5px] absolute z-[200] text-[10px] flex justify-center items-center">
+            !
           </div>
-        )}
-        <ImageWithFallback
-          fallbackSrc={'/no-picture.jpg'}
-          src={integration.picture || '/no-picture.jpg'}
-          className="rounded-[10px] w-[36px] h-[36px] min-w-[36px] shrink-0 object-cover"
-          alt={integration.identifier}
-          width={36}
-          height={36}
-        />
-        <PlatformIconBadge
-          identifier={integration.identifier}
-          size={14}
-          className="rounded-full absolute z-10 -bottom-[3px] -end-[4px] border-2 border-newBgColorInner bg-newBgColorInner"
-        />
-      </div>
-      <div
-        // @ts-ignore
-        ref={drag}
-        {...(integration.disabled &&
-        totalNonDisabledChannels === user?.totalChannels
-          ? {
-              'data-tooltip-id': 'tooltip',
-              'data-tooltip-content': t(
-                'channel_disabled_upgrade_plan',
-                'This channel is disabled, please upgrade your plan to enable it.'
-              ),
-            }
-          : {})}
-        role="Handle"
-        className={clsx(
-          'group-[.sidebar]:hidden flex-1 whitespace-nowrap text-ellipsis overflow-hidden cursor-move',
-          integration.disabled && 'opacity-50'
-        )}
+          <div className="bg-primary/60 w-[39px] h-[46px] start-0 top-0 absolute rounded-full z-[199]" />
+        </button>
+      )}
+      <button
+        type="button"
+        aria-label={t('filter_channel', 'Filter by {{name}}', {
+          name: integration.name,
+        })}
+        aria-pressed={!!selectedChannels?.includes(integration.id)}
+        onClick={selectChannel}
+        className="flex min-h-[48px] min-w-0 flex-1 items-center gap-[12px] rounded-[8px] text-start focus-visible:ring-2 focus-visible:ring-btnPrimary"
       >
-        {integration.name}
-      </div>
-      <div className={clsx(collapsed && 'absolute -end-[9px] top-[10px]')}>
+        <div
+          className={clsx(
+            'relative gap-[6px] flex justify-center items-center',
+            integration.disabled && 'opacity-50'
+          )}
+        >
+          <div className="h-full w-[4px] -ms-[12px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity">
+            <SVGLine />
+          </div>
+          <ImageWithFallback
+            fallbackSrc={'/no-picture.jpg'}
+            src={integration.picture || '/no-picture.jpg'}
+            className="rounded-[10px] w-[36px] h-[36px] min-w-[36px] shrink-0 object-cover"
+            alt={integration.identifier}
+            width={36}
+            height={36}
+          />
+          <PlatformIconBadge
+            identifier={integration.identifier}
+            size={14}
+            className="rounded-full absolute z-10 -bottom-[3px] -end-[4px] border-2 border-newBgColorInner bg-newBgColorInner"
+          />
+        </div>
+        <div
+          // @ts-ignore
+          ref={drag}
+          {...(integration.disabled &&
+          totalNonDisabledChannels === user?.totalChannels
+            ? {
+                'data-tooltip-id': 'tooltip',
+                'data-tooltip-content': t(
+                  'channel_disabled_upgrade_plan',
+                  'This channel is disabled, please upgrade your plan to enable it.'
+                ),
+              }
+            : {})}
+          className={clsx(
+            'group-[.sidebar]:hidden flex-1 whitespace-nowrap text-ellipsis overflow-hidden cursor-move',
+            integration.disabled && 'opacity-50'
+          )}
+        >
+          {integration.name}
+        </div>
+      </button>
+      <div
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+        className={clsx(collapsed && 'absolute -end-[9px] top-[10px]')}
+      >
         <Menu
           canChangeProfilePicture={integration.changeProfilePicture}
           canChangeNickName={integration.changeNickName}
@@ -451,6 +482,36 @@ export const MenuComponent: FC<
         />
       </div>
     </div>
+  );
+};
+export const AllChannelsFilter: FC<{ collapsed: boolean }> = ({
+  collapsed,
+}) => {
+  const { selectedChannels, setSelectedChannels } = useCalendar();
+  const t = useT();
+  return (
+    <button
+      type="button"
+      onClick={() => setSelectedChannels(null)}
+      aria-label={t('all_channels', 'All channels')}
+      aria-pressed={!selectedChannels}
+      title={t(
+        'sidebar_channel_filter_help',
+        'Click an account to filter it. Shift + click selects several accounts.'
+      )}
+      className={clsx(
+        'flex min-h-[44px] w-full items-center gap-2 rounded-[8px] px-2 text-start hover:bg-boxHover focus-visible:ring-2 focus-visible:ring-btnPrimary',
+        !selectedChannels && 'bg-boxHover ring-2 ring-btnPrimary'
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className="flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-[10px] bg-newColColor"
+      >
+        ☷
+      </span>
+      {!collapsed && <span>{t('all_channels', 'All channels')}</span>}
+    </button>
   );
 };
 export const LaunchesComponent = () => {
@@ -745,6 +806,11 @@ export const LaunchesComponent = () => {
                     </div>
                   </div>
                 )}
+              {!!sortedIntegrations.length && (
+                <AllChannelsFilter
+                  collapsed={collapseMenu === '1' && !channelsOpen}
+                />
+              )}
               {menuIntegrations.map((menu) => (
                 <MenuGroupComponent
                   collapsed={collapseMenu === '1' && !channelsOpen}

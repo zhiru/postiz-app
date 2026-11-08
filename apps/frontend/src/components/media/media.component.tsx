@@ -58,6 +58,7 @@ import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 import { useDebounce } from 'use-debounce';
 import useCookie from 'react-use-cookie';
 import { Pagination } from '@gitroom/frontend/components/ui/pagination';
+import { MediaPreview, MediaPreviewPage } from './media.preview';
 export { Pagination } from '@gitroom/frontend/components/ui/pagination';
 const Polonto = dynamic(
   () => import('@gitroom/frontend/components/launches/polonto')
@@ -132,31 +133,32 @@ export const MediaBox: FC<{
   useEffect(() => {
     setPage(0);
   }, [debouncedSearch, mediaType, sort, pageSize]);
-  const loadMedia = useCallback(async () => {
-    const params = new URLSearchParams({
-      page: String(page + 1),
-      limit: String(pageSize),
-      type: type || mediaType,
-      sort,
-    });
-    if (debouncedSearch.trim()) {
-      params.set('search', debouncedSearch.trim());
-    }
-    const response = await fetch(`/media?${params.toString()}`);
-    if (!response.ok) throw new Error('Media request failed');
-    return response.json();
-  }, [page, pageSize, debouncedSearch, type, mediaType, sort, fetch]);
+  const loadMedia = useCallback(
+    async (targetPage: number): Promise<MediaPreviewPage> => {
+      const params = new URLSearchParams({
+        page: String(targetPage + 1),
+        limit: String(pageSize),
+        type: type || mediaType,
+        sort,
+      });
+      if (debouncedSearch.trim()) {
+        params.set('search', debouncedSearch.trim());
+      }
+      const response = await fetch(`/media?${params.toString()}`);
+      if (!response.ok) throw new Error('Media request failed');
+      return response.json();
+    },
+    [pageSize, debouncedSearch, type, mediaType, sort, fetch]
+  );
+  const mediaCacheKey = `get-media-${pageSize}-${
+    type || mediaType
+  }-${sort}-${debouncedSearch}`;
   const {
     data,
     mutate,
     isLoading,
     error: mediaError,
-  } = useSWR(
-    `get-media-${page}-${pageSize}-${
-      type || mediaType
-    }-${sort}-${debouncedSearch}`,
-    loadMedia
-  );
+  } = useSWR(`${mediaCacheKey}-${page}`, () => loadMedia(page));
   useEffect(() => {
     if (data)
       setPage((current) => Math.min(current, Math.max(0, data.pages - 1)));
@@ -299,32 +301,29 @@ export const MediaBox: FC<{
   );
 
   const maximize = useCallback(
-    (media: Media) => async (e: any) => {
+    (media: Media) => (e: React.MouseEvent) => {
       e.stopPropagation();
+      if (!data) return;
       modals.openModal({
         title: '',
         top: 10,
-        children: (
-          <div className="w-full h-full p-[50px]">
-            {isVideo(media.path) ? (
-              <VideoFrame
-                autoplay={true}
-                url={mediaDirectory.set(media.path)}
-              />
-            ) : (
-              <img
-                width="100%"
-                height="100%"
-                className="w-full h-full max-h-[100%] max-w-[100%] object-cover"
-                src={mediaDirectory.set(media.path)}
-                alt="media"
-              />
-            )}
-          </div>
+        size: 'min(960px, calc(100vw - 24px))',
+        withCloseButton: false,
+        children: (close) => (
+          <MediaPreview
+            initialMedia={media}
+            initialPage={page}
+            initialData={data}
+            pageSize={pageSize}
+            cacheKey={mediaCacheKey}
+            loadPage={loadMedia}
+            onPageChange={setPage}
+            onClose={close}
+          />
         ),
       });
     },
-    []
+    [data, page, pageSize, mediaCacheKey, loadMedia, modals]
   );
 
   // A lista visivel ja filtrada pelo tipo — a barra de selecao em massa
@@ -809,11 +808,14 @@ export const MediaBox: FC<{
                   </div>
                   <div className="w-full h-full rounded-[6px] overflow-hidden relative">
                     <div className="absolute z-[20] left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
-                      <div
+                      <button
+                        type="button"
+                        aria-label={t('preview_media', 'Preview {{name}}', {
+                          name: media.originalName || media.name,
+                        })}
                         onClick={maximize(media)}
                         className={clsx(
-                          'cursor-pointer p-[4px] bg-black/40 hidden group-hover:block hover:scale-150 transition-all',
-                          !standalone && 'mobile:!hidden'
+                          'cursor-pointer p-[4px] bg-black/40 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 mobile:opacity-100 transition-opacity focus-visible:ring-2 focus-visible:ring-btnPrimary'
                         )}
                       >
                         <svg
@@ -828,7 +830,7 @@ export const MediaBox: FC<{
                             fill="#F1F5F9"
                           />
                         </svg>
-                      </div>
+                      </button>
                     </div>
                     {isVideo(media.path) ? (
                       <VideoFrame url={mediaDirectory.set(media.path)} />

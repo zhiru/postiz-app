@@ -669,7 +669,7 @@
   "webhook_added_successfully": "Webhook added successfully",
   "webhook_sent": "Webhook send",
   "today": "Today",
-  "channel_disconnected_click_to_reconnect": "Channel disconnected, click to reconnect.",
+  "channel_disconnected_click_to_reconnect": "Channel disconnected. Use the red indicator or channel menu to reconnect.",
   "channel_disabled_upgrade_plan": "This channel is disabled, please upgrade your plan to enable it.",
   "channel_added": "Channel added",
   "are_you_sure_disable_channel": "Are you sure you want to disable this channel?",
@@ -2618,5 +2618,17 @@
   "flow_redispatch_confirm": "Confirm redispatch",
   "flow_redispatch_sending": "Requesting redispatch...",
   "flow_redispatch_started": "Redispatch requested. Follow the execution history for the result.",
-  "flow_log_status_redispatch_requested": "Redispatch requested"
+  "flow_log_status_redispatch_requested": "Redispatch requested",
+  "media_preview": "Media preview",
+  "close_media_preview": "Close preview",
+  "previous_media": "Previous media",
+  "next_media": "Next media",
+  "media_preview_position": "{{current}} of {{total}}",
+  "media_preview_load_error": "Could not load the next media page. Try again.",
+  "media_preview_unavailable": "This media could not be displayed.",
+  "preview_media": "Preview {{name}}",
+  "filter_channel": "Filter by {{name}}",
+  "all_channels": "All channels",
+  "sidebar_channel_filter_help": "Click an account to filter it. Shift + click selects several accounts.",
+  "could_not_load_post": "Could not load the post. Try again."
 }

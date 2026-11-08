@@ -224,6 +224,7 @@ export const usePostActions = (onMutate?: () => void) => {
   const fetch = useFetch();
   const modal = useModals();
   const toaster = useToaster();
+  const { canWrite } = useProfilePermissions();
   const { integrations, reloadCalendarView } = useCalendar();
 
   const mutate = useCallback(() => {
@@ -234,6 +235,7 @@ export const usePostActions = (onMutate?: () => void) => {
   const editPost = useCallback(
     (load: any, isDuplicate?: boolean, copy = false) =>
       async () => {
+        if (!canWrite) return;
         // Existing published identities must never enter the scheduling composer.
         if (
           !isDuplicate &&
@@ -276,7 +278,18 @@ export const usePostActions = (onMutate?: () => void) => {
           publishDate: load.actualDate || load.publishDate,
         };
 
-        const data = await (await fetch(`/posts/group/${post.group}`)).json();
+        let data: any;
+        try {
+          const response = await fetch(`/posts/group/${post.group}`);
+          if (!response.ok) throw new Error('Post unavailable');
+          data = await response.json();
+        } catch {
+          toaster.show(
+            t('could_not_load_post', 'Could not load the post. Try again.'),
+            'warning'
+          );
+          return;
+        }
         if (!data?.posts?.length) {
           toaster.show(t('post_not_found', 'Post not found'), 'warning');
           mutate();
@@ -336,7 +349,7 @@ export const usePostActions = (onMutate?: () => void) => {
           title: ``,
         });
       },
-    [integrations, fetch, modal, mutate, toaster, t]
+    [integrations, fetch, modal, mutate, toaster, t, canWrite]
   );
 
   const copyDebugJson = useCallback(

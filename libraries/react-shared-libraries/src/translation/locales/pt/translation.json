@@ -669,7 +669,7 @@
   "webhook_added_successfully": "Webhook adicionado com sucesso",
   "webhook_sent": "Webhook enviado",
   "today": "Hoje",
-  "channel_disconnected_click_to_reconnect": "Canal desconectado, clique para reconectar.",
+  "channel_disconnected_click_to_reconnect": "Canal desconectado. Use o indicador vermelho ou o menu do canal para reconectar.",
   "channel_disabled_upgrade_plan": "Este canal está desativado, por favor faça upgrade do seu plano para habilitá-lo.",
   "channel_added": "Canal adicionado",
   "are_you_sure_disable_channel": "Tem certeza de que deseja desativar este canal?",
@@ -2618,5 +2618,17 @@
   "flow_redispatch_confirm": "Confirmar redisparo",
   "flow_redispatch_sending": "Solicitando redisparo...",
   "flow_redispatch_started": "Redisparo solicitado. Acompanhe o resultado no histórico da execução.",
-  "flow_log_status_redispatch_requested": "Redisparo solicitado"
+  "flow_log_status_redispatch_requested": "Redisparo solicitado",
+  "media_preview": "Prévia da mídia",
+  "close_media_preview": "Fechar prévia",
+  "previous_media": "Mídia anterior",
+  "next_media": "Próxima mídia",
+  "media_preview_position": "{{current}} de {{total}}",
+  "media_preview_load_error": "Não foi possível carregar a página de mídias. Tente novamente.",
+  "media_preview_unavailable": "Não foi possível exibir esta mídia.",
+  "preview_media": "Visualizar {{name}}",
+  "filter_channel": "Filtrar por {{name}}",
+  "all_channels": "Todos os canais",
+  "sidebar_channel_filter_help": "Clique em uma conta para filtrar. Shift + clique seleciona várias contas.",
+  "could_not_load_post": "Não foi possível carregar a publicação. Tente novamente."
 }

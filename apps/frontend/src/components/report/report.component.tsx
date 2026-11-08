@@ -12,6 +12,8 @@ import { Checkbox } from '@gitroom/react/form/checkbox';
 import { ChartSocial } from '@gitroom/frontend/components/analytics/chart-social';
 import { TrendIndicator } from '@gitroom/frontend/components/platform-analytics/render.analytics';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
+import SafeImage from '@gitroom/react/helpers/safe.image';
+import { PlatformIconBadge } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
 
 interface ReportTotals {
   [column: string]: number;
@@ -21,6 +23,7 @@ interface ReportChannel {
   id: string;
   name: string;
   providerIdentifier: string;
+  identifier?: string;
   picture?: string | null;
   totals: ReportTotals;
   series: Array<{ date: string; totals: ReportTotals }>;
@@ -49,7 +52,9 @@ const useReportChannels = () => {
     async () => {
       const { integrations } = await (await fetch('/integrations/list')).json();
 
-      return (integrations || []).filter((integration: any) => !integration.refreshNeeded);
+      return (integrations || []).filter(
+        (integration: any) => !integration.refreshNeeded
+      );
     },
     { revalidateOnFocus: false, fallbackData: [] }
   );
@@ -227,6 +232,22 @@ export const ReportComponent = () => {
               checked={selected.includes(channel.id)}
               onChange={() => toggle(channel.id)}
             />
+            <span className="relative inline-flex shrink-0">
+              <SafeImage
+                src={channel.picture || '/no-picture.jpg'}
+                alt=""
+                width={32}
+                height={32}
+                className="h-[32px] w-[32px] shrink-0 rounded-full object-cover"
+              />
+              <PlatformIconBadge
+                identifier={
+                  channel.providerIdentifier || channel.identifier || ''
+                }
+                size={14}
+                className="absolute -bottom-1 -end-1 rounded-full border border-newBgColorInner bg-newBgColorInner"
+              />
+            </span>
             <span className="text-[13px] text-textColor">{channel.name}</span>
           </div>
         ))}
@@ -274,8 +295,33 @@ export const ReportComponent = () => {
               </thead>
               <tbody>
                 {report.channels.map((channel) => (
-                  <tr key={channel.id} className="border-t border-newTableBorder">
-                    <td className="p-[12px]">{channel.name}</td>
+                  <tr
+                    key={channel.id}
+                    className="border-t border-newTableBorder"
+                  >
+                    <td className="p-[12px]">
+                      <div className="flex items-center gap-2">
+                        <span className="relative inline-flex shrink-0">
+                          <SafeImage
+                            src={channel.picture || '/no-picture.jpg'}
+                            alt=""
+                            width={32}
+                            height={32}
+                            className="h-[32px] w-[32px] shrink-0 rounded-full object-cover"
+                          />
+                          <PlatformIconBadge
+                            identifier={
+                              channel.providerIdentifier ||
+                              channel.identifier ||
+                              ''
+                            }
+                            size={14}
+                            className="absolute -bottom-1 -end-1 rounded-full border border-newBgColorInner bg-newBgColorInner"
+                          />
+                        </span>
+                        {channel.name}
+                      </div>
+                    </td>
                     {report.columns.map((column) => (
                       <td key={column} className="text-end p-[12px]">
                         {(channel.totals[column] || 0).toLocaleString()}
