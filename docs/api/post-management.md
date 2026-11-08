@@ -37,6 +37,58 @@ Leia antes de editar e envie exatamente `version`. Campo omitido preserva seu va
 
 Um colaborador configurado não prova convite enviado ou aceito. A resposta distingue `configured:true`, `invitationSent:"unknown"`, `invitationAccepted:"unknown"`, `profileValidation:"unknown"`. Atualmente não há consulta remota de perfis/convites nessa operação. A validação verifica sintaxe/configuração suportada e rejeita collab em Stories. Uma menção na legenda nunca é convite. Não oferecemos alteração de collab após publicação.
 
+## Pessoas marcadas em imagens do Instagram
+
+O editor permite até cinco colaboradores. A referência oficial de colaboradores informa cinco contas, mas a referência de criação de mídia ainda informa três. O Mali Posts envia todos os colaboradores configurados e propaga uma eventual rejeição da Meta, sem reduzir a lista nem repetir a publicação com menos pessoas. Esse limite local não confirma a aceitação de cinco em uma conta real.
+
+Fontes consultadas em 08/11/2026. [Colaboradores](https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-media/collaborators/) e [Criação de mídia](https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media/).
+
+Para marcar pessoas na imagem, use `user_tags` no item de mídia. O nome pode chegar com `@`, que é removido na validação. `x` e `y` são números finitos entre 0 e 1, medidos desde as bordas esquerda e superior. Cada usuário pode ser marcado uma vez por imagem. O campo acompanha a imagem quando o carrossel é reordenado.
+
+No painel, adicione a pessoa, selecione seu nome e clique na imagem para posicioná-la. Os campos X/Y oferecem o mesmo ajuste por teclado. É possível remover cada marcação.
+
+A implementação oferece marcações em imagens de feed e imagens de carrossel dos dois provedores Instagram. Mídias de outro canal, vídeos, Stories e comentários da sequência com marcações retornam erro de campo antes do envio. Esses formatos podem ter capacidades adicionais na Meta e ficam fora desta implementação.
+
+Exemplo de edição parcial pela API pública para um post de imagem única. Use o ID real da imagem e a versão recém-lida. Em carrosséis, a lista media deve conter TODAS as imagens, na ordem desejada, mesmo que apenas uma receba marcações. Uma mídia omitida da lista será removida do post. Para preservar as outras imagens, inclua seus IDs com os demais campos omitidos. Omitir `user_tags` preserva as marcações, e `user_tags:[]` limpa somente as marcações da imagem indicada. A edição da legenda isolada também as preserva.
+
+```json
+{
+  "version": "2026-11-08T18:00:00.000Z",
+  "media": [
+    {
+      "id": "ID_DA_IMAGEM",
+      "user_tags": [
+        { "username": "pessoa", "x": 0.25, "y": 0.6 }
+      ]
+    }
+  ],
+  "settings": {
+    "collaborators": [
+      { "label": "colaborador" }
+    ]
+  },
+  "dryRun": true
+}
+```
+
+No `updatePostTool`, envie a lista como array em `media` e as configurações como string JSON em `settingsJson`. O `getPostTool` devolve `media[].user_tags`. Para uma nova publicação no `integrationSchedulePostTool`, cada objeto de `attachments` aceita o mesmo `user_tags` junto de `path`, `alt` e capa.
+
+```json
+{
+  "attachments": [
+    {
+      "path": "https://postiz-app.aireset.com.br/uploads/imagem.jpg",
+      "alt": "Descrição da imagem",
+      "user_tags": [
+        { "username": "pessoa", "x": 0.25, "y": 0.6 }
+      ]
+    }
+  ]
+}
+```
+
+Essa lista integra cada item de `postsAndComments` no contrato da ferramenta. O formato completo, o canal, o estado e o horário seguem o schema existente. Tags da imagem, menções na legenda e convites de collab têm campos e efeitos independentes. A edição continua restrita a posts ainda editáveis.
+
 ## Revisar espaçamento antes de aplicar
 
 1. Leia o post e guarde versão e campos preservados.

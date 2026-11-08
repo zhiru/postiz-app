@@ -820,3 +820,53 @@ describe('channel recurrence capability', () => {
     expect(service.startWorkflow).not.toHaveBeenCalled();
   });
 });
+
+describe('PostsService image people tags validation', () => {
+  const tags = [{ username: 'person', x: 0.1, y: 0.9 }];
+  it.each([
+    ['supported', 'post', 'a.jpg', true, tags, true],
+    ['story', 'story', 'a.jpg', true, tags, false],
+    ['video', 'post', 'a.mp4', true, tags, false],
+    ['other channel', 'post', 'a.jpg', false, tags, false],
+    [
+      'invalid position',
+      'post',
+      'a.jpg',
+      true,
+      [{ username: 'person', x: -1, y: 0.5 }],
+      false,
+    ],
+    ['explicit clearing', 'story', 'a.jpg', true, [], true],
+  ])(
+    'validates %s with media field errors',
+    async (_name, post_type, path, capable, user_tags, expected) => {
+      const { service, repository } = buildService();
+      const { InstagramProvider } = await import(
+        '@gitroom/nestjs-libraries/integrations/social/instagram.provider'
+      );
+      const instagram = new InstagramProvider();
+      const provider = {
+        maxLength: () => 2200,
+        checkValidity: jest.fn().mockResolvedValue(true),
+        supportsImageUserTags: (settings: any, media: any, index: number) =>
+          capable && instagram.supportsImageUserTags(settings, media, index),
+      };
+      (service as any)._integrationManager.getSocialIntegration.mockReturnValue(
+        provider
+      );
+      const [result] = await service.validatePosts('org-1', [
+        {
+          integration: { id: 'int-1' },
+          settings: { post_type },
+          value: [{ content: 'caption', image: [{ path, user_tags }] }],
+        },
+      ] as any);
+      expect(result.valid).toBe(expected);
+      if (!expected)
+        expect(result.fieldErrors[0].field).toMatch(
+          /^value.0.image.0.user_tags/
+        );
+      expect(repository.createOrUpdatePost).not.toHaveBeenCalled();
+    }
+  );
+});

@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Instagram permite configurar até cinco colaboradores e marcar pessoas por imagem de feed/carrossel com posição X/Y no editor, API e MCP. Validações preservam as marcações em edição parcial e reordenação. A documentação registra a divergência entre os limites de criação e leitura publicados pela Meta.
+
 - Recupera WIP da biblioteca: prévia de imagens/vídeos com anterior/próximo entre páginas, teclado, retorno de foco e tratamento de erro sem perder o arquivo atual.
 - Recupera filtros de contas na barra lateral do calendário/listagem (Shift para seleção múltipla e Todos os canais para limpar) e fotos/ícones de rede no relatório.
 - Editor reutiliza a conversão segura de legendas para preservar linhas em branco e texto literal; leitura de post com falha mostra aviso e perfis sem escrita não abrem o composer pela ação de edição.

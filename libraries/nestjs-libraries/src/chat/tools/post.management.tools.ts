@@ -7,6 +7,7 @@ import { readRequestContext } from './tool.context.helper';
 import { PostManagementService } from '@gitroom/nestjs-libraries/database/prisma/posts/post.management.service';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import {
+  imageUserTagsSchema,
   remoteDeletePostSchema,
   postStatusSchema,
   postDateSchema,
@@ -28,6 +29,7 @@ const patchSchema = z
           id: z.string().optional(),
           path: z.string().optional(),
           alt: z.string().optional(),
+          user_tags: imageUserTagsSchema.optional(),
           thumbnail: z.string().nullable().optional(),
           thumbnailTimestamp: z.number().int().min(0).nullable().optional(),
         })
@@ -37,7 +39,7 @@ const patchSchema = z
       .string()
       .optional()
       .describe(
-        'JSON object with only settings to change. collaborators:[{label:"@handle"}], or collaborators:[] to remove. A caption mention is never a collab invitation.'
+        'JSON object with only settings to change. collaborators:[{label:"@handle"}], or collaborators:[] to remove. Up to 5 collaborators locally (Meta may reject). A caption mention is never a collab invitation. Tag people on feed images separately using media[].user_tags:[{username:"person",x:0.5,y:0.5}]; [] clears tags.'
       ),
     normalizeSpacing: z.boolean().optional(),
     dryRun: z.boolean().optional(),

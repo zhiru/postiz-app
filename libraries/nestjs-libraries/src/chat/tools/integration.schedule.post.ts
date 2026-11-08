@@ -1,6 +1,7 @@
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
+import { imageUserTagsSchema } from '@gitroom/nestjs-libraries/dtos/posts/manage.post.dto';
 import { Injectable } from '@nestjs/common';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
@@ -52,12 +53,17 @@ function tryParseJson(value: string): unknown {
   }
 }
 // Attachments are either a plain URL string or { path, alt?, thumbnail?,
-// thumbnailTimestamp? }, the same per-media fields as the public API.
+// thumbnailTimestamp?, user_tags? }, the same per-media fields as the public API.
 const attachment = z.union([
   attachmentUrl,
   z.object({
     path: attachmentUrl,
     alt: z.string().optional(),
+    user_tags: imageUserTagsSchema
+      .optional()
+      .describe(
+        'People on this Instagram feed image: username and normalized x/y (0..1); independent of collaborator invitations.'
+      ),
     thumbnail: attachmentUrl.optional(),
     thumbnailTimestamp: z.number().int().min(0).optional(),
   }),
@@ -69,6 +75,7 @@ const toMedia = (
     | {
         path: string;
         alt?: string;
+        user_tags?: import('@gitroom/nestjs-libraries/dtos/media/media.dto').ImageUserTag[];
         thumbnail?: string;
         thumbnailTimestamp?: number;
       }
@@ -78,6 +85,7 @@ const toMedia = (
     : {
         path: a.path,
         alt: a.alt,
+        user_tags: a.user_tags,
         thumbnail: a.thumbnail,
         thumbnailTimestamp: a.thumbnailTimestamp,
       };

@@ -8,6 +8,7 @@ const isReadTimeout = (err: any) =>
   err?.name === 'TimeoutError' || err?.cause?.name === 'TimeoutError';
 export const stripQuery = heartbeatEndpoint;
 export type ValidityMedia = {
+  user_tags?: import('@gitroom/nestjs-libraries/dtos/media/media.dto').ImageUserTag[];
   path: string;
   thumbnail?: string;
   alt?: string;
@@ -216,6 +217,14 @@ export abstract class SocialAbstract {
    * Note: video-duration validations that used to run in the browser are not
    * re-implemented here (no ffmpeg dependency). Image-dimension checks use sharp.
    */
+  supportsImageUserTags(
+    settings: any,
+    media: ValidityMedia,
+    postIndex: number
+  ): boolean {
+    return false;
+  }
+
   async checkValidity(
     posts: Array<ValidityMedia[]>,
     settings: any,

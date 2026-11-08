@@ -1,5 +1,7 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayUnique,
   IsArray,
   IsDefined,
   IsIn,
@@ -14,6 +16,9 @@ import {
 import { MediaDto } from '@gitroom/nestjs-libraries/dtos/media/media.dto';
 
 export class Collaborators {
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().replace(/^@/, '') : value
+  )
   @IsDefined()
   @IsString()
   @Matches(/^@?[A-Za-z0-9._]{1,30}$/, {
@@ -65,6 +70,17 @@ export class InstagramDto {
   @IsOptional()
   graduation_strategy?: 'MANUAL' | 'SS_PERFORMANCE';
 
+  @ArrayMaxSize(5, {
+    message:
+      'Instagram supports up to 5 collaborators locally; Meta may reject a lower limit',
+  })
+  @ArrayUnique(
+    (item: Collaborators) =>
+      typeof item?.label === 'string'
+        ? item.label.replace(/^@/, '').toLowerCase()
+        : item?.label,
+    { message: 'Each collaborator must be unique' }
+  )
   @Type(() => Collaborators)
   @ValidateNested({ each: true })
   @IsArray()

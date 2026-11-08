@@ -418,7 +418,7 @@
   "label_search_subreddit": "Поиск сабреддита",
   "label_delay": "Задержка",
   "label_post_type": "Тип поста",
-  "label_collaborators": "Соавторы (макс. 3) — аккаунты не могут быть приватными",
+  "label_collaborators": "Соавторы (макс. 5) — аккаунты не могут быть приватными",
   "label_community": "Сообщество",
   "label_search_community": "Поиск сообщества",
   "label_channel": "Канал",
