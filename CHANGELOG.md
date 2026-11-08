@@ -7,6 +7,10 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Recupera WIP da biblioteca: prévia de imagens/vídeos com anterior/próximo entre páginas, teclado, retorno de foco e tratamento de erro sem perder o arquivo atual.
+- Recupera filtros de contas na barra lateral do calendário/listagem (Shift para seleção múltipla e Todos os canais para limpar) e fotos/ícones de rede no relatório.
+- Editor reutiliza a conversão segura de legendas para preservar linhas em branco e texto literal; leitura de post com falha mostra aviso e perfis sem escrita não abrem o composer pela ação de edição.
+
 - Corrige o dimensionamento do conteúdo no gerenciador real de modais com altura definida: a prévia de métricas e a do calendário reservam a altura restante ao iframe, com teste da cadeia real e fixture de browser sem mock do modal.
 - Edição no calendário/listagem: rascunhos, fila e erros sem identidade publicada mantêm o editor local em qualquer canal; publicados/importados com link oferecem “Editar na plataforma original”, respeitando permissão de escrita e exclusão remota. A edição direta de uma identidade já publicada não abre o composer de agendamento; duplicação continua uma ação explícita independente.
 

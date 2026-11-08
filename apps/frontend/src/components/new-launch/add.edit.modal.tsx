@@ -1,4 +1,5 @@
 'use client';
+import { postContentToHtml } from '@gitroom/helpers/utils/sanitize.post.content';
 import 'reflect-metadata';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import dayjs from 'dayjs';
@@ -150,12 +151,7 @@ export const AddEditModalInner: FC<AddEditModalProps> = (props) => {
 const postValues = (posts: Post[]) =>
   posts.map((post) => ({
     delay: post.delay,
-    content: /<p[\s>]/i.test(post.content)
-      ? post.content
-      : post.content
-          .split('\n')
-          .map((line: string) => `<p>${line}</p>`)
-          .join(''),
+    content: postContentToHtml(post.content),
     id: post.id,
     // @ts-ignore
     media: post.image as any[],
@@ -238,24 +234,14 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
       0,
       props.onlyValues?.length
         ? props.onlyValues.map((p) => ({
-            content: /<p[\s>]/i.test(p.content)
-              ? p.content
-              : p.content
-                  .split('\n')
-                  .map((line: string) => `<p>${line}</p>`)
-                  .join(''),
+            content: postContentToHtml(p.content),
             id: makeId(10),
             media: p.image || [],
           }))
         : props.set?.posts?.length
         ? props.set.posts[0].value.map((p: any) => ({
             id: makeId(10),
-            content: /<p[\s>]/i.test(p.content)
-              ? p.content
-              : p.content
-                  .split('\n')
-                  .map((line: string) => `<p>${line}</p>`)
-                  .join(''),
+            content: postContentToHtml(p.content),
             // @ts-ignore
             media: p.media,
           }))

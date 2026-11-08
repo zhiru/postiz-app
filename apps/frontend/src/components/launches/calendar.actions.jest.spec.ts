@@ -51,6 +51,7 @@ let mockCanWrite = true;
 let mockRealModals = false;
 const mockFetch = jest.fn();
 const mockReload = jest.fn();
+const mockToast = jest.fn();
 const mockIntegrations = [
   { id: 'source', name: 'Source' },
   { id: 'target', name: 'Target' },
@@ -86,7 +87,7 @@ jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
   useFetch: () => mockFetch,
 }));
 jest.mock('@gitroom/react/toaster/toaster', () => ({
-  useToaster: () => ({ show: jest.fn() }),
+  useToaster: () => ({ show: mockToast }),
 }));
 jest.mock('@gitroom/react/translation/get.transation.service.client', () => ({
   useT: () => (_: string, fallback: string) => fallback,
@@ -1006,3 +1007,31 @@ it.each([true, false])(
     expect(screen.queryByTitle('Preview post')).toBeNull();
   }
 );
+
+it.each(['http', 'network', 'invalid-json'])(
+  'keeps the composer closed and reports a failed post read (%s)',
+  async (failure: string) => {
+    mockFetch.mockImplementation(async () => {
+      if (failure === 'network') throw new Error('Private failure details');
+      return {
+        ok: failure !== 'http',
+        json: async () => {
+          if (failure === 'invalid-json') throw new Error('Private payload');
+          return { posts: [{ content: 'Error response' }] };
+        },
+      };
+    });
+    const { result } = renderHook(() => usePostActions());
+    await act(async () => { await result.current.editPost({ group: 'group' })(); });
+    expect(mockModal).not.toHaveBeenCalled();
+    expect(mockReload).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledWith('Could not load the post. Try again.', 'warning');
+  }
+);
+it('does not load or open a composer when the active profile cannot write', async () => {
+  mockCanWrite = false;
+  const { result } = renderHook(() => usePostActions());
+  await act(async () => { await result.current.editPost({ group: 'group' }, true)(); });
+  expect(mockFetch).not.toHaveBeenCalled();
+  expect(mockModal).not.toHaveBeenCalled();
+});

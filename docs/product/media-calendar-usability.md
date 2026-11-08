@@ -2,15 +2,23 @@
 
 A biblioteca mantém a visualização por cards. A busca procura o nome original do arquivo; os filtros Imagens/Vídeos e a ordenação são aplicados antes da paginação. É possível escolher 12, 24, 48 ou 96 itens por página. A preferência fica salva no navegador. Contagem, navegação e seletor de quantidade aparecem acima e abaixo da grade. Alterar busca, filtro, ordenação ou quantidade retorna à primeira página.
 
+A prévia de um arquivo oferece Anterior/Próximo, inclusive entre páginas da mesma busca e filtros. As setas do teclado navegam pelas mídias; durante a reprodução de vídeo, as setas continuam disponíveis para o player. Escape fecha a prévia. Se uma página falhar, o arquivo atual permanece visível e é possível tentar novamente. Abrir ou navegar pela prévia não seleciona, envia ou apaga arquivos.
+
 Arrastar arquivos para a área da biblioteca inicia o upload automaticamente, assim como selecionar arquivos pelo botão Enviar. A interface informa esse comportamento e o limite de 1 GB por upload; os formatos aceitos continuam sendo validados pelo uploader. A seleção para inserir mídia e as proteções contra apagar mídia em uso continuam independentes.
 
 No calendário e na listagem, use a busca por texto, o filtro de formato (Feed, Stories, Reels/vídeos, Carrosséis) e o de estado. Formato é deduzido das configurações, anexos e URL da publicação. Quando não há metadados suficientes, o item entra em Feed. Uma publicação tem um formato principal: carrosséis de várias mídias ficam em Carrosséis, mesmo contendo vídeo.
 
-O menu de três pontos recebe foco sem rolar a página ao abrir ou navegar pelo teclado, evitando que a rolagem causada pelo foco feche o próprio menu. Escape, clique externo e rolagem manual continuam fechando o menu. Publicações importadas mantêm prévia e ações permitidas pelo perfil; edição, mudança de data e duplicação continuam indisponíveis para importados.
+O menu de três pontos recebe foco sem rolar a página ao abrir ou navegar pelo teclado, evitando que a rolagem causada pelo foco feche o próprio menu. Escape, clique externo e rolagem manual continuam fechando o menu. Publicações importadas mantêm prévia e ações permitidas pelo perfil; edição da origem e mudança de data continuam indisponíveis para importados. Perfis com escrita podem duplicar ou copiar para outra rede pelo menu e pela prévia privada; essas ações abrem um novo composer sem publicar automaticamente.
 
 A listagem permite 10, 20, 50 ou 100 posts por página e inclui rascunhos passados. O filtro Rascunhos atrasados mostra somente rascunhos com data anterior ao horário atual. Eles recebem X vermelho e “Não publicado”; o verde continua reservado aos publicados. Esse indicador não altera o estado nem agenda/publica o conteúdo automaticamente.
 
 Ao abrir Dia/Semana contendo a data atual, a tela posiciona a linha do horário atual no campo de visão. Clicar em Hoje repete o foco. Atualizações dos dados e do relógio preservam a rolagem manual. Datas sem o dia atual não são reposicionadas. A barra de canais reduzida mantém avatares proporcionais e o botão acessível de expandir/recolher.
+
+Clique em uma conta na barra de canais para filtrar o calendário e a listagem. Shift + clique adiciona ou remove contas da seleção; **Todos os canais** limpa o filtro. A seleção reutiliza os filtros existentes e retorna à primeira página. O indicador vermelho e o menu do canal mantêm as ações de reconexão separadas do filtro.
+
+O relatório mostra a foto e o ícone da rede junto ao nome da conta, no seletor e na tabela. As métricas e a exportação CSV mantêm o mesmo conteúdo.
+
+Ao abrir o editor, legendas em texto simples usam a conversão compartilhada para preservar parágrafos, linhas em branco e caracteres literais como `<` e `&`; conteúdo rico passa pelo sanitizador existente. Se a leitura do post falhar, uma mensagem permite tentar novamente sem abrir um editor vazio. Perfis sem escrita não iniciam a leitura pelo comando de edição.
 
 O selo “Reel de Teste” aparece no calendário e na listagem somente quando `settings.is_trial_reel` está explicitamente habilitado (`true` ou a string legada `"true"`, sem distinção de maiúsculas). `false`, `"false"`, dados ausentes ou inválidos não exibem o selo. O filtro continua sendo Reels/vídeos. Posts importados seguem a mesma regra: vídeo, URL de Reel e origem importada não comprovam teste. A importação atual de mídia do Instagram não consulta nem persiste esse sinal; sem evidência nas configurações locais, não há selo.
 
