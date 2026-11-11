@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- A tela de entrada pode carregar a logo e o favicon da Mali antes do login.
+
 - Corrige tela branca em `/settings`: o DTO de mídia carrega `reflect-metadata` antes dos decorators de `user_tags`, preservando a validação. Mali Posts usa wordmark e M oficiais locais; favicon inicial cobre app, provider e extension sem substituir marcas customizadas de outras instâncias.
 
 - Instagram permite configurar até cinco colaboradores e marcar pessoas por imagem de feed/carrossel com posição X/Y no editor, API e MCP. Validações preservam as marcações em edição parcial e reordenação. A documentação registra a divergência entre os limites de criação e leitura publicados pela Meta.

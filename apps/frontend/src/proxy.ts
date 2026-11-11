@@ -48,6 +48,9 @@ export async function proxy(request: NextRequest) {
     nextUrl.pathname.startsWith('/p/') ||
     nextUrl.pathname.startsWith('/provider/') ||
     nextUrl.pathname.startsWith('/icons/') ||
+    /^\/branding\/mali-(?:icon\.svg|logo\.webp|apple-touch-icon\.png)$/.test(
+      nextUrl.pathname
+    ) ||
     // the consent screen of MCP / OAuth clients handles signed-out visitors
     // itself (sign in and come back, or connect a self-hosted instance)
     nextUrl.pathname.startsWith('/oauth/authorize')
