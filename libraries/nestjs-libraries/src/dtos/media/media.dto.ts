@@ -1,3 +1,6 @@
+// Shared with browser settings: decorators need metadata before evaluation.
+import 'reflect-metadata';
+
 import {
   ArrayUnique,
   IsArray,

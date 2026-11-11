@@ -40,9 +40,7 @@ A organizacao e o "tenant" principal. Ela representa uma empresa, agencia ou gru
 
 ### Como criar
 
-A organizacao e criada **apenas no momento do registro**. Nao existe tela para criar uma segunda organizacao depois de logado.
-
-Para ter acesso a outra organizacao, o caminho e ser **convidado** por um admin dessa org.
+O registro cria a primeira organizacao. Para criar outra, use **Criar nova organizacao** no seletor do topo. Para entrar em uma organizacao existente, aceite o convite de um administrador dela.
 
 ### Como convidar membros
 
@@ -53,9 +51,7 @@ Para ter acesso a outra organizacao, o caminho e ser **convidado** por um admin 
 
 ### Como alternar entre organizacoes
 
-Se o usuario pertence a 2+ organizacoes, um seletor aparece automaticamente no top bar (icone de pessoa). Ao clicar em outra org, a pagina recarrega no contexto da nova organizacao.
-
-Se o usuario tem apenas 1 organizacao, o seletor nao aparece.
+No topo, abra o seletor com o nome da organizacao atual, ao lado do seletor de perfil. Selecione uma das organizacoes das quais sua conta e membro. A pagina recarrega no contexto da organizacao escolhida.
 
 ### Roles da organizacao
 
