@@ -13,7 +13,16 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <html>
       <head>
-        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link
+          rel="icon"
+          href="/branding/mali-icon.svg"
+          type="image/svg+xml"
+          sizes="any"
+        />
+        <link
+          rel="apple-touch-icon"
+          href="/branding/mali-apple-touch-icon.png"
+        />
       </head>
       <body
         className={clsx(jakartaSans.className, 'dark text-primary !bg-primary')}

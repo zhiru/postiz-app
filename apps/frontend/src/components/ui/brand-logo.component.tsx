@@ -2,6 +2,11 @@
 import { ReactNode, useState, useEffect, useRef } from 'react';
 import { useBranding } from '@gitroom/frontend/hooks/use-branding.hook';
 
+const MALI_ICON = '/branding/mali-icon.svg';
+const MALI_LOGO = '/branding/mali-logo.webp';
+const MALI_SITE_LOGO = 'https://grupomali.com.br/_astro/mali-logo.OG1t1RNJ_ZdEBSq.webp';
+const isMali = (name?: string) => name?.trim().toLowerCase() === 'mali posts';
+
 export const BrandLogo = ({
   children,
   compact = false,
@@ -11,18 +16,26 @@ export const BrandLogo = ({
 }) => {
   const { data } = useBranding();
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  if (!data?.logoUrl || failedUrl === data.logoUrl) return <>{children}</>;
+  const defaultLogo = compact ? MALI_ICON : MALI_LOGO;
+  const configuredLogo = data?.logoUrl;
+  const logoUrl =
+    !configuredLogo ||
+    configuredLogo === MALI_SITE_LOGO ||
+    (compact && isMali(data?.name))
+      ? defaultLogo
+      : configuredLogo;
+  if (failedUrl === logoUrl) return <>{children}</>;
   return (
     <img
-      src={data.logoUrl}
-      alt={data.name}
+      src={logoUrl}
+      alt={data?.name || 'Mali Posts'}
       referrerPolicy="no-referrer"
       className={
         compact
           ? 'w-[48px] h-[48px] object-contain'
           : 'w-[160px] h-[40px] object-contain'
       }
-      onError={() => setFailedUrl(data.logoUrl)}
+      onError={() => setFailedUrl(logoUrl)}
     />
   );
 };
@@ -36,7 +49,7 @@ export const BrandMetadata = (): null => {
       const state = titleState.current;
       if (document.title !== state.applied) state.source = document.title;
       const page = state.source.replace(
-        /^(?:Robô MultiPost|Postiz|Gitroom)(?=\s|$)\s*[-–—:]?\s*/,
+        /^(?:Robô MultiPost|Postiz|Gitroom|Mali Posts)(?=\s|$)\s*[-–—:]?\s*/,
         ''
       );
       const title = page ? `${data.name} ${page}` : data.name;
@@ -51,7 +64,10 @@ export const BrandMetadata = (): null => {
         document.head.appendChild(icon);
         icons.push(icon);
       }
-      const href = data.logoUrl || '/favicon.ico';
+      const href =
+        isMali(data.name) || !data.logoUrl || data.logoUrl === MALI_SITE_LOGO
+          ? MALI_ICON
+          : data.logoUrl;
       for (const icon of icons) {
         if (icon.getAttribute('href') !== href) {
           icon.removeAttribute('type');
