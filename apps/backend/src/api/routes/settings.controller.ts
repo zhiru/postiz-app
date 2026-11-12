@@ -18,6 +18,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { KnowledgeService } from '@gitroom/nestjs-libraries/database/prisma/knowledge/knowledge.service';
+import { getOrgRole } from '@gitroom/nestjs-libraries/user/org.role';
 import { ProfileManage } from '@gitroom/nestjs-libraries/services/auth/profile-access/profile-access.decorators';
 
 @ApiTags('Settings')
@@ -49,7 +50,11 @@ export class SettingsController {
     @GetUserFromRequest() user: User,
     @Body() body: AddTeamMemberDto
   ) {
-    return this._organizationService.inviteTeamMember(org.id, body);
+    return this._organizationService.inviteTeamMember(
+      org.id,
+      body,
+      getOrgRole(org)
+    );
   }
 
   @Post('/team/add')
