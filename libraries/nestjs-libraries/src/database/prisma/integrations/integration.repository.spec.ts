@@ -40,7 +40,8 @@ describe('IntegrationRepository (B1 Etapa 2 - criptografia na escrita)', () => {
       {} as any,
       {} as any,
       {} as any,
-      encryption
+      encryption,
+      {} as any
     );
   });
 
@@ -140,7 +141,7 @@ describe('IntegrationRepository (B1 Etapa 2 - criptografia na escrita)', () => {
     it('keeps the existing channel id and copies the fresh scoped login without double encryption', async () => {
       const posts = createPrismaRepositoryMock('post');
       (posts.model.post as any).updateMany = jest.fn().mockResolvedValue({ count: 0 });
-      repo = new IntegrationRepository(prismaMock as any, posts as any, {} as any, {} as any, {} as any, {} as any, encryption);
+      repo = new IntegrationRepository(prismaMock as any, posts as any, {} as any, {} as any, {} as any, {} as any, encryption, {} as any);
       prismaMock.model.integration.findUnique.mockResolvedValue({id: 'existing-channel', profileId: 'prof-1'} as any);
       prismaMock.model.integration.findFirst.mockResolvedValue({rootInternalId: 'fresh-login', refreshToken: `${TOKEN_ENC_PREFIX}FRESH`, tokenExpiration: new Date('2027-01-01')} as any);
       await repo.updateIntegration('temporary-login', {organizationId: 'org-1', profileId: 'prof-1', internalId: 'page-1', token: 'NEWACCESS'});

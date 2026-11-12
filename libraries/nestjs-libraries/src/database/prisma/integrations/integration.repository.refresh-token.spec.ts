@@ -17,7 +17,8 @@ describe('integration refresh token preservation', () => {
       {} as any,
       {} as any,
       {} as any,
-      { encrypt: (value: string) => `cipher:${value}` } as any
+      { encrypt: (value: string) => `cipher:${value}` } as any,
+      {} as any
     );
     return { model, repository };
   };
