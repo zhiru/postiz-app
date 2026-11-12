@@ -34,6 +34,8 @@ import { ModalWrapperComponent } from '@gitroom/frontend/components/new-launch/m
 import copy from 'copy-to-clipboard';
 import { Input } from '@gitroom/react/form/input';
 import { Button } from '@gitroom/react/form/button';
+import { TransferProfileModal } from '@gitroom/frontend/components/launches/menu/transfer.profile.modal';
+import { useUser } from '@gitroom/frontend/components/layout/user.context';
 
 const RenameChannelModal: FC<{
   name: string;
@@ -97,6 +99,8 @@ export const Menu: FC<{
   const t = useT();
   // Visualizador nao gerencia canais — só a acao de leitura "Copiar ID".
   const { canWrite } = useProfilePermissions();
+  const user = useUser();
+  const isOrgAdmin = user?.role === 'ADMIN' || user?.role === 'SUPERADMIN';
 
   const fetch = useFetch();
   const router = useRouter();
@@ -399,6 +403,22 @@ export const Menu: FC<{
     });
     setShow(false);
   }, [integrations, t]);
+  const transferProfile = useCallback(() => {
+    modal.openModal({
+      title: t('move_to_another_profile', 'Move to another profile'),
+      children: (close) => (
+        <TransferProfileModal
+          id={id}
+          close={close}
+          onSave={() => {
+            mutate();
+            reloadCalendarView();
+          }}
+        />
+      ),
+    });
+    setShow(false);
+  }, [id, t, mutate, reloadCalendarView]);
   const resetChannelName = useCallback(async () => {
     await fetch(`/integrations/${id}/custom-name`, {
       method: 'PUT',
@@ -682,6 +702,15 @@ export const Menu: FC<{
                     {t('reset_channel_name', 'Reset to original name')}
                   </div>
                 </div>
+              )}
+              {isOrgAdmin && (
+                <button
+                  type="button"
+                  className="flex gap-[12px] items-center py-[8px] px-[10px] text-[14px]"
+                  onClick={transferProfile}
+                >
+                  {t('move_to_another_profile', 'Move to another profile')}
+                </button>
               )}
               <div
                 className="flex gap-[12px] items-center py-[8px] px-[10px]"

@@ -2651,5 +2651,11 @@
   "instagram_tags_username_error": "Informe um usuário válido que ainda não esteja marcado nesta imagem.",
   "instagram_tags_add": "Adicionar pessoa",
   "instagram_tags_title": "Pessoas marcadas nas imagens",
-  "instagram_tags_description": "As marcações aparecem em cada imagem e não convidam colaboradores. Selecione uma pessoa e clique na imagem ou edite X/Y."
+  "instagram_tags_description": "As marcações aparecem em cada imagem e não convidam colaboradores. Selecione uma pessoa e clique na imagem ou edite X/Y.",
+  "move_to_another_profile": "Transferir para outro perfil",
+  "destination_profile": "Perfil de destino",
+  "select_profile": "Selecione um perfil",
+  "move_channel": "Transferir canal",
+  "channel_moved_profile": "Canal transferido",
+  "channel_move_profile_error": "Não foi possível transferir o canal"
 }
