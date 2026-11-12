@@ -695,6 +695,7 @@ export class IntegrationRepository {
           where: {
             orgId: org,
             name,
+            deletedAt: null,
           },
         })) ||
         (await this._customers.model.customer.create({
@@ -743,6 +744,8 @@ export class IntegrationRepository {
             customer: {
               connect: {
                 id: group,
+                orgId: org,
+                deletedAt: null,
               },
             },
           },

@@ -364,7 +364,6 @@ export const Menu: FC<{
         modal: 'md',
       },
       title: t('move_add_to_group', 'Move / Add to group'),
-      withCloseButton: false,
       closeOnEscape: true,
       closeOnClickOutside: true,
       children: (
@@ -373,7 +372,7 @@ export const Menu: FC<{
           integration={findIntegration}
           onClose={() => {
             mutate();
-            toast.show(t('customer_updated', 'Customer Updated'), 'success');
+            toast.show(t('customer_updated', 'Channel group updated'), 'success');
           }}
         />
       ),
