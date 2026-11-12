@@ -76,7 +76,7 @@ export class OrganizationService {
     userId: string,
     id: string,
     orgId: string,
-    role: 'USER' | 'ADMIN',
+    role: 'USER' | 'ADMIN' | 'SUPERADMIN',
     profileIds?: string[],
     profileRole?: ProfileRole
   ) {
@@ -164,7 +164,18 @@ export class OrganizationService {
     return this._organizationRepository.getOrgByCustomerId(customerId);
   }
 
-  async inviteTeamMember(orgId: string, body: AddTeamMemberDto) {
+  async inviteTeamMember(
+    orgId: string,
+    body: AddTeamMemberDto,
+    inviterRole?: Role
+  ) {
+    // Only a SUPERADMIN can hand out the SUPERADMIN role.
+    if (body.role === Role.SUPERADMIN && inviterRole !== Role.SUPERADMIN) {
+      throw new HttpException(
+        'Only a super admin can invite another super admin',
+        403
+      );
+    }
     // Perfis do convite precisam pertencer a esta org (payload vai assinado
     // no JWT e vira membership no aceite). Coletamos os nomes para o e-mail.
     const profileNames: string[] = [];

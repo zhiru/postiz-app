@@ -30,6 +30,11 @@ const roles = [
     value: 'ADMIN',
   },
 ];
+const superAdminRole = {
+  key: 'super_admin',
+  name: 'Super Admin',
+  value: 'SUPERADMIN',
+};
 const profileRoles = [
   { key: 'profile_role_owner', name: 'Owner', value: 'OWNER' },
   { key: 'profile_role_editor', name: 'Editor', value: 'EDITOR' },
@@ -38,6 +43,7 @@ const profileRoles = [
 ];
 export const AddMember = () => {
   const modals = useModals();
+  const user = useUser();
   const fetch = useFetch();
   const toast = useToaster();
   const t = useT();
@@ -142,7 +148,10 @@ export const AddMember = () => {
           )}
           <Select label={t('label_role', 'Role')} name="role">
             <option value="">{t('select_role', 'Select Role')}</option>
-            {roles.map((role) => (
+            {(user?.role === 'SUPERADMIN'
+              ? [...roles, superAdminRole]
+              : roles
+            ).map((role) => (
               <option key={role.value} value={role.value}>
                 {t(role.key, role.name)}
               </option>

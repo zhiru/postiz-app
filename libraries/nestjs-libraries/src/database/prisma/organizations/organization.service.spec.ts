@@ -227,6 +227,38 @@ describe('OrganizationService', () => {
       expect(profiles.getProfileById).not.toHaveBeenCalled();
     });
 
+    it('recusa convite de SUPERADMIN vindo de quem nao e SUPERADMIN', async () => {
+      await expect(
+        service.inviteTeamMember(
+          'org-1',
+          { email: 'a@b.com', role: 'SUPERADMIN', sendEmail: false } as any,
+          'ADMIN'
+        )
+      ).rejects.toMatchObject({ status: 403 });
+      await expect(
+        service.inviteTeamMember('org-1', {
+          email: 'a@b.com',
+          role: 'SUPERADMIN',
+          sendEmail: false,
+        } as any)
+      ).rejects.toMatchObject({ status: 403 });
+      expect(signSpy).not.toHaveBeenCalled();
+    });
+
+    it('SUPERADMIN convida outro SUPERADMIN sem exigir perfis', async () => {
+      const result = await service.inviteTeamMember(
+        'org-1',
+        { email: 'a@b.com', role: 'SUPERADMIN', sendEmail: false } as any,
+        'SUPERADMIN'
+      );
+
+      expect(result.url).toContain('/?org=');
+      expect(signSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ role: 'SUPERADMIN', orgId: 'org-1' })
+      );
+      expect(profiles.getProfileById).not.toHaveBeenCalled();
+    });
+
     it('envia o e-mail de convite traduzido no idioma da org', async () => {
       repo.getLanguage.mockResolvedValue({ language: 'en' });
 

@@ -432,7 +432,7 @@ export class OrganizationRepository {
     userId: string,
     id: string,
     orgId: string,
-    role: 'USER' | 'ADMIN'
+    role: 'USER' | 'ADMIN' | 'SUPERADMIN'
   ) {
     const checkIfInviteExists = await this._user.model.user.findFirst({
       where: {

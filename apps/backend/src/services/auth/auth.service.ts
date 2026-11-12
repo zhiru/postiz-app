@@ -45,7 +45,7 @@ export class AuthService {
       | {
           email?: string;
           orgId: string;
-          role: 'USER' | 'ADMIN';
+          role: 'USER' | 'ADMIN' | 'SUPERADMIN';
           id: string;
           profileIds?: string[];
           profileRole?: 'MANAGER' | 'EDITOR' | 'VIEWER';
@@ -242,7 +242,7 @@ export class AuthService {
 
       return getOrg as {
         email: string;
-        role: 'USER' | 'ADMIN';
+        role: 'USER' | 'ADMIN' | 'SUPERADMIN';
         orgId: string;
         id: string;
         profileIds?: string[];
@@ -264,7 +264,7 @@ export class AuthService {
       | {
           email?: string;
           orgId: string;
-          role: 'USER' | 'ADMIN';
+          role: 'USER' | 'ADMIN' | 'SUPERADMIN';
           id: string;
           profileIds?: string[];
           profileRole?: 'MANAGER' | 'EDITOR' | 'VIEWER';
@@ -511,7 +511,7 @@ export class AuthService {
     addToOrg?: boolean | {
       email?: string;
       orgId: string;
-      role: 'USER' | 'ADMIN';
+      role: 'USER' | 'ADMIN' | 'SUPERADMIN';
       id: string;
       profileIds?: string[];
       profileRole?: 'MANAGER' | 'EDITOR' | 'VIEWER';
