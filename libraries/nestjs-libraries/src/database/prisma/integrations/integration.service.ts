@@ -463,7 +463,7 @@ export class IntegrationService {
       (source?.instanceUrl || '') !== (target?.instanceUrl || '')
     ) {
       throw new HttpException(
-        'O perfil de destino usa outro app da rede; reconecte o canal la.',
+        'O perfil de destino usa outro app da rede; reconecte o canal lá.',
         HttpStatus.CONFLICT
       );
     }
