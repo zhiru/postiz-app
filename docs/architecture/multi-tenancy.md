@@ -63,6 +63,12 @@ No topo, abra o seletor com o nome da organizacao atual, ao lado do seletor de p
 
 ---
 
+### Grupos de canais no calendário
+
+Use **Mover / adicionar ao grupo** no menu do canal para escolher um grupo da
+organização ou digitar um nome novo. Grupos organizam a barra lateral do
+calendário. A associação preserva a conexão, os posts e as automações do canal.
+
 ## 3. Perfil (Profile)
 
 O perfil e um sub-tenant dentro da organizacao. Ele permite isolar recursos entre clientes ou marcas diferentes sem precisar criar organizacoes separadas.

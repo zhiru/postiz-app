@@ -460,3 +460,35 @@ describe('IntegrationRepository (B1 Etapa 2 - criptografia na escrita)', () => {
     });
   });
 });
+
+
+describe('IntegrationRepository channel groups', () => {
+  const integration = createPrismaRepositoryMock('integration');
+  const customer = createPrismaRepositoryMock('customer');
+  const repository = new IntegrationRepository(
+    integration as any, {} as any, {} as any, {} as any,
+    customer as any, {} as any, createMock<EncryptionService>()
+  );
+
+  it('uses a live group from the current organization when saving by name', async () => {
+    customer.model.customer.findFirst.mockResolvedValue({ id: 'group' } as any);
+    await repository.updateOnCustomerName('org', 'channel', 'Group');
+    expect(customer.model.customer.findFirst).toHaveBeenCalledWith({
+      where: { orgId: 'org', name: 'Group', deletedAt: null },
+    });
+    expect(integration.model.integration.update).toHaveBeenCalledWith({
+      where: { id: 'channel', organizationId: 'org' },
+      data: { customer: { connect: { id: 'group' } } },
+      select: { id: true },
+    });
+  });
+
+  it('scopes a drag to a live group in the same organization', async () => {
+    await repository.updateIntegrationGroup('org', 'channel', 'group');
+    expect(integration.model.integration.update).toHaveBeenLastCalledWith({
+      where: { id: 'channel', organizationId: 'org' },
+      data: { customer: { connect: { id: 'group', orgId: 'org', deletedAt: null } } },
+      select: { id: true },
+    });
+  });
+});

@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- O seletor de grupos do calendário lista os grupos da organização, informa quando a lista está vazia e distingue criar um grupo de selecionar um existente.
+
 - A tela de entrada pode carregar a logo e o favicon da Mali antes do login.
 
 - Corrige tela branca em `/settings`: o DTO de mídia carrega `reflect-metadata` antes dos decorators de `user_tags`, preservando a validação. Mali Posts usa wordmark e M oficiais locais; favicon inicial cobre app, provider e extension sem substituir marcas customizadas de outras instâncias.
