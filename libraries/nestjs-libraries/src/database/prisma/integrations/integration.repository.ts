@@ -1,4 +1,7 @@
-import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import {
+  PrismaRepository,
+  PrismaTransaction,
+} from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
 import { Injectable } from '@nestjs/common';
 import dayjs from 'dayjs';
 import { Integration, Prisma } from '@prisma/client';
@@ -21,7 +24,8 @@ export class IntegrationRepository {
     private _exisingPlugData: PrismaRepository<'exisingPlugData'>,
     private _customers: PrismaRepository<'customer'>,
     private _mentions: PrismaRepository<'mentions'>,
-    private _encryption: EncryptionService
+    private _encryption: EncryptionService,
+    private _transaction: PrismaTransaction
   ) {}
 
   private get shouldEncryptTokens(): boolean {
@@ -389,6 +393,47 @@ export class IntegrationRepository {
     return this._integration.model.integration.update({
       where: { id },
       data: { profileId },
+    });
+  }
+
+  // Move o canal e tudo que e escopado por perfil e ligado a ele, numa unica
+  // transacao. Midias, tags, webhooks e sets sao compartilhados entre canais
+  // e ficam no perfil de origem.
+  async transferToProfile(org: string, id: string, profileId: string) {
+    return this._transaction.model.$transaction(async (tx) => {
+      const profile = await tx.profile.findFirst({
+        where: { id: profileId, organizationId: org, deletedAt: null },
+        select: { id: true },
+      });
+      if (!profile) {
+        return { blocked: 'profile_not_found' as const };
+      }
+      // Regras de repost resolvem credenciais por rule.profileId; mover so o canal as deixaria incoerentes.
+      const repostRules = await tx.repostRule.count({
+        where: {
+          organizationId: org,
+          deletedAt: null,
+          OR: [
+            { sourceIntegrationId: id },
+            { destinations: { some: { integrationId: id } } },
+          ],
+        },
+      });
+      if (repostRules > 0) {
+        return { blocked: 'repost_rules' as const };
+      }
+      const where = { organizationId: org, integrationId: id };
+      const data = { profileId };
+      await tx.post.updateMany({ where, data });
+      await tx.postMetricSnapshot.updateMany({ where, data });
+      await tx.statusEvent.updateMany({ where, data });
+      await tx.flow.updateMany({ where, data });
+      const integration = await tx.integration.update({
+        select: { id: true },
+        where: { id, organizationId: org },
+        data,
+      });
+      return { id: integration.id };
     });
   }
 

@@ -2651,5 +2651,11 @@
   "instagram_tags_username_error": "Enter a valid username that is not already tagged on this image.",
   "instagram_tags_add": "Add person",
   "instagram_tags_title": "People tagged in images",
-  "instagram_tags_description": "Tags appear on each image and do not invite collaborators. Select a person, then click the image or edit X/Y."
+  "instagram_tags_description": "Tags appear on each image and do not invite collaborators. Select a person, then click the image or edit X/Y.",
+  "move_to_another_profile": "Move to another profile",
+  "destination_profile": "Destination profile",
+  "select_profile": "Select a profile",
+  "move_channel": "Move channel",
+  "channel_moved_profile": "Channel moved",
+  "channel_move_profile_error": "Could not move the channel"
 }

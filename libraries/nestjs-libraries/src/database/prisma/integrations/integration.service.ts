@@ -428,6 +428,64 @@ export class IntegrationService {
     }
   }
 
+  async transferToProfile(org: string, id: string, profileId: string) {
+    const integration = await this._integrationRepository.getIntegrationById(
+      org,
+      id
+    );
+    if (!integration) {
+      throw new HttpException('Integration not found', HttpStatus.NOT_FOUND);
+    }
+    if (integration.profileId === profileId) {
+      throw new HttpException(
+        'Channel already belongs to this profile',
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    // O refresh resolve client_id/secret pelo perfil do canal: o refresh_token
+    // so vale com o mesmo app OAuth que o emitiu. Compara sem expor valores.
+    const [source, target] = await Promise.all([
+      this._integrationManager.getProviderCredentials(
+        integration.providerIdentifier,
+        org,
+        integration.profileId || undefined
+      ),
+      this._integrationManager.getProviderCredentials(
+        integration.providerIdentifier,
+        org,
+        profileId
+      ),
+    ]);
+    if (
+      (source?.clientId || '') !== (target?.clientId || '') ||
+      (source?.clientSecret || '') !== (target?.clientSecret || '') ||
+      (source?.instanceUrl || '') !== (target?.instanceUrl || '')
+    ) {
+      throw new HttpException(
+        'O perfil de destino usa outro app da rede; reconecte o canal lá.',
+        HttpStatus.CONFLICT
+      );
+    }
+
+    const result = await this._integrationRepository.transferToProfile(
+      org,
+      id,
+      profileId
+    );
+    if ('blocked' in result) {
+      throw new HttpException(
+        result.blocked === 'profile_not_found'
+          ? 'Profile not found'
+          : 'Remova as regras de repost deste canal antes de mover para outro perfil.',
+        result.blocked === 'profile_not_found'
+          ? HttpStatus.NOT_FOUND
+          : HttpStatus.CONFLICT
+      );
+    }
+    return result;
+  }
+
   async disableChannel(org: string, id: string) {
     return this._integrationRepository.disableChannel(org, id);
   }
