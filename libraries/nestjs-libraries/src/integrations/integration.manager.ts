@@ -160,6 +160,7 @@ const ENV_MAPPING: Record<string, Record<string, string>> = {
 // (e.g., instagram → facebook, since they share the same OAuth app)
 const CREDENTIAL_ALIAS: Record<string, string> = {
   instagram: 'facebook',
+  'instagram-standalone': 'facebook',
   threads: 'facebook',
   'linkedin-page': 'linkedin',
   x: 'twitter',
@@ -232,7 +233,14 @@ export class IntegrationManager {
         credentialKey,
         profileId
       );
-      if (dbCredentials) {
+      if (provider === 'instagram-standalone') {
+        if (dbCredentials?.instagramAppId && dbCredentials.instagramAppSecret) {
+          return {
+            clientId: dbCredentials.instagramAppId,
+            clientSecret: dbCredentials.instagramAppSecret,
+          };
+        }
+      } else if (dbCredentials) {
         return dbCredentials;
       }
     }

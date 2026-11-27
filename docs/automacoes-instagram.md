@@ -128,6 +128,8 @@ O Robo MultiPost oferece dois canais Instagram na tela de conexao:
 | **Instagram (Standalone)** | Recomendado. Conta IG Business com login direto no Instagram | **Sim** — via Instagram Login API (`graph.instagram.com`) com Standard Access |
 | **Instagram (Facebook Business)** | Conta IG vinculada a uma Page do Facebook e gerenciada pelo Business Manager | Nao — exige Advanced Access a `instagram_manage_messages` (App Review completo) |
 
+Para o login direto, configure o ID e o segredo do produto Instagram Login nas credenciais do perfil ou em `INSTAGRAM_APP_ID` e `INSTAGRAM_APP_SECRET` da instância. No app da Meta, autorize o endereço do Mali Posts terminado em `/integrations/social/instagram-standalone`. Se o login pelo Facebook Business falhar por permissões, confira os nomes exibidos pelo Mali Posts.
+
 > **Para instancias de alunos/self-hosted**: use sempre **Instagram (Standalone)**. A Meta nao exige App Review para o campo `is_user_follow_business` no fluxo Instagram Login, entao o follow gate em automacoes de comentario funciona imediatamente apos a conexao. Ja existia conectado via "Instagram (Facebook Business)"? Reconecte o perfil escolhendo **Instagram (Standalone)** para ativar o follow gate.
 
 ---

@@ -280,6 +280,31 @@ describe('InstagramProvider.getMediaMetadata', () => {
 
   // Garante que erros do Meta no token exchange virem mensagens explicitas
   // em vez de TypeError obscuro ("Cannot read properties of undefined").
+  it('identifies permissions declined or omitted by Facebook Business', async () => {
+    const missing = ['instagram_manage_messages', 'business_management'];
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({ json: async () => ({ access_token: 'short' }) })
+      .mockResolvedValueOnce({ json: async () => ({ access_token: 'long' }) })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          data: provider.scopes
+            .filter((permission) => permission !== 'business_management')
+            .map((permission) => ({
+              permission,
+              status: missing.includes(permission) ? 'declined' : 'granted',
+            })),
+        }),
+      });
+    global.fetch = fetchMock as any;
+
+    await expect(
+      provider.authenticate({ code: 'CODE', codeVerifier: 'CV', refresh: '' })
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/business_management, instagram_manage_messages$/),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('authenticate() lanca mensagem explicita quando token exchange retorna erro', async () => {
     const fetchMock = jest.fn().mockResolvedValueOnce({
       json: async () => ({
