@@ -120,7 +120,10 @@ const linkedinCreds = {
 const ENV_MAPPING: Record<string, Record<string, string>> = {
   facebook: facebookCreds,
   instagram: facebookCreds,
-  'instagram-standalone': facebookCreds,
+  'instagram-standalone': {
+    clientId: 'INSTAGRAM_APP_ID',
+    clientSecret: 'INSTAGRAM_APP_SECRET',
+  },
   threads: facebookCreds,
   tiktok: {
     clientId: 'TIKTOK_CLIENT_ID',
@@ -157,7 +160,6 @@ const ENV_MAPPING: Record<string, Record<string, string>> = {
 // (e.g., instagram → facebook, since they share the same OAuth app)
 const CREDENTIAL_ALIAS: Record<string, string> = {
   instagram: 'facebook',
-  'instagram-standalone': 'facebook',
   threads: 'facebook',
   'linkedin-page': 'linkedin',
   x: 'twitter',
