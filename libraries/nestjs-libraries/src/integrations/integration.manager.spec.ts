@@ -13,6 +13,34 @@ import { IntegrationManager, socialIntegrationList } from './integration.manager
 import { buildTemporalWorkers } from '../temporal/temporal.module';
 
 describe('IntegrationManager.getProviderCredentials', () => {
+  it('uses the Instagram product pair for direct login and the Facebook pair for Business login', async () => {
+    const credentials = {
+      clientId: 'facebook-id',
+      clientSecret: 'facebook-secret',
+      instagramAppId: 'instagram-id',
+      instagramAppSecret: 'instagram-secret',
+    };
+    const credentialService = {
+      getRawShared: jest.fn().mockResolvedValue(credentials),
+    };
+    const manager = new IntegrationManager(credentialService as any);
+
+    await expect(
+      manager.getProviderCredentials('instagram-standalone', 'org-1', 'profile-1')
+    ).resolves.toEqual({
+      clientId: 'instagram-id',
+      clientSecret: 'instagram-secret',
+    });
+    await expect(
+      manager.getProviderCredentials('instagram', 'org-1', 'profile-1')
+    ).resolves.toEqual(credentials);
+    expect(credentialService.getRawShared).toHaveBeenCalledWith(
+      'org-1',
+      'facebook',
+      'profile-1'
+    );
+  });
+
   it('reutiliza a credencial Google do YouTube no GMB', async () => {
     const credentialService = {
       getRawShared: jest

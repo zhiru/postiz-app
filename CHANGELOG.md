@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- O login direto do Instagram usa as credenciais do produto Instagram Login. O login pelo Facebook Business exibe as permissões que a Meta deixou de conceder.
+
 - O seletor de grupos do calendário lista os grupos da organização, informa quando a lista está vazia e distingue criar um grupo de selecionar um existente.
 - Administradores podem transferir um canal para outro perfil da mesma organização pelo menu do canal no calendário. Posts, métricas, eventos de status e automações do canal acompanham a transferência; a ação é recusada se o perfil de destino usa outro app da rede ou se o canal tem regras de repost ativas.
 

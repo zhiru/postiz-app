@@ -19,6 +19,7 @@ import dayjs from 'dayjs';
 import {
   RefreshToken,
   SocialAbstract,
+  NotEnoughScopes,
   BadBody,
   Disconnect,
   ValidityMedia,
@@ -642,7 +643,12 @@ export class InstagramProvider
     const permissions = data
       .filter((d: any) => d.status === 'granted')
       .map((p: any) => p.permission);
-    this.checkScopes(this.scopes, permissions);
+    const missing = this.scopes.filter((scope) => !permissions.includes(scope));
+    if (missing.length) {
+      throw new NotEnoughScopes(
+        `Instagram (Facebook Business) | Permissões não concedidas pela Meta: ${missing.join(', ')}`
+      );
+    }
 
     const { id, name, picture } = await (
       await fetchWithTimeout(

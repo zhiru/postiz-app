@@ -120,7 +120,10 @@ const linkedinCreds = {
 const ENV_MAPPING: Record<string, Record<string, string>> = {
   facebook: facebookCreds,
   instagram: facebookCreds,
-  'instagram-standalone': facebookCreds,
+  'instagram-standalone': {
+    clientId: 'INSTAGRAM_APP_ID',
+    clientSecret: 'INSTAGRAM_APP_SECRET',
+  },
   threads: facebookCreds,
   tiktok: {
     clientId: 'TIKTOK_CLIENT_ID',
@@ -230,7 +233,14 @@ export class IntegrationManager {
         credentialKey,
         profileId
       );
-      if (dbCredentials) {
+      if (provider === 'instagram-standalone') {
+        if (dbCredentials?.instagramAppId && dbCredentials.instagramAppSecret) {
+          return {
+            clientId: dbCredentials.instagramAppId,
+            clientSecret: dbCredentials.instagramAppSecret,
+          };
+        }
+      } else if (dbCredentials) {
         return dbCredentials;
       }
     }
