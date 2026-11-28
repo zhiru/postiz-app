@@ -130,6 +130,13 @@ const InstagramCollaborators: FC<{
           />
         </div>
       )}
+
+      <div className="mt-[18px]">
+        <Checkbox
+          label={t('label_made_with_ai', 'Made with AI')}
+          {...register('made_with_ai')}
+        />
+      </div>
     </>
   );
 };

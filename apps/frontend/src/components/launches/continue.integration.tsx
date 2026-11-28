@@ -10,6 +10,7 @@ import { continueProviderList } from '@gitroom/frontend/components/new-launch/pr
 import { IntegrationContext } from '@gitroom/frontend/components/launches/helpers/use.integration';
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
+import { ToolTip } from '@gitroom/frontend/components/layout/top.tip';
 
 import {
   AccountConnectionResult,
@@ -67,7 +68,9 @@ export const ContinueIntegration: FC<{
       if (returnURL) {
         // If returnURL exists, always redirect to it with the path params
         const params = path.includes('?') ? path.split('?')[1] : '';
-        push(params ? `${returnURL}?${params}` : returnURL);
+        // a returnURL of the public API may carry its own query string
+        const separator = returnURL.includes('?') ? '&' : '?';
+        push(params ? `${returnURL}${separator}${params}` : returnURL);
       } else if (logged) {
         // If logged in without returnURL, use normal navigation
         push(path);
@@ -308,10 +311,23 @@ export const ContinueIntegration: FC<{
             }`
           : `/integrations/public/provider/${twoStepState.integrationId}/connect`;
 
-        const response = await fetch(endpoint, {
+        const body = JSON.stringify({ ...modifiedParams, ...data });
+        let response = await fetch(endpoint, {
           method: 'POST',
-          body: JSON.stringify({ ...modifiedParams, ...data }),
+          body,
         });
+
+        // Logged into another organization than the one the channel is added
+        // to (a connect link or an invite link): save it by the connection state
+        if (logged && response.status === HttpStatusCode.NotFound) {
+          response = await fetch(
+            `/integrations/public/provider/${twoStepState.integrationId}/connect`,
+            {
+              method: 'POST',
+              body,
+            }
+          );
+        }
 
         if (
           response.status !== HttpStatusCode.Ok &&
@@ -431,6 +447,7 @@ export const ContinueIntegration: FC<{
   if (twoStepState && Provider && !error) {
     return (
       <div className="flex flex-1 items-center justify-center text-white relative overflow-hidden">
+        <ToolTip />
         {/* Background gradient decoration */}
         <div className="absolute inset-0 opacity-30">
           <div className="absolute top-[20%] left-[10%] w-[300px] h-[300px] bg-[#612BD3] rounded-full blur-[120px]" />

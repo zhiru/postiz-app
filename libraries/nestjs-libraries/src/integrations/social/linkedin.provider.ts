@@ -90,7 +90,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   override maxConcurrentJob = 2;
 
   refreshWait = true;
-
+  refreshRepeat = true;
   editor = 'normal' as const;
 
   dto = LinkedinDto;

@@ -160,6 +160,7 @@ export interface Integrations {
   name: string;
   originalName?: string;
   id: string;
+  internalId?: string;
   disabled?: boolean;
   inBetweenSteps: boolean;
   editor: 'none' | 'normal' | 'markdown' | 'html';

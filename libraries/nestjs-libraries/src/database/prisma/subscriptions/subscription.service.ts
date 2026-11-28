@@ -398,6 +398,62 @@ export class SubscriptionService {
     return { deleted: count };
   }
 
+  async grantCredits(
+    organizationId: string,
+    credits: { ai_images: number; ai_videos: number; clipping_minutes?: number }
+  ) {
+    const subscription = await this._subscriptionRepository.getSubscription(
+      organizationId
+    );
+
+    if (!subscription) {
+      return null;
+    }
+
+    const grants = (['ai_images', 'ai_videos', 'clipping_minutes'] as const)
+      .filter((type) => (credits[type] || 0) > 0)
+      .map((type) => ({ type, credits: credits[type] || 0 }));
+
+    if (grants.length) {
+      await this._subscriptionRepository.grantCredits(organizationId, grants);
+    }
+
+    return this.getGrantedCredits(organizationId);
+  }
+
+  async getGrantedCredits(organizationId: string) {
+    const subscription = await this._subscriptionRepository.getSubscription(
+      organizationId
+    );
+
+    if (!subscription) {
+      return {
+        ai_images: 0,
+        ai_videos: 0,
+        clipping_minutes: 0,
+        periodStart: null,
+      };
+    }
+
+    const from = this.currentPeriodStart(subscription.createdAt);
+    const [ai_images, ai_videos, clipping_minutes] = await Promise.all(
+      (['ai_images', 'ai_videos', 'clipping_minutes'] as const).map((type) =>
+        this._subscriptionRepository.getGrantedCreditsFrom(
+          organizationId,
+          from,
+          type
+        )
+      )
+    );
+
+    return {
+      ai_images,
+      ai_videos,
+      clipping_minutes,
+      periodStart: from.toDate(),
+    };
+  }
+
   async checkCredits(
     organization: Organization,
     checkType = 'ai_images',

@@ -83,7 +83,7 @@ import {
 import { randomBytes } from 'crypto';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import {
-  ssrfSafeDispatcher,
+  getSsrfSafeDispatcher,
   ssrfSafeFetch,
 } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import {
@@ -410,7 +410,7 @@ export class MediaService {
     try {
       response = await fetch(url, {
         // @ts-ignore — undici option, not in lib.dom fetch types
-        dispatcher: ssrfSafeDispatcher,
+        dispatcher: getSsrfSafeDispatcher(),
         signal: AbortSignal.timeout(30_000),
       });
     } catch (err) {
@@ -539,7 +539,7 @@ export class MediaService {
       let input: string | Buffer = local;
       if (!input) {
         const response = await fetch(media.path, {
-          dispatcher: ssrfSafeDispatcher,
+          dispatcher: getSsrfSafeDispatcher(),
           signal: AbortSignal.timeout(15000),
         } as any);
         if (!response.ok)
@@ -1297,7 +1297,7 @@ export class MediaService {
 
     if (!video.trial && org.isTrailing && process.env.STRIPE_PUBLISHABLE_KEY) {
       throw new HttpException(
-        `This video is not available in trial mode. To use it now, open ${process.env.FRONTEND_URL}/billing and click "Finish trial" (this charges the plan immediately)`,
+        `This video is not available in trial mode. To use it now, open ${process.env.FRONTEND_URL}/billing and click "End trial and pay now" (this charges the plan immediately). Only an admin or the super admin of the organization can end the trial and pay`,
         406
       );
     }
@@ -1325,7 +1325,7 @@ export class MediaService {
 
     if (!video.trial && org.isTrailing && process.env.STRIPE_PUBLISHABLE_KEY) {
       throw new HttpException(
-        `This video is not available in trial mode. To use it now, open ${process.env.FRONTEND_URL}/billing and click "Finish trial" (this charges the plan immediately)`,
+        `This video is not available in trial mode. To use it now, open ${process.env.FRONTEND_URL}/billing and click "End trial and pay now" (this charges the plan immediately). Only an admin or the super admin of the organization can end the trial and pay`,
         406
       );
     }

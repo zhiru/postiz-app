@@ -4,7 +4,10 @@ import { useMoveToIntegrationListener } from '@gitroom/frontend/components/launc
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import clsx from 'clsx';
 import SafeImage from '@gitroom/react/helpers/safe.image';
-import { PlatformIconBadge } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
+import {
+  isBrandMark,
+  PlatformIcon,
+} from '@gitroom/frontend/components/ui/platform.icon.component';
 import { useCopilotAction, useCopilotReadable } from '@copilotkit/react-core';
 import { useStateCallback } from '@gitroom/react/helpers/use.state.callback';
 import { timer } from '@gitroom/helpers/utils/timer';
@@ -240,22 +243,38 @@ export const PickPlatforms: FC<{
                           'cursor-pointer relative w-[34px] h-[34px] rounded-full flex justify-center items-center bg-fifth filter transition-all duration-500',
                           selectedAccounts.findIndex(
                             (p) => p.id === integration.id
-                          ) === -1
-                            ? 'opacity-40'
-                            : ''
+                          ) === -1 &&
+                            !isBrandMark(integration.identifier) &&
+                            'opacity-40'
                         )}
                       >
+                        {/* a brand mark can't be dimmed with its channel: the
+                            avatar is instead (see isBrandMark) */}
                         <SafeImage
                           src={integration.picture || '/no-picture.jpg'}
-                          className="rounded-full"
+                          className={clsx(
+                            'rounded-full',
+                            selectedAccounts.findIndex(
+                              (p) => p.id === integration.id
+                            ) === -1 &&
+                              isBrandMark(integration.identifier) &&
+                              'opacity-40'
+                          )}
                           alt={integration.identifier}
                           width={32}
                           height={32}
                         />
-                        <PlatformIconBadge
+                        <PlatformIcon
                           identifier={integration.identifier}
                           size={20}
-                          className="rounded-full absolute z-10 -bottom-[5px] -end-[5px] border border-fifth"
+                          inactive={
+                            selectedAccounts.findIndex(
+                              (p) => p.id === integration.id
+                            ) === -1
+                          }
+                          className="absolute z-10 -bottom-[5px] -end-[5px]"
+                          iconClassName="rounded-full border border-fifth"
+                          markClassName="bg-newBgColorInner"
                         />
                       </div>
                     </div>
@@ -273,7 +292,15 @@ export const PickPlatforms: FC<{
                         )}
                       >
                         <div className="flex items-center justify-center gap-[10px]">
-                          <div className="relative">
+                          {/* a brand mark is bigger than this avatar: it sits
+                              next to it, on the pill (see isBrandMark) */}
+                          <div
+                            className={clsx(
+                              'relative',
+                              isBrandMark(integration.identifier) &&
+                                'flex items-center gap-[6px]'
+                            )}
+                          >
                             <img
                               src={integration.picture || '/no-picture.jpg'}
                               className="rounded-full"
@@ -281,10 +308,14 @@ export const PickPlatforms: FC<{
                               width={24}
                               height={24}
                             />
-                            <PlatformIconBadge
+                            <PlatformIcon
                               identifier={integration.identifier}
                               size={15}
-                              className="rounded-full absolute z-10 -bottom-[5px] -end-[5px] border border-fifth"
+                              className={clsx(
+                                !isBrandMark(integration.identifier) &&
+                                  'absolute z-10 -bottom-[5px] -end-[5px]'
+                              )}
+                              iconClassName="rounded-full border border-fifth"
                             />
                           </div>
                           <div>

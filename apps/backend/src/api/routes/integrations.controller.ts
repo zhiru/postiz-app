@@ -1,5 +1,6 @@
 import { PermissionsService } from '@gitroom/backend/services/auth/permissions/permissions.service';
 import { ConnectAccountsDto } from '@gitroom/nestjs-libraries/dtos/integrations/connect.accounts.dto';
+import dayjs from 'dayjs';
 import {
   Body,
   Controller,
@@ -238,9 +239,13 @@ export class IntegrationsController {
             supportsPostsSync: !!findIntegration?.listPublishedPosts,
             picture: p.picture || '/no-picture.jpg',
             identifier: p.providerIdentifier,
-            inBetweenSteps: p.inBetweenSteps,
+            inBetweenSteps: this._integrationService.needsPageSelection(
+              p,
+              findIntegration
+            ),
             refreshNeeded: p.refreshNeeded,
             isCustomFields: !!findIntegration.customFields,
+            isChromeExtension: !!findIntegration.isChromeExtension,
             ...(findIntegration.customFields
               ? { customFields: await findIntegration.customFields() }
               : {}),
@@ -607,6 +612,31 @@ export class IntegrationsController {
     );
     if (!integrationProvider) {
       throw new Error('Invalid provider');
+    }
+
+    // Only for a channel that still has to select its page: other channels
+    // post fine past the stored expiration, a failed refresh would flag them.
+    if (
+      this._integrationService.needsPageSelection(
+        getIntegration,
+        integrationProvider
+      ) &&
+      dayjs(getIntegration.tokenExpiration).isBefore(dayjs())
+    ) {
+      const data = await this._refreshIntegrationService.refresh(
+        getIntegration
+      );
+
+      if (!data) {
+        return false;
+      }
+
+      getIntegration.token = data.accessToken;
+      getIntegration.refreshToken = data.refreshToken;
+
+      if (integrationProvider.refreshWait) {
+        await timer(10000);
+      }
     }
 
     if (

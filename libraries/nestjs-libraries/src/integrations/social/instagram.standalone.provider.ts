@@ -27,7 +27,10 @@ import { META_GRAPH_API_VERSION } from '@gitroom/nestjs-libraries/integrations/s
 const instagramProvider = new InstagramProvider();
 
 @Rules(
-  "Instagram should have at least one attachment, if it's a story, it can have only one picture"
+  [
+    "Instagram should have at least one attachment, if it's a story, it can have only one picture.",
+    'If the content of the post (text, pictures or video) was made with AI, ask the user if they want to mark it as AI, and set made_with_ai to true only when they say yes.',
+  ].join(' ')
 )
 export class InstagramStandaloneProvider
   extends SocialAbstract
@@ -179,7 +182,19 @@ export class InstagramStandaloneProvider
       )
     ).json();
 
-    this.checkScopes(this.scopes, getAccessToken.permissions);
+    try {
+      this.checkScopes(this.scopes, getAccessToken.permissions);
+    } catch (err) {
+      const { access_token: shortLivedToken, ...exchange } = getAccessToken;
+      console.error(
+        'Instagram standalone scope check failed:',
+        JSON.stringify({
+          ...exchange,
+          longLived: { hasToken: !!access_token, expires_in, ...all },
+        })
+      );
+      throw err;
+    }
 
     const { user_id, name, username, profile_picture_url } = await (
       await fetch(

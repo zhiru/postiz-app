@@ -7,6 +7,7 @@ import { Button } from '@gitroom/react/form/button';
 import clsx from 'clsx';
 import { useVideo } from '@gitroom/frontend/components/videos/video.context.wrapper';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { Textarea } from '@gitroom/react/form/textarea';
 
 export interface Voices {
   voices: Voice[];
@@ -168,7 +169,24 @@ const VoiceSelector: FC = () => {
 };
 
 const ImageSlidesComponent = () => {
-  return <VoiceSelector />;
+  const { register, formState } = useFormContext();
+  const { value } = useVideo();
+
+  return (
+    <div>
+      <Textarea
+        label="Prompt"
+        name="prompt"
+        {...register('prompt', {
+          required: true,
+          minLength: 5,
+          value,
+        })}
+        error={formState?.errors?.prompt?.message}
+      />
+      <VoiceSelector />
+    </div>
+  );
 };
 
 videoWrapper('image-text-slides', ImageSlidesComponent);

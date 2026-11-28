@@ -185,6 +185,22 @@ export class IntegrationService {
     return this._integrationRepository.getIntegrationsList(org, profileId);
   }
 
+  needsPageSelection(
+    integration: Pick<
+      Integration,
+      'inBetweenSteps' | 'internalId' | 'rootInternalId'
+    >,
+    provider: SocialProvider
+  ) {
+    return (
+      !!provider?.pageRequiredToPost &&
+      (integration.inBetweenSteps ||
+        (!!integration.rootInternalId &&
+          integration.internalId === integration.rootInternalId &&
+          !provider.isPageId?.(integration.internalId)))
+    );
+  }
+
   getIntegrationForOrder(id: string, order: string, user: string, org: string) {
     return this._integrationRepository.getIntegrationForOrder(
       id,

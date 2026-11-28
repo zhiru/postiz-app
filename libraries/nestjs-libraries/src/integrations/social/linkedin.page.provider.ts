@@ -247,6 +247,7 @@ export interface SocialActionsResponse {
   };
 }
 import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
+import { BadBody } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 
 @Rules(
   'LinkedIn can have maximum one attachment when selecting video, when choosing a carousel on LinkedIn minimum amount of attachment must be two, and only pictures, if uploading a video, LinkedIn can have only one attachment'
@@ -260,7 +261,7 @@ export class LinkedinPageProvider
   override name = 'LinkedIn Page';
 
   override isBetweenSteps = true;
-
+  pageRequiredToPost = true;
   override refreshWait = true;
 
   override maxConcurrentJob = 2;
@@ -427,6 +428,11 @@ export class LinkedinPageProvider
 
   async fetchPageInformation(accessToken: string, params: { page: string }) {
     const pageId = params.page;
+    // it goes into the url path: anything but an organization id (e.g.
+    // "../me") makes LinkedIn answer with another kind of id
+    if (!this.isPageId(String(pageId))) {
+      throw new Error('Invalid LinkedIn page');
+    }
     const data = await (
       await fetch(
         `https://api.linkedin.com/v2/organizations/${pageId}?projection=(id,localizedName,vanityName,logoV2(original~:playableStreams))`,
@@ -507,6 +513,12 @@ export class LinkedinPageProvider
       })
     ).json();
 
+    // without the member id every failed lookup would share one placeholder,
+    // and with it the tokens of every channel connected that way
+    if (!id) {
+      throw new Error('Could not load the LinkedIn profile');
+    }
+
     return {
       id: `p_${id}`,
       accessToken,
@@ -518,13 +530,50 @@ export class LinkedinPageProvider
     };
   }
 
+  // Organization ids are numeric, the member id and its placeholder are not.
+  isPageId(internalId: string) {
+    return /^\d+$/.test(internalId);
+  }
+
+  // A channel that never finished the page step still carries the member id
+  // (or its placeholder) from authenticate(), not an organization id.
+  private checkPageId(id: string, integration: Integration) {
+    if (integration?.inBetweenSteps || id.startsWith(`${this.identifier}_`)) {
+      throw new BadBody(
+        this.identifier,
+        '{}',
+        JSON.stringify({ id }),
+        'This channel is not linked to a LinkedIn page. Please finish connecting it and select a page.'
+      );
+    }
+  }
+
   override async post(
     id: string,
     accessToken: string,
     postDetails: PostDetails[],
     integration: Integration
   ): Promise<PostResponse[]> {
+    this.checkPageId(id, integration);
     return super.post(id, accessToken, postDetails, integration, 'company');
+  }
+
+  // checkPostStatus / finalizePost are inherited as-is: the company context
+  // travels inside pendingData (postType), set here once.
+  override async postPending(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    this.checkPageId(id, integration);
+    return super.postPending(
+      id,
+      accessToken,
+      postDetails,
+      integration,
+      'company'
+    );
   }
 
   override async comment(
@@ -947,21 +996,6 @@ export class LinkedinPageProvider
     reach: ['Page Views'],
     engagement: ['Clicks', 'Shares', 'Comments'],
   };
-
-  override async postPending(
-    id: string,
-    accessToken: string,
-    postDetails: PostDetails[],
-    integration: Integration
-  ): Promise<PostResponse[]> {
-    return super.postPending(
-      id,
-      accessToken,
-      postDetails,
-      integration,
-      'company'
-    );
-  }
 
   private async pageStatistics(
     id: string,
