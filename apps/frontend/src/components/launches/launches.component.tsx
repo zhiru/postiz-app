@@ -1,4 +1,5 @@
 'use client';
+import { CalendarTourButton } from './calendar.tour';
 import {
   CalendarWeekProvider,
   useCalendar,
@@ -871,7 +872,12 @@ export const LaunchesComponent = () => {
               </div>
             )}
           </div>
-          <Filters />
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+            <div className="min-w-0 flex-1 mobile:basis-full">
+              <Filters />
+            </div>
+            <CalendarTourButton />
+          </div>
           <div className="flex-1 flex">
             <Calendar />
           </div>

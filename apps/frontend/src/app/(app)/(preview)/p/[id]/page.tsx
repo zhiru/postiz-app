@@ -17,7 +17,7 @@ import { CopyClient } from '@gitroom/frontend/components/preview/copy.client';
 import { getT } from '@gitroom/react/translation/get.translation.service.backend';
 import { RenderPreviewDateClient } from '@gitroom/frontend/components/preview/render.preview.date.client';
 import { ReviewCommentsComponents } from '@gitroom/frontend/components/preview/review.comments.components';
-import { getPlatformIconPath } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
+import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 import { LogoTextComponent } from '@gitroom/frontend/components/ui/logo-text.component';
 import { PostEngagement } from '@gitroom/frontend/components/preview/post.engagement';
 import { CreationMethodBadge } from '@gitroom/frontend/components/launches/creation.method.badge';
@@ -104,10 +104,13 @@ export default async function Auth(props: {
                   <div>
                     <div className="flex shrink-0 rounded-full relative">
                       <div className="w-[50px] h-[50px] z-[20]">
-                        <img
-                          className="w-full h-full relative z-[20] bg-newBgColor aspect-square rounded-full"
+                        <ImageWithFallback
+                          className="w-full h-full relative z-[20] bg-newBgColor aspect-square rounded-full object-cover"
                           alt={post[0].integration.name}
-                          src={post[0].integration.picture}
+                          src={post[0].integration.picture || '/no-picture.jpg'}
+                          fallbackSrc="/no-picture.jpg"
+                          width={50}
+                          height={50}
                         />
                       </div>
                       <PlatformIcon

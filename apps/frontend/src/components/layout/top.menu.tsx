@@ -316,14 +316,15 @@ export const useMenuItem = () => {
   };
 };
 
-export const TopMenu: FC = () => {
+export const TopMenu: FC<{ onNavigate?: () => void }> = ({ onNavigate }) => {
+  const t = useT();
   const user = useUser();
   const { isViewer } = useProfilePermissions();
   const { firstMenu, secondMenu } = useMenuItem();
   const { isGeneral, billingEnabled } = useVariables();
   return (
-    <>
-      <div className="flex flex-1 flex-col minCustom:gap-[20px] custom:gap-[8px] blurMe">
+    <nav aria-label={t('navigation', 'Navigation')} className="flex flex-1 flex-col gap-[8px]">
+      <div className="flex flex-1 flex-col gap-[2px] blurMe">
         {
           // @ts-ignore
           user?.orgId &&
@@ -357,11 +358,12 @@ export const TopMenu: FC = () => {
                   icon={item.icon}
                   key={item.name}
                   onClick={item.onClick}
+                  onNavigate={onNavigate}
                 />
               ))
         }
       </div>
-      <div className="flex flex-col minCustom:gap-[20px] custom:gap-[8px] blurMe">
+      <div className="flex flex-col gap-[2px] border-t border-newTableBorder pt-[8px] blurMe">
         {secondMenu
           .filter((f) => {
             if (f.hide) {
@@ -390,9 +392,10 @@ export const TopMenu: FC = () => {
               icon={item.icon}
               key={item.name}
               onClick={item.onClick}
+              onNavigate={onNavigate}
             />
           ))}
       </div>
-    </>
+    </nav>
   );
 };
