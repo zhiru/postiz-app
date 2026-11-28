@@ -9,29 +9,41 @@ export const MenuItem: FC<{
   icon: ReactNode;
   path: string;
   onClick?: () => void;
-}> = ({ label, icon, path, onClick }) => {
+  onNavigate?: () => void;
+}> = ({ label, icon, path, onClick, onNavigate }) => {
   const currentPath = usePathname();
-  const isActive = currentPath.indexOf(path) === 0;
+  const isActive = currentPath === path || currentPath.startsWith(path + '/');
 
   const className = clsx(
-    'group w-full shrink-0 focus-visible:ring-2 focus-visible:ring-btnPrimary minCustom:h-[54px] custom:h-[44px] py-[8px] px-[6px] minCustom:gap-[4px] custom:gap-[2px] flex flex-col font-[600] items-center justify-center rounded-[12px] hover:text-textItemFocused hover:bg-boxFocused transition-colors',
-    isActive ? 'text-textItemFocused bg-boxFocused' : 'text-textItemBlur'
+    'relative flex min-h-[40px] w-full shrink-0 items-center gap-[9px] rounded-[8px] px-[10px] text-start text-[13px] transition-colors focus-visible:ring-2 focus-visible:ring-btnPrimary mobile:min-h-[44px]',
+    isActive
+      ? 'bg-boxHover font-semibold text-newTextColor before:absolute before:inset-y-[8px] before:start-0 before:w-[2px] before:rounded-full before:bg-btnPrimary'
+      : 'text-textItemBlur hover:bg-boxHover hover:text-newTextColor'
   );
 
   const inner = (
     <>
-      <div className="w-[24px] h-[24px] shrink-0 flex items-center justify-center [&_svg]:max-w-full [&_svg]:max-h-full">
+      <span
+        aria-hidden="true"
+        className="flex h-[18px] w-[18px] shrink-0 items-center justify-center [&_svg]:max-h-full [&_svg]:max-w-full"
+      >
         {icon}
-      </div>
-      <div className="custom:text-[9px] minCustom:text-[10px] leading-[1.1] text-center w-full truncate">
-        {label}
-      </div>
+      </span>
+      <span className="min-w-0 truncate">{label}</span>
     </>
   );
 
   if (onClick) {
     return (
-      <button onClick={onClick} title={label} className={className}>
+      <button
+        type="button"
+        onClick={() => {
+          onNavigate?.();
+          onClick();
+        }}
+        title={label}
+        className={className}
+      >
         {inner}
       </button>
     );
@@ -41,6 +53,7 @@ export const MenuItem: FC<{
     <Link
       prefetch={true}
       href={path}
+      onNavigate={onNavigate}
       title={label}
       aria-label={label}
       aria-current={isActive ? 'page' : undefined}

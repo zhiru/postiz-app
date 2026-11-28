@@ -1,6 +1,12 @@
 'use client';
 
-import React, { ReactNode, useCallback, useEffect, useState } from 'react';
+import React, {
+  ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Logo } from '@gitroom/frontend/components/new-layout/logo';
 import { jakartaSans } from '@gitroom/frontend/fonts/plus-jakarta-sans/plus.jakarta.sans.font';
 const ModeComponent = dynamic(
@@ -11,6 +17,7 @@ const ModeComponent = dynamic(
 );
 
 import clsx from 'clsx';
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import dynamic from 'next/dynamic';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
@@ -50,6 +57,7 @@ import { setUserTimezone } from '@gitroom/frontend/components/layout/set.timezon
 
 export const LayoutComponent = ({ children }: { children: ReactNode }) => {
   const fetch = useFetch();
+  const t = useT();
 
   const { backendUrl, billingEnabled, isGeneral } = useVariables();
 
@@ -57,9 +65,21 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const mobileMenu = useRef<HTMLDialogElement>(null);
+  const closeMenu = () => mobileMenu.current?.close();
+
   useEffect(() => {
-    setMenuOpen(false);
+    mobileMenu.current?.close();
   }, [pathname]);
+
+  useEffect(() => {
+    const mobileViewport = window.matchMedia('(max-width: 1025px)');
+    const closeOnDesktop = () => {
+      if (!mobileViewport.matches) mobileMenu.current?.close();
+    };
+    mobileViewport.addEventListener('change', closeOnDesktop);
+    return () => mobileViewport.removeEventListener('change', closeOnDesktop);
+  }, []);
   const load = useCallback(async (path: string) => {
     return await (await fetch(path)).json();
   }, []);
@@ -109,7 +129,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
             <ContinueProvider />
             <div
               className={clsx(
-                'flex flex-col min-h-screen min-w-screen text-newTextColor p-[12px] mobile:p-[8px] mobile:pb-[80px]',
+                'flex flex-col min-h-screen w-full min-w-0 text-newTextColor p-[12px] mobile:p-[8px] mobile:pb-[80px]',
                 jakartaSans.className
               )}
             >
@@ -121,46 +141,74 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                   <AnnouncementBanner />
                   <div className="flex-1 flex gap-[8px] mobile:gap-0">
                     <Support />
-                    {menuOpen && (
-                      <div
-                        className="hidden mobile:block fixed inset-0 bg-newBackdrop opacity-60 z-[490]"
-                        onClick={() => setMenuOpen(false)}
-                      />
-                    )}
-                    <div
-                      className={clsx(
-                        'flex flex-col bg-newBgColorInner w-[112px] shrink-0 rounded-[12px] mobile:fixed mobile:top-0 mobile:bottom-0 mobile:start-0 mobile:z-[491] mobile:rounded-none mobile:overflow-y-auto mobile:overflow-x-hidden',
-                        !menuOpen && 'mobile:hidden'
-                      )}
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      <div
-                        id="left-menu"
-                        className={clsx(
-                          'fixed h-full w-[96px] start-[20px] flex flex-1 top-0 mobile:static mobile:h-auto mobile:min-h-full mobile:mx-auto',
-                          user?.admin &&
-                            user?.impersonate &&
-                            'pt-[52px] max-h-[1000px]:w-[500px]'
-                        )}
-                      >
-                        <div className="flex flex-col h-full gap-[32px] mobile:gap-[16px] flex-1 pt-[12px] pb-[20px] mobile:pb-[12px]">
-                          <div className="flex justify-center">
-                            <Logo />
-                          </div>
-                          <TopMenu />
+                    <aside className="w-[174px] tablet:w-[166px] shrink-0 rounded-[12px] border border-newTableBorder bg-newBgColorInner mobile:hidden">
+                      <div className="sticky top-[12px] flex max-h-[calc(100dvh-24px)] min-h-[calc(100dvh-26px)] flex-col gap-[10px] overflow-y-auto px-[10px] pb-[10px]">
+                        <div className="flex border-b border-newTableBorder ps-[10px]">
+                          <Logo />
                         </div>
+                        <TopMenu />
                       </div>
-                    </div>
-                    <div className="flex-1 min-w-0 bg-newBgLineColor rounded-[12px] overflow-hidden flex flex-col gap-[1px] blurMe">
+                    </aside>
+                    <dialog
+                      ref={mobileMenu}
+                      id="mali-mobile-navigation"
+                      aria-labelledby="mali-mobile-navigation-title"
+                      className="fixed inset-0 m-0 h-[100dvh] max-h-none w-full max-w-none bg-transparent p-0 text-newTextColor backdrop:bg-black/55"
+                      onClose={() => setMenuOpen(false)}
+                      onClick={(event) => {
+                        if (event.target === event.currentTarget) closeMenu();
+                      }}
+                    >
+                      <div className="flex h-full w-[min(272px,calc(100vw-44px))] flex-col overflow-y-auto border-e border-newTableBorder bg-newBgColorInner px-[12px] pb-[12px]">
+                        <div className="mb-[10px] flex h-[64px] shrink-0 items-center justify-between border-b border-newTableBorder ps-[8px]">
+                          <h2
+                            id="mali-mobile-navigation-title"
+                            className="text-[15px] font-semibold"
+                          >
+                            {t('navigation', 'Navigation')}
+                          </h2>
+                          <button
+                            type="button"
+                            onClick={closeMenu}
+                            aria-label={t('close', 'Close')}
+                            className="grid h-[44px] w-[44px] place-items-center rounded-[8px] hover:bg-boxHover focus-visible:ring-2 focus-visible:ring-btnPrimary"
+                          >
+                            <svg
+                              width="18"
+                              height="18"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="m6 6 12 12M18 6 6 18"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                          </button>
+                        </div>
+                        {menuOpen && <TopMenu onNavigate={closeMenu} />}
+                      </div>
+                    </dialog>
+                    <div className="flex-1 min-w-0 bg-newBgLineColor rounded-[12px] border border-newTableBorder overflow-hidden flex flex-col gap-[1px] blurMe">
                       {/* relative: the notifications popup spans this bar on phones */}
-                      <div className="relative flex bg-newBgColorInner h-[80px] mobile:h-[64px] px-[20px] mobile:px-[12px] gap-[12px] items-center">
+                      <div className="relative flex bg-newBgColorInner h-[60px] shrink-0 px-[18px] mobile:px-[10px] gap-[10px] items-center">
                         <button
-                          className="hidden mobile:flex items-center justify-center w-[36px] h-[36px] -ms-[6px] rounded-[8px] text-textItemBlur hover:text-newTextColor hover:bg-boxFocused"
-                          onClick={() => setMenuOpen(true)}
-                          aria-label="Open menu"
+                          type="button"
+                          className="hidden mobile:flex shrink-0 items-center justify-center w-[44px] h-[44px] -ms-[6px] rounded-[8px] text-textItemBlur hover:text-newTextColor hover:bg-boxHover focus-visible:ring-2 focus-visible:ring-btnPrimary"
+                          onClick={() => {
+                            mobileMenu.current?.showModal();
+                            setMenuOpen(true);
+                          }}
+                          aria-label={t('open_menu', 'Open menu')}
+                          aria-expanded={menuOpen}
+                          aria-controls="mali-mobile-navigation"
                         >
                           <svg
                             xmlns="http://www.w3.org/2000/svg"
+                            aria-hidden="true"
                             width="22"
                             height="22"
                             viewBox="0 0 24 24"
@@ -174,24 +222,21 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                             />
                           </svg>
                         </button>
-                        <div className="text-[24px] mobile:text-[20px] font-[600] flex flex-1 min-w-0">
+                        <div className="text-[19px] mobile:text-[16px] font-[650] flex flex-1 min-w-0">
                           <Title />
                         </div>
-                        <div className="flex gap-[20px] mobile:gap-[14px] mobile:items-center text-textItemBlur">
+                        <div className="flex items-center gap-[14px] mobile:gap-[8px] text-textItemBlur">
                           <StreakComponent />
-                          <div className="w-[1px] h-[20px] bg-blockSeparator mobile:hidden" />
                           <OrganizationSelector />
                           <ProfileSelector />
                           <InvoicesComponent />
                           <div className="hover:text-newTextColor">
                             <ModeComponent />
                           </div>
-                          <div className="w-[1px] h-[20px] bg-blockSeparator mobile:hidden" />
                           <LanguageComponent />
                           <div className="contents mobile:hidden">
                             <ChromeExtensionComponent />
                           </div>
-                          <div className="w-[1px] h-[20px] bg-blockSeparator mobile:hidden" />
                           <div className="contents mobile:hidden">
                             <AttachToFeedbackIcon />
                           </div>

@@ -7,6 +7,8 @@ Fork do [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0).
 
 ## [Unreleased]
 
+- Navegação do Mali Posts com ícones e rótulos lado a lado, cabeçalho compacto e menu móvel acessível. O calendário ganhou um tour opcional com dados fictícios. A prévia usa um avatar padrão quando a imagem do canal está ausente ou indisponível.
+
 - O login direto do Instagram usa as credenciais do produto Instagram Login. O login pelo Facebook Business exibe as permissões que a Meta deixou de conceder.
 
 - O seletor de grupos do calendário lista os grupos da organização, informa quando a lista está vazia e distingue criar um grupo de selecionar um existente.

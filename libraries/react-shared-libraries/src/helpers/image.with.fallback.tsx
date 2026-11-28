@@ -1,3 +1,5 @@
+'use client';
+
 import { FC, useEffect, useState } from 'react';
 import SafeImage from './safe.image';
 interface ImageSrc {

@@ -14,7 +14,7 @@ const SafeImage: FC<SafeImageProps> = ({
   height,
   className,
   style,
-  ...rest
+  onError
 }) => {
   return (
     <img
@@ -24,6 +24,7 @@ const SafeImage: FC<SafeImageProps> = ({
       height={typeof height === 'number' ? height : undefined}
       className={className}
       style={style}
+      onError={onError}
     />
   );
 };
