@@ -1,4 +1,7 @@
 import { FC } from 'react';
+import { useWatch } from 'react-hook-form';
+import { capitalize } from 'lodash';
+import { useSettings } from '@gitroom/frontend/components/launches/helpers/use.values';
 import { useIntegration } from '@gitroom/frontend/components/launches/helpers/use.integration';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
@@ -14,6 +17,11 @@ export const YoutubePreview: FC<{
   const current = useLaunchStore((state) => state.current);
   const mediaDir = useMediaDirectory();
   const t = useT();
+  const { control } = useSettings();
+  const [title, privacyStatus] = useWatch({
+    control,
+    name: ['title', 'type'],
+  });
 
   const renderContent = topValue.map((p) => {
     const newContent = stripHtmlValidation(
@@ -63,6 +71,11 @@ export const YoutubePreview: FC<{
           />
         )}
       </div>
+      {!!title && (
+        <div dir="auto" className="text-[16px] font-[600] break-words">
+          {title}
+        </div>
+      )}
       <div className="flex items-center">
         <div className="flex flex-1 gap-[17px] items-center">
           <div>
@@ -142,11 +155,16 @@ export const YoutubePreview: FC<{
           </div>
         </div>
       </div>
-      <div
-        dir="auto"
-        className="bg-youtubeBgAction rounded-[12px] p-[12px] text-[12px] font-[400] whitespace-pre-line"
-        dangerouslySetInnerHTML={{ __html: renderContent?.[0]?.text }}
-      />
+      <div className="bg-youtubeBgAction rounded-[12px] p-[12px] text-[12px] font-[400] flex flex-col gap-[8px]">
+        {!!privacyStatus && (
+          <div className="font-[600]">{capitalize(privacyStatus)}</div>
+        )}
+        <div
+          dir="auto"
+          className="whitespace-pre-line"
+          dangerouslySetInnerHTML={{ __html: renderContent?.[0]?.text }}
+        />
+      </div>
     </div>
   );
 };

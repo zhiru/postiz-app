@@ -123,6 +123,20 @@ export class PinterestProvider
         value: 'The specified board was not found. Please check the board ID.',
       };
     }
+    if (body.indexOf('You are not permitted to access that resource') > -1) {
+      return {
+        type: 'bad-body' as const,
+        value:
+          'The connected Pinterest account is not permitted to post to this board. Please check the board ID and that the account owns or can write to the board.',
+      };
+    }
+    if (body.indexOf('We blocked this link because it may lead to spam') > -1) {
+      return {
+        type: 'bad-body' as const,
+        value:
+          'Pinterest blocked the link of this pin because it may lead to spam. Please check the link, or contact Pinterest about your website.',
+      };
+    }
     if (body.indexOf('cover_image_url or cover_image_content_type') > -1) {
       return {
         type: 'bad-body' as const,

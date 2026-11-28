@@ -2,7 +2,6 @@
 
 import { FC } from 'react';
 import clsx from 'clsx';
-import SafeImage from '@gitroom/react/helpers/safe.image';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { useShallow } from 'zustand/react/shallow';
 import { useExistingData } from '@gitroom/frontend/components/launches/helpers/use.existing.data';
@@ -10,13 +9,24 @@ import ImageWithFallback from '@gitroom/react/helpers/image.with.fallback';
 import { Check } from '@gitroom/frontend/components/launches/tags.component';
 import { PlatformIconBadge } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
+import {
+  isBrandMark,
+  PlatformIcon,
+} from '@gitroom/frontend/components/ui/platform.icon.component';
 
-const PlatformBadge: FC<{ integration: Integrations }> = ({ integration }) => {
+const PlatformBadge: FC<{ integration: Integrations; inactive?: boolean }> = ({
+  integration,
+  inactive,
+}) => {
   return (
-    <PlatformIconBadge
+    <PlatformIcon
       identifier={integration.identifier}
       size={16}
-      className="absolute z-10 bottom-0 -end-[5px] min-w-[16px] min-h-[16px] rounded-[4px]"
+      inactive={inactive}
+      className="absolute z-10 bottom-0 -end-[5px]"
+      iconClassName="rounded-[4px] min-w-[16px] min-h-[16px]"
+      // a brand mark hangs a little off the corner, to hide less of the picture
+      markClassName="-mb-[4px] -me-[4px] bg-newBgColorInner"
     />
   );
 };
@@ -26,27 +36,41 @@ export const IntegrationListRow: FC<{
   integration: Integrations;
   selected: boolean;
   onClick: () => void;
-}> = ({ integration, selected, onClick }) => {
+  dimmed?: boolean;
+}> = ({ integration, selected, onClick, dimmed }) => {
+  // a brand mark can't be dimmed with its row (see isBrandMark)
+  const dimParts =
+    isBrandMark(integration.identifier) && dimmed && 'opacity-50';
   return (
     <div
       onClick={onClick}
-      className="flex items-center gap-[12px] py-[8px] cursor-pointer select-none"
+      className={clsx(
+        'flex items-center gap-[12px] py-[8px] cursor-pointer select-none',
+        !isBrandMark(integration.identifier) && dimmed && 'opacity-50'
+      )}
     >
       <div className="relative">
         <ImageWithFallback
           fallbackSrc="/no-picture.jpg"
           src={integration.picture || '/no-picture.jpg'}
-          className="rounded-[8px] min-w-[40px] min-h-[40px]"
+          className={clsx('rounded-[8px] min-w-[40px] min-h-[40px]', dimParts)}
           alt={integration.identifier}
           width={40}
           height={40}
         />
-        <PlatformBadge integration={integration} />
+        <PlatformBadge integration={integration} inactive={dimmed} />
       </div>
-      <div className="flex-1 min-w-0 truncate text-[14px] font-[600]">
+      <div
+        className={clsx(
+          'flex-1 min-w-0 truncate text-[14px] font-[600]',
+          dimParts
+        )}
+      >
         {integration.name}
       </div>
-      <Check onChange={() => {}} value={selected} />
+      <div className={clsx(dimParts)}>
+        <Check onChange={() => {}} value={selected} />
+      </div>
     </div>
   );
 };
@@ -93,7 +117,7 @@ export const PicksSocialsComponent: FC<{
       <div
         className={clsx(
           'flex flex-col gap-[4px]',
-          locked && 'opacity-50 pointer-events-none'
+          locked && 'pointer-events-none'
         )}
       >
         {availableIntegrations.map((integration) => (
@@ -104,14 +128,25 @@ export const PicksSocialsComponent: FC<{
               (p) => p.integration.id === integration.id
             )}
             onClick={toggleIntegration(integration)}
+            dimmed={locked}
           />
         ))}
       </div>
     );
   }
 
+  // an unselected channel is grayed out and a locked one faded, as a whole. A
+  // brand mark can't be: only its avatar is (see isBrandMark)
+  const dimChannel = (integration: Integrations) =>
+    clsx(
+      selectedIntegrations.findIndex(
+        (p) => p.integration.id === integration.id
+      ) === -1 && 'grayscale',
+      locked && 'opacity-50'
+    );
+
   return (
-    <div className={clsx('flex', locked && 'opacity-50 pointer-events-none')}>
+    <div className={clsx('flex', locked && 'pointer-events-none')}>
       <div className="flex flex-1">
         <div className="innerComponent flex-1 flex">
           <div className="flex flex-wrap gap-[12px] flex-1">
@@ -131,8 +166,10 @@ export const PicksSocialsComponent: FC<{
                     selectedIntegrations.findIndex(
                       (p) => p.integration.id === integration.id
                     ) === -1
-                      ? 'grayscale border-transparent'
-                      : 'border-[#622FF6]'
+                      ? 'border-transparent'
+                      : 'border-[#622FF6]',
+                    !isBrandMark(integration.identifier) &&
+                      dimChannel(integration)
                   )}
                 >
                   <ImageWithFallback
@@ -144,13 +181,18 @@ export const PicksSocialsComponent: FC<{
                         (p) => p.integration.id === integration.id
                       ) === -1
                         ? 'border-transparent'
-                        : 'border-[#000]'
+                        : 'border-[#000]',
+                      isBrandMark(integration.identifier) &&
+                        dimChannel(integration)
                     )}
                     alt={integration.identifier}
                     width={42}
                     height={42}
                   />
-                  <PlatformBadge integration={integration} />
+                  <PlatformBadge
+                    integration={integration}
+                    inactive={!!dimChannel(integration)}
+                  />
                 </div>
               </div>
             ))}

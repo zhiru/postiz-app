@@ -4,6 +4,7 @@ import { BrandMetadata } from '@gitroom/frontend/components/ui/brand-logo.compon
 import { ReactNode, useCallback } from 'react';
 import { FetchWrapperComponent } from '@gitroom/helpers/utils/custom.fetch';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
+import { useDecisionModal } from '@gitroom/frontend/components/layout/new-modal';
 import { useReturnUrl } from '@gitroom/frontend/app/(app)/auth/return.url.component';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import i18next from '@gitroom/react/translation/i18next';
@@ -26,6 +27,7 @@ export function setCookie(cname: string, cvalue: string, exdays: number) {
 function LayoutContextInner(params: { children: ReactNode }) {
   const returnUrl = useReturnUrl();
   const { backendUrl, isGeneral, isSecured } = useVariables();
+  const decision = useDecisionModal();
   const afterRequest = useCallback(
     async (url: string, options: RequestInit, response: Response) => {
       if (
@@ -84,6 +86,12 @@ function LayoutContextInner(params: { children: ReactNode }) {
       }
 
       if (response?.headers?.get('reload')) {
+        // a stale org or impersonation was refused, the backend can't clear
+        // cookies set here
+        if (response.status === 403 && !isSecured) {
+          setCookie('showorg', '', -10);
+          setCookie('impersonate', '', -10);
+        }
         window.location.reload();
         return true;
       }
@@ -127,18 +135,20 @@ function LayoutContextInner(params: { children: ReactNode }) {
       }
 
       if (response.status === 402) {
-        if (
-          await deleteDialog(
-            (
-              await response
-                .clone()
-                .json()
-                .catch(() => ({}))
-            ).message,
-            i18next.t('move_to_billing', 'Move to billing'),
-            i18next.t('payment_required', 'Payment Required')
-          )
-        ) {
+        const { message, canManageBillingUi } = await response
+          .clone()
+          .json()
+          .catch(() => ({}));
+        if (canManageBillingUi === false) {
+          await decision.open({
+            title: 'Payment Required',
+            onlyApprove: true,
+            approveLabel: 'OK',
+            description: `${message} Please ask an admin of your organization.`,
+          });
+          return true;
+        }
+        if (await deleteDialog(message, 'Move to billing', 'Payment Required')) {
           window.open('/billing', '_blank');
           return false;
         }

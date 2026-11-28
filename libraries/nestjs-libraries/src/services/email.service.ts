@@ -48,7 +48,7 @@ export class EmailService {
     lang?: string
   ) {
     if (!to || !subject) {
-      return;
+      return undefined;
     }
 
     return this._temporalService.client

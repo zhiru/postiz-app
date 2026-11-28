@@ -496,7 +496,7 @@ export const Menu: FC<{
               {t('posts_sync_now', 'Synchronize now')}
             </button>
           )}
-          {canWrite && canDisable && !findIntegration?.refreshNeeded && (
+          {canWrite && canDisable && !findIntegration?.refreshNeeded && !findIntegration?.inBetweenSteps && (
             <div
               className="flex gap-[12px] items-center py-[8px] px-[10px]"
               onClick={createPost(findIntegration!)}

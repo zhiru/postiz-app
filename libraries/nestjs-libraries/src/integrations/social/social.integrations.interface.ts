@@ -266,6 +266,17 @@ export interface SocialProvider
   reportMetrics?: ReportMetricsMap;
   convertToJPEG?: boolean;
   stripLinks?: () => boolean;
+  // A token rejected by finalizePost means its mutation did not run (it makes
+  // one mutating call): the post activity then refreshes the token and repeats
+  // finalizePost itself. Without it the workflow refreshes and goes back to
+  // checkPostStatus, which for an arm -> confirm -> publish provider finds the
+  // confirmed attempt and stops with a false "may have already published".
+  // Never set it when finalizePost can throw RefreshToken after a mutation
+  // that cannot be repeated.
+  refreshRepeat?: boolean;
+  // The token cannot be refreshed and does not expire on its stored
+  // expiration date, so it is never refreshed before a call
+  noRefreshBeforeCall?: boolean;
   refreshErrorMessage?(err: any): string | undefined;
   refreshCron?: boolean;
   // Provider cujo refreshToken() e stub (sem mecanismo nativo de renovacao —
@@ -295,7 +306,7 @@ export interface SocialProvider
   ): Promise<PendingCheckResponse>;
   migrationMatch(
     auth: Pick<AuthTokenDetails, 'id' | 'username'>,
-    integration: Integration
+    integration: Omit<Integration, 'token' | 'refreshToken'>
   ): boolean;
   finalizePost(
     accessToken: string,
@@ -330,6 +341,8 @@ export interface SocialProvider
   // provider a exibir tela de consent e emitir refresh_token novo, mesmo
   // quando a conta ja autorizou o app antes (Google pula consent silencioso).
   revokeToken?(accessToken: string): Promise<void>;
+  pageRequiredToPost?: boolean;
+  isPageId?: (internalId: string) => boolean;
   scopes: string[];
   externalUrl?: (
     url: string

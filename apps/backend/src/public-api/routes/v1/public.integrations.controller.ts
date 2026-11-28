@@ -40,7 +40,6 @@ import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/po
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { GetPostsDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.dto';
-import { ChangePostStatusDto } from '@gitroom/nestjs-libraries/dtos/posts/change.post.status.dto';
 import { UpdatePostSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/update.post.settings.dto';
 import {
   AuthorizationActions,
@@ -770,7 +769,18 @@ export class PublicIntegrationsController {
         );
 
       if (refresh) {
-        await ioRedis.set(`refresh:${state}`, refresh, 'EX', 3600);
+        // The callback matches the channel by its provider account id, while
+        // API callers only know the integration id.
+        const existing = await this._integrationService.getIntegrationById(
+          org.id,
+          refresh
+        );
+        await ioRedis.set(
+          `refresh:${state}`,
+          existing?.internalId || refresh,
+          'EX',
+          3600
+        );
       }
 
       await ioRedis.set(`organization:${state}`, org.id, 'EX', 3600);

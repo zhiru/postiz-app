@@ -4,8 +4,7 @@ import React, { FC, Fragment, useCallback, useMemo } from 'react';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import { useShallow } from 'zustand/react/shallow';
 import clsx from 'clsx';
-import SafeImage from '@gitroom/react/helpers/safe.image';
-import { getPlatformIconPath } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
+import { PlatformIcon } from '@gitroom/frontend/components/ui/platform.icon.component';
 import { capitalize } from 'lodash';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { hasLinks } from '@gitroom/helpers/utils/strip.links';
@@ -265,12 +264,11 @@ export const InformationComponent: FC<{
               {selectedIntegrations.map((p, index) => (
                 <Fragment key={p.integration.id}>
                   <div>
-                    <SafeImage
-                      src={getPlatformIconPath(p.integration.identifier)}
-                      alt={p.integration.name}
-                      className="rounded-[4px] w-[16px] h-[16px] min-w-[16px] min-h-[16px]"
-                      width={16}
-                      height={16}
+                    <PlatformIcon
+                      identifier={p.integration.identifier}
+                      size={16}
+                      channel={p.integration.internalId}
+                      iconClassName="rounded-[4px] w-[16px] h-[16px] min-w-[16px] min-h-[16px]"
                     />
                   </div>
                   <div

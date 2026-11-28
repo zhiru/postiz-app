@@ -27,7 +27,7 @@ import { InternalChannels } from '@gitroom/frontend/components/launches/internal
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import SafeImage from '@gitroom/react/helpers/safe.image';
-import { getPlatformIconPath } from '@gitroom/frontend/components/launches/helpers/platform-icon.helper';
+import { PlatformIcon } from '@gitroom/frontend/components/ui/platform.icon.component';
 import { useMediaSettingsValues } from '@gitroom/frontend/components/new-launch/media.settings.section';
 
 class Empty {
@@ -374,14 +374,13 @@ export const withProvider = function <T extends object>(params: {
                           className="min-w-[42px] min-h-[42px] w-[42px] h-[42px] rounded-full"
                           src={selectedIntegration?.integration.picture}
                         />
-                        <SafeImage
-                          alt={selectedIntegration?.integration.identifier}
-                          width={16}
-                          height={16}
-                          className="rounded-[16px] min-w-[16px] min-h-[16px] w-[16px] h-[16px] absolute bottom-0 end-0"
-                          src={getPlatformIconPath(
-                            selectedIntegration?.integration.identifier || ''
-                          )}
+                        <PlatformIcon
+                          identifier={selectedIntegration?.integration.identifier}
+                          size={16}
+                          channel={selectedIntegration?.integration.internalId}
+                          className="absolute bottom-0 end-0"
+                          iconClassName="rounded-[16px] min-w-[16px] min-h-[16px] w-[16px] h-[16px]"
+                          markClassName="-mb-[4px] -me-[8px] bg-newSettings"
                         />
                       </div>
                       <div className="text-[20px]">

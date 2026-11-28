@@ -58,6 +58,17 @@ async function fetchWithTimeout(
 
 export { META_GRAPH_API_VERSION } from '@gitroom/nestjs-libraries/integrations/social/meta-graph.constants';
 
+// Editing the AI self-disclosure of a Page post only exists from v27.0
+const META_AI_DISCLOSURE_API_VERSION = 'v27.0';
+const AI_DISCLOSURE_TIMEOUT = 30_000;
+
+@Rules(
+  [
+    "Facebook posts can be text only, or include photos or a video. If it's a story, it must have at least one attachment (photo or video), and each media is published as a separate story. Video posts (not stories) can carry an optional title.",
+    'If the content of the post (text or pictures) was made with AI, ask the user if they want to mark it as AI, and set made_with_ai to true only when they say yes.',
+    'made_with_ai applies to text, link and photo posts only - Facebook has no AI label for the video posts and stories published here, so it is discarded for those. Never tell the user that a video post or a story will be marked as AI.',
+  ].join(' ')
+)
 export class FacebookProvider extends SocialAbstract implements SocialProvider {
   identifier = 'facebook';
 
@@ -67,6 +78,8 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
 
   noNativeRefresh = true;
 
+  pageRequiredToPost = true;
+  noRefreshBeforeCall = true;
   scopes = [
     'pages_show_list',
     'business_management',
@@ -473,7 +486,12 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       );
     }
 
-    return allPages;
+    // Pages listed without an access_token were never granted to the app in
+    // the Facebook dialog, so no page token can be issued for them
+    return allPages.map((p: any) => ({
+      ...p,
+      disabledReason: !p.access_token ? 'not_granted' : undefined,
+    }));
   }
 
   async fetchPageInformation(accessToken: string, data: { page: string }) {
@@ -982,6 +1000,30 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     return videoStatus === 'upload_complete' || videoStatus === 'ready';
   }
 
+  private async markAsAiGenerated(postId: string, accessToken: string) {
+    try {
+      await this.fetch(
+        `https://graph.facebook.com/${META_AI_DISCLOSURE_API_VERSION}/${postId}?access_token=${accessToken}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            is_ai_generated: true,
+          }),
+          signal: AbortSignal.timeout(AI_DISCLOSURE_TIMEOUT),
+        },
+        'mark as AI generated'
+      );
+    } catch (err) {
+      console.warn('Facebook did not add the AI generated label to the post', {
+        postId,
+        message: (err as any)?.message,
+      });
+    }
+  }
+
   async postPending(
     id: string,
     accessToken: string,
@@ -1325,6 +1367,10 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
 
       finalUrl = permalink_url;
       finalId = postId;
+
+      if (this.assetBoolean(firstPost?.settings?.made_with_ai)) {
+        await this.markAsAiGenerated(postId, accessToken);
+      }
     }
 
     return [

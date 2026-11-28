@@ -25,6 +25,43 @@ export function isHttpsUrl(value: unknown): boolean {
     return false;
   }
 }
+const blockedIPv4Ranges: [string, number][] = [
+  ['0.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['172.16.0.0', 12],
+  ['192.168.0.0', 16],
+  ['100.64.0.0', 10],
+  ['198.18.0.0', 15],
+  ['224.0.0.0', 3], // multicast/reserved
+];
+
+// BlockList matches an IPv4 rule against the address in any notation,
+// including IPv4-mapped IPv6 like ::ffff:7f00:1 (what the URL parser turns
+// [::ffff:127.0.0.1] into), so the addresses are never compared as strings.
+const blockedIps = new net.BlockList();
+
+for (const [address, prefix] of blockedIPv4Ranges) {
+  blockedIps.addSubnet(address, prefix, 'ipv4');
+
+  // the same IPv4 range embedded in NAT64 (64:ff9b::/96) and 6to4 (2002::/16)
+  const [a, b, c, d] = address.split('.').map(Number);
+  const high = ((a << 8) | b).toString(16);
+  const low = ((c << 8) | d).toString(16);
+  blockedIps.addSubnet(`64:ff9b::${high}:${low}`, 96 + prefix, 'ipv6');
+  blockedIps.addSubnet(`2002:${high}:${low}::`, 16 + prefix, 'ipv6');
+  // and in IPv4-translated form (::ffff:0:0/96, SIIT)
+  blockedIps.addSubnet(`::ffff:0:${high}:${low}`, 96 + prefix, 'ipv6');
+}
+
+blockedIps.addSubnet('64:ff9b:1::', 48, 'ipv6'); // local-use NAT64 (RFC 8215)
+
+blockedIps.addSubnet('::', 96, 'ipv6'); // unspecified, loopback, IPv4-compatible
+blockedIps.addSubnet('fe80::', 10, 'ipv6'); // link-local
+blockedIps.addSubnet('fec0::', 10, 'ipv6'); // site-local (deprecated)
+blockedIps.addSubnet('fc00::', 7, 'ipv6'); // unique local
+blockedIps.addSubnet('ff00::', 8, 'ipv6'); // multicast
 
 export function isBlockedIPv4(ip: string): boolean {
   const [a, b, c] = ip.split('.').map(Number);
@@ -95,6 +132,10 @@ function expandIPv6(ip: string): number[] | undefined {
 export function isBlockedIPv6(ip: string): boolean {
   const parts = expandIPv6(ip);
   if (!parts) {
+    return true;
+  }
+
+  if (blockedIps.check(ip.split('%')[0], 'ipv6')) {
     return true;
   }
 

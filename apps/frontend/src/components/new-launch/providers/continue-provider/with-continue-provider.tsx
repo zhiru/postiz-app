@@ -24,11 +24,19 @@ export interface ContinueProviderProps {
   isSaving?: boolean;
   onCancel?: () => void;
   multiple?: boolean;
+  // Shows a "Back to Postiz" button in the empty state — used by the
+  // full-page OAuth landing flow, which has no dialog to close
+  onBack?: () => void;
 }
 
 export interface EmptyStateMessage {
   key: string;
   text: string;
+}
+
+export interface DisabledItemMessage {
+  caption: EmptyStateMessage;
+  tooltip: EmptyStateMessage;
 }
 
 export interface ContinueProviderConfig<TItem, TSelection> {
@@ -39,6 +47,9 @@ export interface ContinueProviderConfig<TItem, TSelection> {
   titleKey: string;
   titleDefault: string;
   emptyStateMessages: EmptyStateMessage[];
+  // Returns why an item can't be selected (rendered muted with a caption
+  // and an info tooltip), or undefined when it is selectable
+  getDisabledMessage?: (item: TItem) => DisabledItemMessage | undefined;
   getSelectionValue: (item: TItem) => TSelection;
   transformSaveData: (selection: TSelection) => any;
   renderItem: (item: TItem, isSelected: boolean) => ReactNode;
@@ -57,6 +68,7 @@ export function withContinueProvider<TItem, TSelection>(
     titleKey,
     titleDefault,
     emptyStateMessages,
+    getDisabledMessage,
     getSelectionValue,
     transformSaveData,
     renderItem,
@@ -65,7 +77,8 @@ export function withContinueProvider<TItem, TSelection>(
   } = config;
 
   return function ContinueProviderComponent(props: ContinueProviderProps) {
-    const { onSave, existingId, initialData, isSaving, onCancel, multiple } = props;
+    const { onSave, existingId, initialData, isSaving, onCancel: cancel, onBack, multiple } = props;
+    const onCancel = cancel ?? onBack;
     const call = useCustomProviderFunction();
     const t = useT();
     const [query, setQuery] = useState('');
@@ -92,7 +105,7 @@ export function withContinueProvider<TItem, TSelection>(
       SWR_OPTIONS
     );
 
-    const resolvedData = initialData || data;
+    const resolvedData = initialData || (Array.isArray(data) ? data : []);
 
     const handleSelect = useCallback(
       (item: TItem) => () => {
@@ -126,6 +139,11 @@ export function withContinueProvider<TItem, TSelection>(
       );
     }, [resolvedData, existingId]);
 
+    const hasDisabled = useMemo(
+      () => filteredData.some((item) => !!getDisabledMessage?.(item)),
+      [filteredData]
+    );
+
     if (!isLoading && !resolvedData?.length) {
       return (
         <div className="text-center flex flex-col justify-center items-center text-[18px] leading-[26px] h-[300px]">
@@ -145,6 +163,13 @@ export function withContinueProvider<TItem, TSelection>(
               )}
             </span>
           ))}
+          {!!onBack && (
+            <div className="mt-[24px]">
+              <Button type="button" onClick={onBack}>
+                {t('back_to_postiz', 'Back to Postiz')}
+              </Button>
+            </div>
+          )}
         </div>
       );
     }
@@ -248,6 +273,11 @@ export function withContinueProvider<TItem, TSelection>(
                 })
               : t('save', 'Save')}
           </Button>
+          {!!onBack && hasDisabled && (
+            <Button type="button" secondary={true} onClick={onBack}>
+              {t('back_to_postiz', 'Back to Postiz')}
+            </Button>
+          )}
         </div>
       </div>
     );

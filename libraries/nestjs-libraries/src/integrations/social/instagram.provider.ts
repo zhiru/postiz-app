@@ -83,7 +83,10 @@ export const instagramReportMetrics: ReportMetricsMap = {
 };
 
 @Rules(
-  "Instagram should have at least one attachment, if it's a story, it can have only one picture"
+  [
+    "Instagram should have at least one attachment, if it's a story, it can have only one picture.",
+    'If the content of the post (text, pictures or video) was made with AI, ask the user if they want to mark it as AI, and set made_with_ai to true only when they say yes.',
+  ].join(' ')
 )
 export class InstagramProvider
   extends SocialAbstract
@@ -110,6 +113,8 @@ export class InstagramProvider
 
   noNativeRefresh = true;
 
+  pageRequiredToPost = true;
+  noRefreshBeforeCall = true;
   toolTip = 'Instagram must be business and connected to a Facebook page';
 
   scopes = [
@@ -500,10 +505,48 @@ export class InstagramProvider
       };
     }
 
-    if (body.indexOf('2207027') > -1) {
+    if (body.indexOf('1772107') > -1) {
       return {
         type: 'bad-body' as const,
-        value: 'Unknown error, please try again later or contact support',
+        value:
+          'Instagram did not add the comment, the post itself was published. Please try again with different comment text',
+      };
+    }
+
+    if (body.indexOf('2207082') > -1) {
+      return {
+        type: 'retry' as const,
+        value:
+          'Instagram could not process this video. If you attached audio to a video that has no sound track, set the original video volume to 0 and try again',
+      };
+    }
+
+    if (body.indexOf('2207085') > -1) {
+      return {
+        type: 'bad-body' as const,
+        value:
+          'Instagram could not process the video, please check the video format, duration and resolution and try again',
+      };
+    }
+
+    if (body.indexOf('2207077') > -1) {
+      return {
+        type: 'bad-body' as const,
+        value: 'Instagram Video download failed',
+      };
+    }
+
+    if (body.indexOf('too little or too many attachments') > -1) {
+      return {
+        type: 'bad-body' as const,
+        value: 'Instagram carousel should have between 2 and 20 media attachments',
+      }
+    }
+
+    if (body.indexOf('2207027') > -1) {
+      return {
+        type: 'retry' as const,
+        value: 'Instagram media was not ready for publishing, please try again',
       };
     }
 
@@ -2017,6 +2060,7 @@ export class InstagramProvider
           )}`
         : ``;
     const isTrialReel = this.assetBoolean(firstPost.settings.is_trial_reel);
+    const madeWithAi = this.assetBoolean(firstPost.settings.made_with_ai);
     const medias = await Promise.all(
       firstPost?.media?.map(async (m) => {
         const caption =
@@ -2076,6 +2120,11 @@ export class InstagramProvider
         const itemCollaborators =
           firstPost?.media?.length === 1 ? collaborators : ``;
 
+        // is_ai_generated is rejected on carousel child items,
+        // it goes on the carousel container instead
+        const itemAiGenerated =
+          madeWithAi && !isCarousel ? `&is_ai_generated=true` : ``;
+
         // audio_configuration is only supported for Reels (single video, not a story)
         // and only with Facebook Login (not Instagram Login / graph.instagram.com)
         const audioConfiguration =
@@ -2101,7 +2150,7 @@ export class InstagramProvider
 
         const { id: photoId } = await (
           await this.fetch(
-            `https://${type}/${META_GRAPH_API_VERSION}/${id}/media?${mediaType}${altText}${userTags}${isCarousel}${itemCollaborators}${trialParams}${audioConfiguration}&access_token=${accessToken}${caption}`,
+            `https://${type}/${META_GRAPH_API_VERSION}/${id}/media?${mediaType}${altText}${userTags}${isCarousel}${itemCollaborators}${itemAiGenerated}${trialParams}${audioConfiguration}&access_token=${accessToken}${caption}`,
             {
               method: 'POST',
             }
@@ -2138,6 +2187,7 @@ export class InstagramProvider
                 ),
               }
             : {}),
+          ...(madeWithAi ? { madeWithAi } : {}),
         },
       },
     ];
@@ -2152,6 +2202,7 @@ export class InstagramProvider
       message?: string;
       carouselId?: string;
       collaborators?: string[];
+      madeWithAi?: boolean;
     },
     integration: Integration
   ): Promise<PendingCheckResponse> {
@@ -2219,6 +2270,7 @@ export class InstagramProvider
       message?: string;
       carouselId?: string;
       collaborators?: string[];
+      madeWithAi?: boolean;
     },
     integration: Integration
   ): Promise<PendingCheckResponse> {
@@ -2283,6 +2335,8 @@ export class InstagramProvider
                   JSON.stringify(pendingData.collaborators)
                 )}`
               : ``
+          }${
+            pendingData.madeWithAi ? `&is_ai_generated=true` : ``
           }&access_token=${accessToken}`,
           {
             method: 'POST',

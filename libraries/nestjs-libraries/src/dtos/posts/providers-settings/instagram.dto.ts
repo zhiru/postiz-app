@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   ArrayUnique,
   IsArray,
+  IsBoolean,
   IsDefined,
   IsIn,
   IsNumber,
@@ -14,6 +15,7 @@ import {
   Matches,
 } from 'class-validator';
 import { MediaDto } from '@gitroom/nestjs-libraries/dtos/media/media.dto';
+import { JSONSchema } from 'class-validator-jsonschema';
 
 export class Collaborators {
   @Transform(({ value }) =>
@@ -96,4 +98,12 @@ export class InstagramDto {
   @ValidateNested()
   @IsOptional()
   audio?: InstagramAudio;
+
+  @IsOptional()
+  @IsBoolean()
+  @JSONSchema({
+    description:
+      'Labels the post as AI generated (Instagram shows the "AI info" label). Works for posts, reels, carousels and stories.',
+  })
+  made_with_ai?: boolean;
 }
