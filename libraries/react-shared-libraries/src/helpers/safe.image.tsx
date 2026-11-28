@@ -16,6 +16,7 @@ const SafeImage: FC<SafeImageProps> = ({
   className,
   style,
   onError,
+  ref,
 }) => {
   return (
     <img
